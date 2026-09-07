@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<restrictions xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <restriction
+        android:key="base_url"
+        android:restrictionType="string"
+        android:title="@string/restriction_base_url_title"
+        android:description="@string/restriction_base_url_description"
+        android:defaultValue="" />
+
+    <restriction
+        android:key="identifier"
+        android:restrictionType="string"
+        android:title="@string/restriction_identifier_title"
+        android:description="@string/restriction_identifier_description"
+        android:defaultValue="" />
+
+    <restriction
+        android:key="token"
+        android:restrictionType="string"
+        android:title="@string/restriction_token_title"
+        android:description="@string/restriction_token_description"
+        android:defaultValue="" />
+
+    <restriction
+        android:key="call_log_enabled"
+        android:restrictionType="bool"
+        android:title="@string/restriction_call_log_title"
+        android:description="@string/restriction_call_log_description"
+        android:defaultValue="true" />
+
+    <restriction
+        android:key="recordings_enabled"
+        android:restrictionType="bool"
+        android:title="@string/restriction_recordings_title"
+        android:description="@string/restriction_recordings_description"
+        android:defaultValue="false" />
+
+    <restriction
+        android:key="wifi_only_uploads"
+        android:restrictionType="bool"
+        android:title="@string/restriction_wifi_only_title"
+        android:description="@string/restriction_wifi_only_description"
+        android:defaultValue="false" />
+
+    <restriction
+        android:key="upload_window_seconds"
+        android:restrictionType="integer"
+        android:title="@string/restriction_upload_window_title"
+        android:description="@string/restriction_upload_window_description"
+        android:defaultValue="180" />
+
+    <restriction
+        android:key="location_interval_seconds"
+        android:restrictionType="integer"
+        android:title="@string/restriction_interval_title"
+        android:description="@string/restriction_interval_description"
+        android:defaultValue="60" />
+</restrictions>

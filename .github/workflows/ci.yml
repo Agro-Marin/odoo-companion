@@ -1,0 +1,115 @@
+# The repository had no gate at all. The three data-loss paths this workflow's
+# suite now pins -- an archived device answering 404, a 1 MB payload cap
+# answering 413, and Android's call type 7 -- all reached main because nothing
+# ran the tests and nothing compared the payload against the endpoint.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Only the assignments: $GITHUB_ENV is parsed as KEY=value per line and
+      # rejects anything without an `=`, so cat-ing a commented file at it fails
+      # the step outright.
+      - name: Read the pinned versions
+        run: grep -E '^[A-Z_]+=' tools/versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # compileSdk is 37 and the runner image lags the platform releases. AGP
+      # auto-downloads a missing platform only while every license is accepted,
+      # which is true here but is not a property of this repository -- asking
+      # for it explicitly means a missing platform fails in this step, named,
+      # rather than inside a compile task.
+      - name: Android SDK 37
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      # Room writes a JSON schema per version. A schema the migration did not
+      # produce means an app update would meet a database it cannot open, and
+      # the outbox holds the only copy of a call log until the server takes it.
+      - name: The exported Room schema matches the entities
+        run: |
+          ./gradlew assembleDebug
+          git diff --exit-code -- app/schemas \
+            || { echo "::error::app/schemas is stale — commit the regenerated schema"; exit 1; }
+
+      - name: Android Lint
+        run: ./gradlew lintDebug
+
+      # The step used to be named for a property it did not check: R8 dropping a
+      # generated serializer, or a @SerialName string, still builds — and every
+      # unit test stays green, because none of them runs against minified output.
+      # A release handset would post payloads Odoo cannot read.
+      - name: Release build keeps the wire format
+        run: |
+          ./gradlew assembleRelease
+          tools/check-release-wire.sh
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Only the assignments: $GITHUB_ENV is parsed as KEY=value per line and
+      # rejects anything without an `=`, so cat-ing a commented file at it fails
+      # the step outright.
+      - name: Read the pinned versions
+        run: grep -E '^[A-Z_]+=' tools/versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # Pinned: tools/lint.sh resolves whatever ktlint and detekt happen to be
+      # on PATH, so a developer and this job could disagree about a clean tree.
+      #
+      # The launcher in the release zip is `bin/detekt-cli`, not `bin/detekt`.
+      # Naming it wrongly did not skip static analysis quietly -- `chmod +x` on
+      # a path that does not exist fails, and a `run:` step is `bash -e` -- but
+      # it did mean this job had never once executed detekt.
+      # The versions come from tools/versions.env, which tools/lint.sh reads
+      # too. Stating them here as well is how a developer and this job came to
+      # disagree about a clean tree while a comment claimed the pin prevented it.
+      - name: Install ktlint and detekt
+        run: |
+          curl -sSLO https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint
+          curl -sSL -o detekt.zip https://github.com/detekt/detekt/releases/download/v${DETEKT_VERSION}/detekt-cli-${DETEKT_VERSION}.zip
+          unzip -q detekt.zip
+          chmod +x ktlint detekt-cli-${DETEKT_VERSION}/bin/detekt-cli
+          echo "KTLINT=$PWD/ktlint" >> "$GITHUB_ENV"
+          echo "DETEKT=$PWD/detekt-cli-${DETEKT_VERSION}/bin/detekt-cli" >> "$GITHUB_ENV"
+
+      # Through the same script a developer runs, so the two cannot drift apart
+      # again. It verifies both versions before believing either tool.
+      - name: ktlint and detekt
+        run: tools/lint.sh --static-only

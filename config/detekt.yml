@@ -1,0 +1,25 @@
+build:
+  maxIssues: 0
+
+style:
+  # Timeouts, HTTP status codes and batch sizes read better inline than as a
+  # wall of one-use constants; the ones that carry meaning are already named.
+  MagicNumber:
+    active: false
+  ReturnCount:
+    max: 4
+  LoopWithTooManyJumpStatements:
+    maxJumpCount: 3
+
+complexity:
+  LongMethod:
+    threshold: 70
+  TooManyFunctions:
+    thresholdInClasses: 15
+    thresholdInFiles: 20
+
+exceptions:
+  SwallowedException:
+    active: true
+  TooGenericExceptionCaught:
+    active: true

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Odoo Companion</string>
+    <string name="config_server">Odoo base URL</string>
+    <string name="config_identifier">Device identifier</string>
+    <string name="config_token">Bearer token</string>
+    <string name="config_location_interval">Seconds between positions (15 to 86400)</string>
+    <string name="config_upload_window">Upload window in seconds (0 sends every position at once)</string>
+    <string name="action_save">Save</string>
+    <string name="action_sync_now">Sync now</string>
+    <string name="action_grant">Grant permissions</string>
+    <string name="notification_channel_location">Location reporting</string>
+    <string name="notification_location_title">Location reporting active</string>
+    <string name="notification_location_text">Sending position to Odoo</string>
+    <string name="status_managed">Configured by your organization</string>
+    <string name="status_bad_base_url">Not saved: the base URL must start with http:// or https://</string>
+    <string name="status_bad_identifier">Not saved: the device identifier may contain only letters, digits, and - _ . ~</string>
+    <string name="status_enrolled">Enrolled</string>
+    <string name="status_not_enrolled">Not enrolled</string>
+    <string name="status_queued_positions">Queued positions: %1$d</string>
+    <string name="status_queued_calls">Queued calls: %1$d</string>
+    <string name="status_queued_recordings">Queued recordings: %1$d</string>
+    <plurals name="status_undeliverable">
+        <item quantity="one">%1$d record could not be delivered and is no longer being retried</item>
+        <item quantity="other">%1$d records could not be delivered and are no longer being retried</item>
+    </plurals>
+    <string name="status_call_log_permission_missing">Call sync is on but the call-log permission is missing — no calls are being read</string>
+    <string name="status_recording_storage_missing">Call recordings are on but this app has no access to the recordings folder — no audio is being harvested</string>
+    <string name="status_undeliverable_hint">Fix the device in Odoo and they will be retried automatically</string>
+    <string name="status_last_attempt">Last attempt: %1$s</string>
+    <string name="status_location_missing">Location permission missing — not reporting</string>
+    <string name="status_battery_optimized">Battery optimization is on — reporting will stop when the phone idles</string>
+    <string name="status_last_upload_ok">Last upload: %1$s</string>
+    <string name="status_last_upload_failed">Last upload failed: %1$s</string>
+    <string name="status_last_upload_never">No upload yet</string>
+    <string name="status_background_location_missing">Location set to “while using the app” — reporting will not resume after a restart until it is set to “Allow all the time”</string>
+    <string name="restriction_base_url_title">Odoo base URL</string>
+    <string name="restriction_base_url_description">Base URL of the Odoo instance, e.g. https://odoo.example.com</string>
+    <string name="restriction_identifier_title">Device identifier</string>
+    <string name="restriction_identifier_description">The remote.device identifier for this phone</string>
+    <string name="restriction_token_title">Bearer token</string>
+    <string name="restriction_token_description">The device inbound token issued by Odoo</string>
+    <string name="restriction_call_log_title">Sync call log</string>
+    <string name="restriction_call_log_description">Upload call metadata (requires READ_CALL_LOG)</string>
+    <string name="restriction_recordings_title">Upload call recordings</string>
+    <string name="restriction_recordings_description">Harvest recordings written by the OEM dialer</string>
+    <string name="restriction_wifi_only_title">Upload on Wi-Fi only</string>
+    <string name="restriction_wifi_only_description">Hold uploads until an unmetered network is available</string>
+    <string name="restriction_upload_window_title">Upload window (seconds)</string>
+    <string name="restriction_upload_window_description">How long a position may wait to be sent with others. Higher means fewer uploads and less battery; 0 sends every position immediately.</string>
+    <string name="restriction_interval_title">Location interval (seconds)</string>
+    <string name="restriction_interval_description">Seconds between position reports</string>
+</resources>
