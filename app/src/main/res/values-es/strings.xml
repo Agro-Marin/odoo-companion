@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="config_server">URL base de Odoo</string>
+    <string name="config_identifier">Identificador del dispositivo</string>
+    <string name="config_token">Token Bearer</string>
+    <string name="config_location_interval">Segundos entre posiciones (15 a 86400)</string>
+    <string name="config_upload_window">Ventana de envío en segundos (0 envía cada posición de inmediato)</string>
+    <string name="action_save">Guardar</string>
+    <string name="action_sync_now">Sincronizar ahora</string>
+    <string name="action_grant">Conceder permisos</string>
+    <string name="notification_channel_location">Reporte de ubicación</string>
+    <string name="notification_location_title">Reporte de ubicación activo</string>
+    <string name="notification_location_text">Enviando la posición a Odoo</string>
+    <string name="status_managed">Configurado por tu organización</string>
+    <string name="status_bad_base_url">No se guardó: la URL base debe empezar con http:// o https://</string>
+    <string name="status_bad_identifier">No se guardó: el identificador del dispositivo solo admite letras, dígitos y - _ . ~</string>
+    <string name="status_cleartext_refused">No se guardó: esta compilación solo habla con servidores https://</string>
+    <string name="status_enrolled">Dado de alta</string>
+    <string name="status_not_enrolled">Sin dar de alta</string>
+    <string name="status_small_cap">El servidor solo acepta %1$s por envío: en Odoo, pon este dispositivo en la categoría Mobile Phone</string>
+    <string name="status_queued_positions">Posiciones en cola: %1$d</string>
+    <string name="status_queued_calls">Llamadas en cola: %1$d</string>
+    <string name="status_queued_recordings">Grabaciones en cola: %1$d</string>
+    <plurals name="status_undeliverable">
+        <item quantity="one">%1$d registro no se pudo entregar y ya no se reintenta</item>
+        <item quantity="other">%1$d registros no se pudieron entregar y ya no se reintentan</item>
+    </plurals>
+    <string name="status_call_log_permission_missing">La sincronización de llamadas está activa pero falta el permiso de registro de llamadas: no se está leyendo ninguna</string>
+    <string name="status_recording_storage_missing">Las grabaciones de llamada están activas pero la app no tiene acceso a la carpeta de grabaciones: no se está recolectando audio</string>
+    <string name="status_undeliverable_hint">Corrige el dispositivo en Odoo y se reintentarán automáticamente</string>
+    <string name="status_last_attempt">Último intento: %1$s</string>
+    <string name="status_location_missing">Falta el permiso de ubicación: no se está reportando</string>
+    <string name="status_battery_optimized">La optimización de batería está activa: el reporte se detendrá cuando el teléfono quede inactivo</string>
+    <string name="status_last_upload_ok">Último envío: %1$s</string>
+    <string name="status_last_upload_failed">El último envío falló: %1$s</string>
+    <string name="status_last_upload_never">Todavía no se ha enviado nada</string>
+    <string name="status_background_location_missing">La ubicación está en “solo mientras usas la app”: el reporte no se reanudará después de reiniciar hasta que la pongas en “Permitir todo el tiempo”</string>
+    <string name="restriction_base_url_title">URL base de Odoo</string>
+    <string name="restriction_base_url_description">URL base de la instancia de Odoo, por ejemplo https://odoo.example.com</string>
+    <string name="restriction_identifier_title">Identificador del dispositivo</string>
+    <string name="restriction_identifier_description">El identificador de remote.device que le corresponde a este teléfono</string>
+    <string name="restriction_token_title">Token Bearer</string>
+    <string name="restriction_token_description">El token de entrada del dispositivo emitido por Odoo</string>
+    <string name="restriction_call_log_title">Sincronizar el registro de llamadas</string>
+    <string name="restriction_call_log_description">Envía los metadatos de las llamadas (requiere READ_CALL_LOG)</string>
+    <string name="restriction_recordings_title">Enviar las grabaciones de llamada</string>
+    <string name="restriction_recordings_description">Recolecta las grabaciones que escribe el marcador del fabricante</string>
+    <string name="restriction_wifi_only_title">Enviar solo por Wi-Fi</string>
+    <string name="restriction_wifi_only_description">Retiene los envíos hasta que haya una red sin límite de datos</string>
+    <string name="restriction_upload_window_title">Ventana de envío (segundos)</string>
+    <string name="restriction_upload_window_description">Cuánto puede esperar una posición para enviarse junto con otras. Un valor más alto significa menos envíos y menos batería; 0 envía cada posición de inmediato.</string>
+    <string name="restriction_interval_title">Intervalo de ubicación (segundos)</string>
+    <string name="restriction_interval_description">Segundos entre reportes de posición</string>
+</resources>
