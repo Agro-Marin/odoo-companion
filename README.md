@@ -193,6 +193,34 @@ handset.
 
 `local.properties` must point at an SDK (`sdk.dir=…`); it is git-ignored.
 
+### Signing a release
+
+A handset installs a signed APK and nothing else, so a release meant for the fleet
+needs a keystore. The build reads one from `keystore.properties` at the repository
+root — git-ignored, like the keystore itself:
+
+```properties
+storeFile=companion-release.jks
+storePassword=…
+keyAlias=companion
+keyPassword=…
+```
+
+```bash
+keytool -genkeypair -v -keystore companion-release.jks -alias companion \
+    -keyalg RSA -keysize 4096 -validity 10000
+./gradlew assembleRelease        # app/build/outputs/apk/release/app-release.apk
+```
+
+Without that file the release build still runs and stays **unsigned**, which is what
+CI does: `app-release-unsigned.apk` in the same folder. The filename is the difference,
+so an unsigned build cannot be mistaken for a shippable one.
+
+Keep the keystore and its passwords somewhere the team can reach and an outsider
+cannot. Losing it means no future build can update an installed app: Android refuses
+an update signed by a different key, and the only way out is uninstalling every
+handset in the fleet, which takes the queued call log on each one with it.
+
 ## Configuration
 
 ### Provisioning by MDM (how a fleet should do it)
