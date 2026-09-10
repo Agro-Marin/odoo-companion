@@ -38,6 +38,12 @@ echo "2b. the same batch again — a duplicate is a delivery, not a refusal"
 echo "    (expect 200 with duplicates:1; a 422 here dead-letters delivered calls)"
 post calllog "$CALL"
 
+echo "2b'. every reply names the service and the cap; a batch route names its skipped rows"
+echo "    (expect \"service\":\"remote_mobile\", \"max_payload_bytes\", \"skipped_indexes\":[1])"
+post calllog "{\"calls\":[
+    {\"number\":\"$NUMBER\",\"direction\":\"incoming\",\"timestamp\":$((NOW + 500)),\"duration\":1},
+    {\"number\":\"\",\"direction\":\"incoming\",\"timestamp\":$((NOW + 600)),\"duration\":1}]}"
+
 echo "2c. calllog — the raw integer an older queue still holds"
 post calllog "{\"calls\":[
     {\"number\":\"$NUMBER\",\"direction\":\"1\",\"timestamp\":$((NOW + 1000)),

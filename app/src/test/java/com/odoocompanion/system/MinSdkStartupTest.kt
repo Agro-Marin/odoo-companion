@@ -49,6 +49,20 @@ class MinSdkStartupTest {
         )
     }
 
+    @Test
+    fun `the manifest asks for write access on Android 10, or an upload stays for ever`() {
+        val app = RuntimeEnvironment.getApplication()
+        val info = app.packageManager.getPackageInfo(
+            app.packageName,
+            PackageManager.GET_PERMISSIONS,
+        )
+
+        assertTrue(
+            "legacy storage deletes nothing without it, and the harvest deletes its uploads",
+            "android.permission.WRITE_EXTERNAL_STORAGE" in info.requestedPermissions.orEmpty(),
+        )
+    }
+
     private companion object {
         const val PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE = 1 shl 29
     }
