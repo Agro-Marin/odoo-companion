@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -227,6 +228,12 @@ class DeviceConfig(private val store: DataStore<Preferences>) {
         store.edit { prefs -> prefs[CALL_LOG_CURSOR] = value }
     }
 
+    suspend fun callLogSeen(): Set<String> = store.data.first()[CALL_LOG_SEEN] ?: emptySet()
+
+    suspend fun setCallLogSeen(keys: Set<String>) {
+        store.edit { prefs -> prefs[CALL_LOG_SEEN] = keys }
+    }
+
     suspend fun recordingCursor(): Long = store.data.first()[RECORDING_CURSOR] ?: 0L
 
     suspend fun setRecordingCursor(value: Long) {
@@ -256,6 +263,7 @@ class DeviceConfig(private val store: DataStore<Preferences>) {
         private val LAST_UPLOAD_ERROR = stringPreferencesKey("last_upload_error")
         private val LAST_BUILD = longPreferencesKey("last_build")
         private val CALL_LOG_CURSOR = longPreferencesKey("call_log_cursor")
+        private val CALL_LOG_SEEN = stringSetPreferencesKey("call_log_seen")
         private val RECORDING_CURSOR = longPreferencesKey("recording_cursor")
     }
 }

@@ -58,6 +58,7 @@ class CallLogSyncWorkerTest {
     private suspend fun reset() {
         app.config.clearEnrollment()
         app.config.setCallLogCursor(0)
+        app.config.setCallLogSeen(emptySet())
         app.config.setFeature(callLog = true)
         val dao = app.database.outbox()
         dao.delete(dao.take(OutboxKind.CALL_LOG, 1000).map { it.id })
@@ -124,6 +125,43 @@ class CallLogSyncWorkerTest {
         run()
 
         assertEquals(1, app.database.outbox().countOf(OutboxKind.CALL_LOG))
+    }
+
+    @Test
+    fun `a call written after the cursor moved past its date is still queued`() = runTest {
+        reset()
+        enroll()
+        grantCallLog()
+        // The short call ends first, so the provider writes it first, and it
+        // carries the later date. The long one started earlier and is written
+        // when it ends -- after the cursor has already moved past its date.
+        FakeCallLogProvider.calls = listOf(Call(number = "+52short", date = 20))
+        run()
+        assertEquals(20, app.config.callLogCursor())
+
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+52long", date = 10),
+            Call(number = "+52short", date = 20),
+        )
+
+        assertEquals(ListenableWorker.Result.success(), run())
+
+        assertEquals(2, app.database.outbox().countOf(OutboxKind.CALL_LOG))
+        assertEquals(20, app.config.callLogCursor())
+    }
+
+    @Test
+    fun `reading behind the cursor does not walk the cursor backwards`() = runTest {
+        reset()
+        enroll()
+        grantCallLog()
+        FakeCallLogProvider.calls = listOf(Call(number = "+525511111111", date = 20))
+        run()
+
+        FakeCallLogProvider.calls = emptyList()
+
+        assertEquals(ListenableWorker.Result.success(), run())
+        assertEquals(20, app.config.callLogCursor())
     }
 
     @Test

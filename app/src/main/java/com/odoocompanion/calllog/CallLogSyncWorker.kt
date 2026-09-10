@@ -20,13 +20,28 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         if (!hasPermission()) return@withContext Result.success()
 
         val since = app.config.callLogCursor()
-        val batch = CallLogReader(applicationContext.contentResolver).readSince(since)
+        val seen = app.config.callLogSeen()
+        // Read behind the cursor, because a call that was still in progress
+        // when the last pass ran is written afterwards carrying an earlier
+        // date. What keeps that re-read from queueing the same calls every
+        // half hour is `seen`, not the cursor.
+        val from = (since - CallLogReader.LATE_WRITE_LOOKBACK_MILLIS).coerceAtLeast(0)
+        val batch = CallLogReader(applicationContext.contentResolver)
+            .readSince(from, alreadyQueued = seen)
 
         if (batch.entries.isNotEmpty()) {
             app.database.outbox().insertAll(batch.entries)
             SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
         }
+        // The reader starts its cursor at what it was given, so an empty log
+        // would otherwise walk the stored cursor back by the lookback.
         if (batch.cursor > since) app.config.setCallLogCursor(batch.cursor)
+        app.config.setCallLogSeen(
+            CallLogReader.forget(
+                seen + batch.queuedKeys,
+                maxOf(batch.cursor, since) - CallLogReader.LATE_WRITE_LOOKBACK_MILLIS,
+            ),
+        )
 
         if (batch.moreWaiting) SyncScheduler.collectCallLogNow(applicationContext)
         Result.success()
