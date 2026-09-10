@@ -17,6 +17,8 @@ internal class RecordingBody(
 
     override fun contentType(): MediaType = contentType
 
+    override fun isOneShot(): Boolean = true
+
     override fun contentLength(): Long = prefix.size + base64Length(file.length()) + SUFFIX.size
 
     override fun writeTo(sink: BufferedSink) {

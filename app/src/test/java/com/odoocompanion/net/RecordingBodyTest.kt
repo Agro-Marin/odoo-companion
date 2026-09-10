@@ -9,9 +9,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.MediaType.Companion.toMediaType
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
@@ -85,6 +87,20 @@ class RecordingBodyTest {
         )
         assertEquals("+52", sent.getValue("number").jsonPrimitive.content)
         file.delete()
+    }
+
+    @Test
+    fun `a recording body is sent once per attempt, never re-streamed by the transport`() {
+        val body = RecordingBody(
+            metadata("""{"number":"+52"}"""),
+            recordingOf(16),
+            "application/json".toMediaType(),
+        )
+
+        assertTrue(
+            "OkHttp would otherwise replay the whole base64 body after a mid-stream failure",
+            body.isOneShot(),
+        )
     }
 
     @Test

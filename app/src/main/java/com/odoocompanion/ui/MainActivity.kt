@@ -103,7 +103,7 @@ class MainActivity : AppCompatActivity() {
                 app.applyConfiguration()
                 val settings = app.config.current()
                 if (settings.isEnrolled && !LocationForegroundService.canRun(this@MainActivity)) {
-                    requestPermissions()
+                    requestPermissions(settings)
                 }
 
                 binding.locationInterval.showSeconds(settings.locationIntervalSeconds)
@@ -123,19 +123,20 @@ class MainActivity : AppCompatActivity() {
 
         binding.grantPermissions.setOnClickListener {
             lifecycleScope.launch {
-                requestPermissions()
+                val settings = app.config.current()
+                requestPermissions(settings)
                 requestBatteryExemption()
-                if (app.config.current().recordingsEnabled) requestRecordingStorageAccess()
+                if (settings.recordingsEnabled) requestRecordingStorageAccess()
             }
         }
     }
 
-    private fun requestPermissions() {
+    private fun requestPermissions(settings: Settings) {
         val wanted = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.READ_CALL_LOG,
         )
+        if (settings.callLogEnabled) wanted += Manifest.permission.READ_CALL_LOG
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             wanted += Manifest.permission.POST_NOTIFICATIONS
         } else {
