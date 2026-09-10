@@ -41,6 +41,22 @@ class StatusScreenPolicyTest {
     }
 
     @Test
+    fun `a cap too small for any recording names the provisioning mistake`() {
+        val shown = lines(enrolled.copy(maxPayloadBytes = 1024 * 1024))
+
+        assertEquals(
+            StatusLine.Detail(R.string.status_small_cap, "1024 KB"),
+            shown.single { it.text == R.string.status_small_cap },
+        )
+        assertFalse(
+            lines(enrolled.copy(maxPayloadBytes = 50L * 1024 * 1024)).any {
+                it.text == R.string.status_small_cap
+            }
+        )
+        assertFalse(lines().any { it.text == R.string.status_small_cap })
+    }
+
+    @Test
     fun `an error outranks a past success on the last-upload line`() {
         val shown = lines(
             enrolled.copy(lastUploadAt = 500L, lastUploadError = "server 500"),

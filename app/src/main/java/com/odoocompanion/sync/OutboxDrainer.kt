@@ -246,6 +246,7 @@ class OutboxDrainer(
             when (outcome) {
                 is UploadOutcome.Success -> {
                     tally.delivered = true
+                    outcome.limitBytes?.let { learnPayloadLimit(it) }
                     if (outcome.accepted > 0) tally.note(tally.accepted, kind, outcome.accepted)
                     if (outcome.duplicates > 0) {
                         tally.note(tally.duplicates, kind, outcome.duplicates)
@@ -369,6 +370,9 @@ class OutboxDrainer(
                 when (outcome) {
                     is UploadOutcome.Success, is UploadOutcome.Duplicate -> {
                         tally.delivered = true
+                        (outcome as? UploadOutcome.Success)?.limitBytes?.let {
+                            learnPayloadLimit(it)
+                        }
                         if (outcome is UploadOutcome.Duplicate) {
                             tally.note(tally.duplicates, OutboxKind.RECORDING, 1)
                         } else {

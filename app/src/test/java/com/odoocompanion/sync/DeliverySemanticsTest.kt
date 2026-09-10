@@ -307,6 +307,17 @@ class DeliverySemanticsTest {
     }
 
     @Test
+    fun `a success that states the cap teaches it before any 413`() = runTest {
+        respond(200, """{"status":"success","accepted":1,"max_payload_bytes":1048576}""")
+        var learned = 0L
+        queueCall(1)
+
+        OutboxDrainer(dao, OdooClient(), { 5_000L }, { learned = it }, ::settings).drainAll()
+
+        assertEquals(1_048_576L, learned)
+    }
+
+    @Test
     fun `a 413 that states its cap in bytes is read exactly`() = runTest {
         respond(413, """{"error":"payload_too_large","message":"x","limit_bytes":1500}""")
         var learned = 0L

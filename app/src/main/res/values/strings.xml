@@ -27,6 +27,7 @@
     </plurals>
     <string name="status_call_log_permission_missing">Call sync is on but the call-log permission is missing — no calls are being read</string>
     <string name="status_recording_storage_missing">Call recordings are on but this app has no access to the recordings folder — no audio is being harvested</string>
+    <string name="status_small_cap">Server accepts only %1$s per upload: in Odoo, put this device in the Mobile Phone category</string>
     <string name="status_undeliverable_hint">Fix the device in Odoo and they will be retried automatically</string>
     <string name="status_last_attempt">Last attempt: %1$s</string>
     <string name="status_location_missing">Location permission missing — not reporting</string>

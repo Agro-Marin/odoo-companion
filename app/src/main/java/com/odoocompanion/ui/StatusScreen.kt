@@ -38,6 +38,14 @@ object StatusScreen {
                 if (settings.isEnrolled) R.string.status_enrolled else R.string.status_not_enrolled
             add(StatusLine.Say(enrolment))
             if (settings.managed) add(StatusLine.Say(R.string.status_managed))
+            if (settings.maxPayloadBytes in 1..<SMALLEST_MOBILE_CAP_BYTES) {
+                add(
+                    StatusLine.Detail(
+                        R.string.status_small_cap,
+                        "${settings.maxPayloadBytes / 1024} KB",
+                    ),
+                )
+            }
             health.blockers(settings.callLogEnabled, settings.recordingsEnabled)
                 .forEach { add(StatusLine.Say(textFor(it))) }
 
@@ -55,6 +63,8 @@ object StatusScreen {
                 add(StatusLine.Say(R.string.status_undeliverable_hint))
             }
         }
+
+    const val SMALLEST_MOBILE_CAP_BYTES = 8L * 1024 * 1024
 
     @StringRes
     fun textFor(blocker: Blocker): Int = when (blocker) {

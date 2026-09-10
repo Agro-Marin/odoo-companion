@@ -31,6 +31,7 @@ sealed interface UploadOutcome {
         val duplicates: Int,
         val skipped: Int,
         val skippedIndexes: List<Int> = emptyList(),
+        val limitBytes: Long? = null,
     ) : UploadOutcome
 
     data class Rejected(val code: Int) : UploadOutcome
@@ -119,6 +120,7 @@ class OdooClient(
                 counts.duplicates,
                 counts.skipped,
                 body.indexesAt("skipped_indexes"),
+                body?.get("max_payload_bytes")?.jsonPrimitive?.longOrNull,
             )
 
             code == HTTP_CONFLICT -> UploadOutcome.Duplicate
