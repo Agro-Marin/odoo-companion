@@ -138,6 +138,13 @@ request looks like Odoo refusing the payload, and a refusal dead-letters a call 
 because the server deduplicates: whatever a misread network made the phone re-send comes
 back 409 once the real endpoint is reachable.
 
+A gateway that speaks JSON can still say `{"error": "..."}`, and that passes the test above.
+So every reply from `remote_mobile` now also carries `"service": "remote_mobile"`, and the
+phone learns it: the first reply that names the service is remembered for that base URL, and
+from then on a reply that would remove rows must name it too or is retried as not-Odoo. An
+older server that never names itself is believed as before, and a re-enrolment onto another
+base URL forgets what was learned.
+
 The 422 row above is the one that had to be split. The endpoint chose its status
 from `accepted > 0`, and it drops rows it already holds *before* taking that
 count — so "nothing here was storable" and "the server already had every row"

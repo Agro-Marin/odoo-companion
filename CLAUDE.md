@@ -287,6 +287,14 @@ machine at `http://10.0.2.2:<port>`.
   needs `reportsSuccess()`, and any other row-removing code needs `isOdooReply()`.
   `"status": "success"` is in the endpoint's first commit, so no deployed server
   omits it.
+  **And a server that has once named itself must keep doing so.** `remote_mobile`
+  now puts `"service": "remote_mobile"` in every reply; the first time a device
+  sees it, `DeviceConfig.learnServerNamesItself` remembers, and from then on a
+  row-removing reply without it is retried as not-Odoo — which closes the
+  `{"error": ...}` gateway envelope that `isOdooReply` alone lets through. Learned
+  per base URL: a re-enrolment onto a different server forgets it, so an older
+  Odoo is still believed. Never require the key unconditionally; a handset talks
+  to whatever Odoo it points at.
   **Verified against a live Odoo, not reasoned about.** `ServerContractTest` pins
   the eight responses `tools/smoke-test.sh` and three targeted probes captured from
   a real `remote_mobile` on a provisioned mobile-phone device (50 MB cap, 900 s

@@ -67,6 +67,20 @@ class DeviceConfigTest {
     }
 
     @Test
+    fun `what was learned about one server does not carry to another`() = runTest {
+        val config = config()
+        config.saveEnrollment("https://one.example.com", "phone-01", "token")
+        config.learnServerNamesItself()
+        assertTrue(config.current().serverNamesItself)
+
+        config.saveEnrollment("https://one.example.com", "phone-02", "token")
+        assertTrue("same server, same knowledge", config.current().serverNamesItself)
+
+        config.saveEnrollment("https://two.example.com", "phone-01", "token")
+        assertFalse(config.current().serverNamesItself)
+    }
+
+    @Test
     fun `a usable base url is stored`() = runTest {
         val config = config()
 

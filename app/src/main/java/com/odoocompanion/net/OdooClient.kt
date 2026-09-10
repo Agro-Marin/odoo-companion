@@ -36,7 +36,10 @@ sealed interface UploadOutcome {
     data class TooLarge(val limitBytes: Long?) : UploadOutcome
 }
 
-class OdooClient(private val http: OkHttpClient = defaultClient()) {
+class OdooClient(
+    private val http: OkHttpClient = defaultClient(),
+    private val onServerNamedItself: suspend () -> Unit = {},
+) {
     suspend fun post(settings: Settings, suffix: String, body: String): UploadOutcome =
         post(settings, suffix, body.toRequestBody(JSON))
 
@@ -61,7 +64,10 @@ class OdooClient(private val http: OkHttpClient = defaultClient()) {
             .post(body)
             .build()
         http.newCall(request).await().use { response ->
-            classify(response.code, response.peekBody(MAX_READ_BYTES).string())
+            val text = response.peekBody(MAX_READ_BYTES).string()
+            val body = text.asJsonObject()
+            if (!settings.serverNamesItself && body.namesTheService()) onServerNamedItself()
+            classify(response.code, text, body, settings.serverNamesItself)
         }
     } catch (e: IOException) {
         Log.w(TAG, "Upload to $suffix failed", e)
@@ -85,15 +91,20 @@ class OdooClient(private val http: OkHttpClient = defaultClient()) {
         })
     }
 
-    private fun classify(code: Int, text: String): UploadOutcome {
-        val body = text.asJsonObject()
+    private fun classify(
+        code: Int,
+        text: String,
+        body: JsonObject?,
+        mustNameItself: Boolean,
+    ): UploadOutcome {
         val counts = Counts(
             accepted = body.intAt("accepted"),
             duplicates = body.intAt("duplicates"),
             skipped = body.intAt("skipped"),
         )
         return when {
-            removesRows(code) && !body.isOdooReply() -> UploadOutcome.Retry(notOdoo(code, text))
+            removesRows(code) && !body.isOdooReply(mustNameItself) ->
+                UploadOutcome.Retry(notOdoo(code, text))
 
             code in 200..299 && !body.reportsSuccess() -> UploadOutcome.Retry(notOdoo(code, text))
 
@@ -125,8 +136,14 @@ class OdooClient(private val http: OkHttpClient = defaultClient()) {
 
     private data class Counts(val accepted: Int, val duplicates: Int, val skipped: Int)
 
-    private fun JsonObject?.isOdooReply(): Boolean =
-        this != null && ("status" in this || "error" in this)
+    private fun JsonObject?.isOdooReply(mustNameItself: Boolean): Boolean = when {
+        this == null -> false
+        mustNameItself -> namesTheService()
+        else -> "status" in this || "error" in this
+    }
+
+    private fun JsonObject?.namesTheService(): Boolean =
+        this?.get("service")?.jsonPrimitive?.contentOrNull == SERVICE
 
     private fun JsonObject?.reportsSuccess(): Boolean =
         this?.get("status")?.jsonPrimitive?.contentOrNull == "success"
@@ -162,6 +179,7 @@ class OdooClient(private val http: OkHttpClient = defaultClient()) {
     private companion object {
         const val TAG = "OdooClient"
         const val HTTP_CONFLICT = 409
+        const val SERVICE = "remote_mobile"
         const val HTTP_TOO_LARGE = 413
         val DECLARED_KILOBYTES = Regex("""maximum size of (\d+)KB""")
         const val MAX_READ_BYTES = 64L * 1024

@@ -134,4 +134,46 @@ class OdooClientTest {
         assertTrue(outcome is UploadOutcome.Rejected)
         assertEquals(422, (outcome as UploadOutcome.Rejected).code)
     }
+
+    @Test
+    fun `a reply that names the service is remembered, and from then on required`() = runTest {
+        var learned = 0
+        val client = OdooClient(onServerNamedItself = { learned++ })
+        server.enqueue(
+            MockResponse(body = """{"service":"remote_mobile","status":"success","accepted":1}"""),
+        )
+        server.enqueue(MockResponse(body = """{"status":"success","accepted":1}"""))
+        server.enqueue(MockResponse(code = 400, body = """{"error":"bad_request"}"""))
+        server.enqueue(
+            MockResponse(code = 400, body = """{"service":"remote_mobile","error":"no_calls"}"""),
+        )
+
+        assertTrue(client.post(settings(), "calllog", "{}") is UploadOutcome.Success)
+        assertEquals(1, learned)
+
+        val strict = settings().copy(serverNamesItself = true)
+        assertTrue(
+            "a gateway's own success envelope no longer deletes anything",
+            client.post(strict, "calllog", "{}") is UploadOutcome.Retry,
+        )
+        assertTrue(
+            "nor does a gateway's own refusal dead-letter anything",
+            client.post(strict, "calllog", "{}") is UploadOutcome.Retry,
+        )
+        assertEquals(UploadOutcome.Rejected(400), client.post(strict, "calllog", "{}"))
+        assertEquals("learned once, not on every reply", 1, learned)
+    }
+
+    @Test
+    fun `an older server that does not name itself is still believed`() = runTest {
+        var learned = 0
+        server.enqueue(MockResponse(body = """{"status":"success","accepted":1}"""))
+
+        val outcome = OdooClient(onServerNamedItself = {
+            learned++
+        }).post(settings(), "calllog", "{}")
+
+        assertTrue(outcome is UploadOutcome.Success)
+        assertEquals(0, learned)
+    }
 }

@@ -29,6 +29,7 @@ data class Settings(
     val recordingsEnabled: Boolean = false,
     val managed: Boolean = false,
     val maxPayloadBytes: Long = 0,
+    val serverNamesItself: Boolean = false,
     val lastUploadAt: Long = 0,
     val lastAttemptAt: Long = 0,
     val lastUploadError: String? = null,
@@ -42,6 +43,7 @@ data class Settings(
             "uploadWindowSeconds=$uploadWindowSeconds, wifiOnlyUploads=$wifiOnlyUploads, " +
             "callLogEnabled=$callLogEnabled, recordingsEnabled=$recordingsEnabled, " +
             "managed=$managed, maxPayloadBytes=$maxPayloadBytes, " +
+            "serverNamesItself=$serverNamesItself, " +
             "lastUploadAt=$lastUploadAt, lastAttemptAt=$lastAttemptAt, " +
             "lastUploadError=$lastUploadError)"
 
@@ -101,6 +103,7 @@ class DeviceConfig(
         recordingsEnabled = this[RECORDINGS_ENABLED] ?: false,
         managed = this[MANAGED] ?: false,
         maxPayloadBytes = this[MAX_PAYLOAD] ?: 0,
+        serverNamesItself = this[SERVER_NAMES_ITSELF] ?: false,
         lastUploadAt = this[LAST_UPLOAD_AT] ?: 0,
         lastAttemptAt = this[LAST_ATTEMPT_AT] ?: 0,
         lastUploadError = this[LAST_UPLOAD_ERROR],
@@ -117,6 +120,7 @@ class DeviceConfig(
         if (!cleartextPermitted && isCleartextUrl(baseUrl)) return EnrollmentResult.CleartextRefused
         if (!isUsableIdentifier(identifier)) return EnrollmentResult.InvalidIdentifier
         store.edit { prefs ->
+            if (prefs[BASE_URL] != baseUrl.trim()) prefs.remove(SERVER_NAMES_ITSELF)
             prefs[BASE_URL] = baseUrl.trim()
             prefs[IDENTIFIER] = identifier.trim()
             prefs[TOKEN] = token.trim()
@@ -130,7 +134,10 @@ class DeviceConfig(
             val before = prefs.toSettings().managedFacet()
 
             prefs[MANAGED] = !values.isEmpty
-            values.baseUrl?.let { prefs[BASE_URL] = it }
+            values.baseUrl?.let {
+                if (prefs[BASE_URL] != it) prefs.remove(SERVER_NAMES_ITSELF)
+                prefs[BASE_URL] = it
+            }
             values.identifier?.let { prefs[IDENTIFIER] = it }
             values.token?.let { prefs[TOKEN] = it }
             values.callLogEnabled?.let { prefs[CALL_LOG_ENABLED] = it }
@@ -210,6 +217,10 @@ class DeviceConfig(
         return changed
     }
 
+    suspend fun learnServerNamesItself() {
+        store.edit { prefs -> prefs[SERVER_NAMES_ITSELF] = true }
+    }
+
     suspend fun learnPayloadLimit(bytes: Long) {
         store.edit { prefs ->
             if (bytes > 0) prefs[MAX_PAYLOAD] = bytes else prefs.remove(MAX_PAYLOAD)
@@ -262,6 +273,7 @@ class DeviceConfig(
         private val RECORDINGS_ENABLED = booleanPreferencesKey("recordings_enabled")
         private val MANAGED = booleanPreferencesKey("managed_by_mdm")
         private val MAX_PAYLOAD = longPreferencesKey("max_payload_bytes")
+        private val SERVER_NAMES_ITSELF = booleanPreferencesKey("server_names_itself")
         private val LAST_UPLOAD_AT = longPreferencesKey("last_upload_at")
         private val LAST_ATTEMPT_AT = longPreferencesKey("last_attempt_at")
         private val LAST_UPLOAD_ERROR = stringPreferencesKey("last_upload_error")

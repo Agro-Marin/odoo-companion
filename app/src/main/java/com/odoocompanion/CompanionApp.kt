@@ -34,7 +34,9 @@ class CompanionApp : Application() {
             .build()
     }
 
-    val client: OdooClient by lazy { OdooClient() }
+    val client: OdooClient by lazy {
+        OdooClient(onServerNamedItself = { config.learnServerNamesItself() })
+    }
 
     private val scope = CoroutineScope(
         SupervisorJob() +
