@@ -59,6 +59,7 @@ object DeviceHealth {
             runCatching { Environment.isExternalStorageManager() }.getOrDefault(false)
         } else {
             granted(context, Manifest.permission.READ_EXTERNAL_STORAGE) &&
+                granted(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) &&
                 runCatching { Environment.isExternalStorageLegacy() }.getOrDefault(false)
         }
 

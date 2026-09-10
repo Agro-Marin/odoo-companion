@@ -119,6 +119,15 @@ class DeviceHealthTest {
 
         ShadowEnvironment.setIsExternalStorageLegacy(true)
 
+        assertFalse(
+            "reading is half the job: an uploaded recording has to be deletable too",
+            DeviceHealth.hasRecordingStorageAccess(application),
+        )
+
+        Shadows.shadowOf(application).grantPermissions(
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        )
+
         assertTrue(DeviceHealth.hasRecordingStorageAccess(application))
     }
 

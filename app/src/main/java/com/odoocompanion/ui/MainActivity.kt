@@ -141,6 +141,9 @@ class MainActivity : AppCompatActivity() {
             wanted += Manifest.permission.POST_NOTIFICATIONS
         } else {
             wanted += Manifest.permission.READ_EXTERNAL_STORAGE
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                wanted += Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }
         }
         permissionLauncher.launch(wanted.toTypedArray())
     }

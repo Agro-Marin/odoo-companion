@@ -160,6 +160,11 @@ machine at `http://10.0.2.2:<port>`.
   cover `getExternalStorageDirectory()`. `blockers()` takes `recordingsWanted`
   alongside `callLogWanted` — both parameters are required, so a new collector
   cannot be added without deciding what makes it visibly broken.
+  On Android 10 the check also wants `WRITE_EXTERNAL_STORAGE` (declared to API 29):
+  measured on an API 29 emulator, the harvest read and uploaded a recording owned by
+  `sdcard_rw` and then could not delete it, so every uploaded recording stayed on the
+  phone for ever — the one level where `requestLegacyExternalStorage` is in force is
+  the one where reading is not deleting.
   `Environment.isExternalStorageManager` is unshimmable (Robolectric 4.14.1 does
   not shadow it) and throws on a device with no external volume, so the probe is
   guarded: a health check must never be what crashes the screen.
