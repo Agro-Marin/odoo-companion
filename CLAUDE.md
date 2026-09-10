@@ -385,16 +385,16 @@ machine at `http://10.0.2.2:<port>`.
   delivering perfectly was losing everything it sent. `discarded`, `lost` and `purged` were split off `expired` for the same reason:
   positions dropped now, a recording whose file the phone no longer has, and dead
   rows aging out after 90 days are unrelated events that shared a counter.
-  **`skipped` on a 200 is the one hole left open deliberately.** The server reports
-  *how many* it could not store and not *which*, so a partial skip deletes rows it
-  refused along with rows it took. It is unreachable today — the server drops a call
-  only for a blank number or an empty direction, and `CallLogReader` filters the
-  first while `CallDirection.of` falls back to the raw type number, which
-  `_DIRECTION_ALIASES` maps to `"unknown"`; GPS is the same story. Narrowing the
-  batch to find them was tried and reverted: the counters are tallied before the
-  narrowing, so a fixed mock double-counted 9 duplicates for 3 rows. **The fix is in
-  `remote_mobile`** — return the refused items' indexes beside the counter — not
-  here.
+  **`skipped` on a 200 names its rows now.** The server used to report *how many* it
+  could not store and not *which*, so a partial skip deleted rows it refused along
+  with rows it took; narrowing the batch to find them was tried and reverted, because
+  the counters are tallied before the narrowing. `remote_mobile` now sends
+  `skipped_indexes` beside the counter, indexes into the batch as posted, and the
+  drain sets aside exactly those rows (`refused` for a call, discarded for a fix)
+  and deletes the rest. An older server sending only the count is believed as
+  before. Still unreachable in practice — `CallLogReader` filters blank numbers and
+  `CallDirection.of` never yields a word the server does not know — but the hole is
+  closed rather than documented.
 - **A collector whose feature is off is cancelled, not merely not scheduled.**
   `schedulePeriodicWork` takes the whole `Settings` and reconciles: registering
   all three periodic workers unconditionally woke the process every 30 min and

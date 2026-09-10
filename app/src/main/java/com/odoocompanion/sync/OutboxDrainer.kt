@@ -250,8 +250,13 @@ class OutboxDrainer(
                     if (outcome.duplicates > 0) {
                         tally.note(tally.duplicates, kind, outcome.duplicates)
                     }
-                    if (outcome.skipped > 0) noteSkipped(tally, kind, outcome.skipped)
-                    dao.delete(sent)
+                    val refused = outcome.skippedIndexes.mapNotNull { sent.getOrNull(it) }
+                    if (refused.isNotEmpty()) {
+                        abandon(tally, kind, refused, "server read it and could not store it")
+                    } else if (outcome.skipped > 0) {
+                        noteSkipped(tally, kind, outcome.skipped)
+                    }
+                    dao.delete(sent - refused.toSet())
                 }
 
                 is UploadOutcome.Duplicate -> {
@@ -316,9 +321,12 @@ class OutboxDrainer(
 
     private suspend fun drainRecordings(settings: Settings, tally: DrainTally): Outcome {
         var budget = RECORDING_BYTES_PER_DRAIN
+        val poisoned = mutableSetOf<Long>()
+        val settled = { if (poisoned.isEmpty()) Outcome.DONE else Outcome.RETRY }
         while (true) {
-            val entries = dao.take(OutboxKind.RECORDING, RECORDING_BATCH)
-            if (entries.isEmpty()) return Outcome.DONE
+            val entries = dao.take(OutboxKind.RECORDING, RECORDING_BATCH + poisoned.size)
+                .filter { it.id !in poisoned }
+            if (entries.isEmpty()) return settled()
             for (entry in entries) {
                 val file = entry.filePath?.let(::File)
                 if (file == null || !file.exists()) {
@@ -335,7 +343,7 @@ class OutboxDrainer(
                 }
                 if (budget <= 0) {
                     tally.moreWork = true
-                    return Outcome.DONE
+                    return settled()
                 }
 
                 val metadata = attempt {
@@ -389,7 +397,8 @@ class OutboxDrainer(
                     is UploadOutcome.Retry -> {
                         dao.markFailed(listOf(entry.id), outcome.reason, outcome.serverFault)
                         tally.lastError = outcome.reason
-                        return Outcome.RETRY
+                        if (!outcome.serverFault) return Outcome.RETRY
+                        poisoned += entry.id
                     }
                 }
             }

@@ -342,6 +342,59 @@ class DeliverySemanticsTest {
     }
 
     @Test
+    fun `a server that says which rows it could not store sets aside exactly those`() = runTest {
+        respond(
+            200,
+            """{"status":"success","accepted":2,"duplicates":0,"skipped":1,"skipped_indexes":[1]}""",
+        )
+        repeat(3) { queueCall(it) }
+
+        val report = drainer().drainAll()
+
+        assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
+        assertEquals(1, report.skipped[OutboxKind.CALL_LOG])
+        assertEquals("the two it stored are gone", 0, dao.countOf(OutboxKind.CALL_LOG))
+        assertEquals("the one it could not store is kept where it is counted", 1, dao.countDead())
+        assertTrue(dao.take(OutboxKind.CALL_LOG, 10).isEmpty())
+    }
+
+    @Test
+    fun `a server that only says how many it skipped is believed as before`() = runTest {
+        respond(200, """{"status":"success","accepted":2,"duplicates":0,"skipped":1}""")
+        repeat(3) { queueCall(it) }
+
+        val report = drainer().drainAll()
+
+        assertEquals(1, report.skipped[OutboxKind.CALL_LOG])
+        assertEquals(0, dao.countOf(OutboxKind.CALL_LOG))
+        assertEquals(0, dao.countDead())
+    }
+
+    @Test
+    fun `a recording the server chokes on does not hold the ones behind it`() = runTest {
+        val poison = queueRecording().apply { writeBytes(ByteArray(32) { 1 }) }
+        val fine = queueRecording()
+        val poisonAudio = java.util.Base64.getEncoder().encodeToString(poison.readBytes())
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.body!!.utf8().contains(poisonAudio)) {
+                    MockResponse(code = 500, body = """{"error":"processing_error"}""")
+                } else {
+                    MockResponse(body = """{"status":"success","recording_id":1}""")
+                }
+        }
+
+        val report = drainer().drainAll()
+
+        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        assertEquals(1, report.accepted[OutboxKind.RECORDING])
+        assertFalse("the good one is uploaded and gone", fine.exists())
+        assertTrue("the bad one is kept and charged", poison.exists())
+        assertEquals(1, dao.take(OutboxKind.RECORDING, 10).single().attempts)
+        poison.delete()
+    }
+
+    @Test
     fun `a single row over the cap says what the cap is`() = runTest {
         respond(
             413,

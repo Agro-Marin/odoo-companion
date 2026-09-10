@@ -5,6 +5,7 @@ import com.odoocompanion.config.Settings
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -25,7 +26,12 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 sealed interface UploadOutcome {
-    data class Success(val accepted: Int, val duplicates: Int, val skipped: Int) : UploadOutcome
+    data class Success(
+        val accepted: Int,
+        val duplicates: Int,
+        val skipped: Int,
+        val skippedIndexes: List<Int> = emptyList(),
+    ) : UploadOutcome
 
     data class Rejected(val code: Int) : UploadOutcome
 
@@ -108,8 +114,12 @@ class OdooClient(
 
             code in 200..299 && !body.reportsSuccess() -> UploadOutcome.Retry(notOdoo(code, text))
 
-            code in 200..299 ->
-                UploadOutcome.Success(counts.accepted, counts.duplicates, counts.skipped)
+            code in 200..299 -> UploadOutcome.Success(
+                counts.accepted,
+                counts.duplicates,
+                counts.skipped,
+                body.indexesAt("skipped_indexes"),
+            )
 
             code == HTTP_CONFLICT -> UploadOutcome.Duplicate
 
@@ -175,6 +185,9 @@ class OdooClient(
     }.getOrNull()
 
     private fun JsonObject?.intAt(key: String): Int = this?.get(key)?.jsonPrimitive?.intOrNull ?: 0
+
+    private fun JsonObject?.indexesAt(key: String): List<Int> =
+        (this?.get(key) as? JsonArray)?.mapNotNull { it.jsonPrimitive.intOrNull }.orEmpty()
 
     private companion object {
         const val TAG = "OdooClient"
