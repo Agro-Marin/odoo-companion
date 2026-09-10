@@ -29,6 +29,7 @@ data class Settings(
     val recordingsEnabled: Boolean = false,
     val managed: Boolean = false,
     val maxPayloadBytes: Long = 0,
+    val maxPayloadLearnedAt: Long = 0,
     val serverNamesItself: Boolean = false,
     val lastUploadAt: Long = 0,
     val lastAttemptAt: Long = 0,
@@ -47,6 +48,13 @@ data class Settings(
             "lastUploadAt=$lastUploadAt, lastAttemptAt=$lastAttemptAt, " +
             "lastUploadError=$lastUploadError)"
 
+    fun payloadLimit(now: Long): Long =
+        if (maxPayloadBytes > 0 && now - maxPayloadLearnedAt < PAYLOAD_LIMIT_TTL_MILLIS) {
+            maxPayloadBytes
+        } else {
+            0
+        }
+
     fun endpoint(suffix: String): String = baseUrl.toHttpUrl()
         .newBuilder()
         .addPathSegment("remote")
@@ -60,6 +68,8 @@ data class Settings(
 private fun String.redacted(): String = if (isEmpty()) "" else "***($length chars)"
 
 const val DEFAULT_LOCATION_INTERVAL_SECONDS = 60L
+
+const val PAYLOAD_LIMIT_TTL_MILLIS = 24L * 60 * 60 * 1000
 
 const val MIN_LOCATION_INTERVAL_SECONDS = 15L
 const val MAX_LOCATION_INTERVAL_SECONDS = 24L * 60 * 60
@@ -103,6 +113,7 @@ class DeviceConfig(
         recordingsEnabled = this[RECORDINGS_ENABLED] ?: false,
         managed = this[MANAGED] ?: false,
         maxPayloadBytes = this[MAX_PAYLOAD] ?: 0,
+        maxPayloadLearnedAt = this[MAX_PAYLOAD_LEARNED_AT] ?: 0,
         serverNamesItself = this[SERVER_NAMES_ITSELF] ?: false,
         lastUploadAt = this[LAST_UPLOAD_AT] ?: 0,
         lastAttemptAt = this[LAST_ATTEMPT_AT] ?: 0,
@@ -221,9 +232,15 @@ class DeviceConfig(
         store.edit { prefs -> prefs[SERVER_NAMES_ITSELF] = true }
     }
 
-    suspend fun learnPayloadLimit(bytes: Long) {
+    suspend fun learnPayloadLimit(bytes: Long, at: Long = System.currentTimeMillis()) {
         store.edit { prefs ->
-            if (bytes > 0) prefs[MAX_PAYLOAD] = bytes else prefs.remove(MAX_PAYLOAD)
+            if (bytes > 0) {
+                prefs[MAX_PAYLOAD] = bytes
+                prefs[MAX_PAYLOAD_LEARNED_AT] = at
+            } else {
+                prefs.remove(MAX_PAYLOAD)
+                prefs.remove(MAX_PAYLOAD_LEARNED_AT)
+            }
         }
     }
 
@@ -273,6 +290,7 @@ class DeviceConfig(
         private val RECORDINGS_ENABLED = booleanPreferencesKey("recordings_enabled")
         private val MANAGED = booleanPreferencesKey("managed_by_mdm")
         private val MAX_PAYLOAD = longPreferencesKey("max_payload_bytes")
+        private val MAX_PAYLOAD_LEARNED_AT = longPreferencesKey("max_payload_learned_at")
         private val SERVER_NAMES_ITSELF = booleanPreferencesKey("server_names_itself")
         private val LAST_UPLOAD_AT = longPreferencesKey("last_upload_at")
         private val LAST_ATTEMPT_AT = longPreferencesKey("last_attempt_at")

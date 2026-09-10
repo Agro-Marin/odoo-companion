@@ -357,7 +357,11 @@ machine at `http://10.0.2.2:<port>`.
   already said. `DeviceConfig.learnPayloadLimit` keeps it, `drainRecordings` asks
   `client.recordingWireSize` before posting and declines to send what the server has
   declared it will not take, and `learnPayloadLimit(0)` on any revival drops it so a
-  raised cap is discovered. Same scenario after: **10 MB**, which is one probe per
+  raised cap is discovered — and **it expires after a day** (`PAYLOAD_LIMIT_TTL_MILLIS`),
+  because on an emulator with no positions flowing a cap raised in Odoo was never
+  re-learned: the only request the phone made was the declined recording's, and
+  the revival probe that would have dropped the cap was days away. Every success
+  re-stamps it, so a working phone keeps the cap fresh for free. Same scenario after: **10 MB**, which is one probe per
   revival and is the cost of not going permanently blind to an operator's fix. The
   size asked for is `RecordingBody.contentLength()` itself, not a second copy of the
   base64 arithmetic. The gap is reachable —

@@ -3,6 +3,7 @@ package com.odoocompanion.sync
 import android.app.Application
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.odoocompanion.config.PAYLOAD_LIMIT_TTL_MILLIS
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.CompanionDatabase
 import com.odoocompanion.data.OutboxDao
@@ -72,7 +73,7 @@ class DeliverySemanticsTest {
         OdooClient(),
         { 1_000L },
         learnPayloadLimit = { learnedCap = it },
-    ) { settings().copy(maxPayloadBytes = learnedCap) }
+    ) { settings().copy(maxPayloadBytes = learnedCap, maxPayloadLearnedAt = 4_000L) }
 
     private val refusal = """{"error":"no_calls","message":"No call entries in payload"}"""
 
@@ -304,6 +305,20 @@ class DeliverySemanticsTest {
 
         assertEquals(1, requests)
         assertTrue(dao.take(OutboxKind.CALL_LOG, 100).none { it.serverFault })
+    }
+
+    @Test
+    fun `a cap learned a day ago is tried again rather than trusted for ever`() = runTest {
+        respond(200, """{"status":"success","recording_id":1}""")
+        queueRecording(bytes = 4_000)
+        val stale = OutboxDrainer(dao, OdooClient(), { 5_000L + PAYLOAD_LIMIT_TTL_MILLIS }) {
+            settings().copy(maxPayloadBytes = 1_000, maxPayloadLearnedAt = 4_000L)
+        }
+
+        val report = stale.drainAll()
+
+        assertEquals(1, server.requestCount)
+        assertEquals(1, report.accepted[OutboxKind.RECORDING])
     }
 
     @Test

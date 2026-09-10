@@ -183,8 +183,14 @@ class DeviceConfigTest {
     fun `the cap the server declared is remembered, and forgettable`() = runTest {
         val config = config()
 
-        config.learnPayloadLimit(1024L * 1024)
+        config.learnPayloadLimit(1024L * 1024, at = 5_000L)
         assertEquals(1024L * 1024, config.current().maxPayloadBytes)
+        assertEquals(1024L * 1024, config.current().payloadLimit(now = 65_000L))
+        assertEquals(
+            "a cap learned a day ago is not trusted to still be the cap",
+            0L,
+            config.current().payloadLimit(now = 5_000L + PAYLOAD_LIMIT_TTL_MILLIS),
+        )
 
         config.learnPayloadLimit(0)
         assertEquals(

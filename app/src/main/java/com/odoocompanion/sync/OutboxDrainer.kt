@@ -353,12 +353,13 @@ class OutboxDrainer(
                     ).jsonObject
                 }.getOrElse { return failBatch(tally, listOf(entry.id), it) }
                 val wireSize = client.recordingWireSize(file, metadata)
-                if (settings.maxPayloadBytes in 1..<wireSize) {
+                val declared = settings.payloadLimit(now())
+                if (declared in 1..<wireSize) {
                     return failLargeBatch(
                         tally,
                         listOf(entry.id),
                         "recording would send $wireSize bytes and the server declared a " +
-                            "${settings.maxPayloadBytes / 1024} KB cap, so it is not sent",
+                            "${declared / 1024} KB cap, so it is not sent",
                     )
                 }
                 budget -= file.length()

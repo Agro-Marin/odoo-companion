@@ -1,6 +1,7 @@
 package com.odoocompanion.ui
 
 import com.odoocompanion.R
+import com.odoocompanion.config.PAYLOAD_LIMIT_TTL_MILLIS
 import com.odoocompanion.config.Settings
 import com.odoocompanion.system.Blocker
 import com.odoocompanion.system.HealthReport
@@ -42,16 +43,33 @@ class StatusScreenPolicyTest {
 
     @Test
     fun `a cap too small for any recording names the provisioning mistake`() {
-        val shown = lines(enrolled.copy(maxPayloadBytes = 1024 * 1024))
+        val shown = StatusScreen.lines(
+            enrolled.copy(maxPayloadBytes = 1024 * 1024, maxPayloadLearnedAt = 1),
+            health(),
+            empty,
+            now = 2,
+        )
 
         assertEquals(
             StatusLine.Detail(R.string.status_small_cap, "1024 KB"),
             shown.single { it.text == R.string.status_small_cap },
         )
         assertFalse(
-            lines(enrolled.copy(maxPayloadBytes = 50L * 1024 * 1024)).any {
-                it.text == R.string.status_small_cap
-            }
+            "what was learned a day ago may have been raised since",
+            StatusScreen.lines(
+                enrolled.copy(maxPayloadBytes = 1024 * 1024, maxPayloadLearnedAt = 0),
+                health(),
+                empty,
+                now = PAYLOAD_LIMIT_TTL_MILLIS,
+            ).any { it.text == R.string.status_small_cap },
+        )
+        assertFalse(
+            StatusScreen.lines(
+                enrolled.copy(maxPayloadBytes = 50L * 1024 * 1024, maxPayloadLearnedAt = 1),
+                health(),
+                empty,
+                now = 2,
+            ).any { it.text == R.string.status_small_cap },
         )
         assertFalse(lines().any { it.text == R.string.status_small_cap })
     }
