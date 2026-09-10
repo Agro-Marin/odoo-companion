@@ -134,7 +134,7 @@ class LocationForegroundService : LifecycleService() {
             latitude = location.latitude,
             longitude = location.longitude,
             timestamp = location.time,
-            accuracy = location.accuracy,
+            accuracy = location.accuracy.takeIf { location.hasAccuracy() },
             altitude = location.altitude.takeIf { location.hasAltitude() },
             speed = location.speed.takeIf { location.hasSpeed() },
             heading = location.bearing.takeIf { location.hasBearing() },

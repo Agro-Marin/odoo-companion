@@ -23,9 +23,9 @@ class CallLogReader(
         val cursor = resolver.query(
             CallLog.Calls.CONTENT_URI,
             PROJECTION,
-            "${CallLog.Calls.DATE} > ?",
+            "${CallLog.Calls.LAST_MODIFIED} > ?",
             arrayOf(since.toString()),
-            "${CallLog.Calls.DATE} ASC",
+            "${CallLog.Calls.LAST_MODIFIED} ASC",
         ) ?: return CallLogBatch(emptyList(), since)
         return cursor.use { read(it, since, limit) }
     }
@@ -36,20 +36,22 @@ class CallLogReader(
         val dateIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DATE)
         val durationIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION)
         val nameIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)
+        val modifiedIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.LAST_MODIFIED)
 
         val entries = mutableListOf<OutboxEntry>()
         var reached = since
         var scanned = 0
         var stoppedAtLimit = false
         while (cursor.moveToNext()) {
-            val date = cursor.getLong(dateIndex)
+            val modified = cursor.getLong(modifiedIndex)
 
-            if (scanned >= limit && date != reached) {
+            if (scanned >= limit && modified != reached) {
                 stoppedAtLimit = true
                 break
             }
             scanned++
-            reached = date
+            reached = modified
+            val date = cursor.getLong(dateIndex)
             val number = cursor.getString(numberIndex).orEmpty()
             if (number.isBlank()) continue
             entries += OutboxEntry(
@@ -78,6 +80,7 @@ class CallLogReader(
             CallLog.Calls.DATE,
             CallLog.Calls.DURATION,
             CallLog.Calls.CACHED_NAME,
+            CallLog.Calls.LAST_MODIFIED,
         )
     }
 }

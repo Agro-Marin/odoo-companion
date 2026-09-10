@@ -22,6 +22,7 @@ object SyncScheduler {
     internal const val CALL_LOG_NOW = "calllog-now"
     private const val UPLOAD_NOW = "upload-now"
     private const val COLLECT_NOW = "collect-now"
+    const val UPLOAD_FOLLOWS = "upload-follows"
 
     fun schedulePeriodicWork(context: Context, settings: Settings) {
         val manager = WorkManager.getInstance(context)
@@ -70,8 +71,10 @@ object SyncScheduler {
                 COLLECT_NOW,
                 ExistingWorkPolicy.REPLACE,
                 listOf(
-                    OneTimeWorkRequestBuilder<CallLogSyncWorker>().build(),
-                    OneTimeWorkRequestBuilder<RecordingHarvestWorker>().build(),
+                    OneTimeWorkRequestBuilder<CallLogSyncWorker>().addTag(UPLOAD_FOLLOWS).build(),
+                    OneTimeWorkRequestBuilder<RecordingHarvestWorker>().addTag(
+                        UPLOAD_FOLLOWS
+                    ).build(),
                 ),
             )
             .then(

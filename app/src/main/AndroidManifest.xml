@@ -31,7 +31,6 @@
          hides that folder from ordinary media access on many builds, so
          MANAGE_EXTERNAL_STORAGE is requested and granted by MDM policy. Whether
          that suffices is per-OEM and must be verified on the target handset. -->
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -42,6 +41,7 @@
     <application
         android:name=".CompanionApp"
         android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@drawable/ic_launcher"

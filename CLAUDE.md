@@ -217,12 +217,30 @@ machine at `http://10.0.2.2:<port>`.
   instance, so the first test in the JVM to touch it bound the store to that
   test's `filesDir` and every later test silently reused a stale directory — a
   test that passed or failed on ordering alone.
+- **A policy whose every value is unusable is still a policy.** `ManagedValues.isEmpty`
+  used to be computed from the parsed values, so a bundle carrying only a malformed
+  `base_url` read as "policy withdrawn" and unlocked the form under an MDM that was
+  speaking. `fromBundle` sets `policyPresent` from the bundle itself.
+- **A collector chained ahead of an upload does not ask for a third drain.** The
+  `collect-now` chain tags its collectors `UPLOAD_FOLLOWS`; a tagged worker queues
+  and leaves the chained `UploadWorker` to drain, instead of enqueueing `upload-now`
+  beside it — the third concurrent drain the outbox section counts.
+- **An http:// base URL is refused at enrolment on a build that cannot send it.**
+  `NetworkSecurityPolicy.isCleartextTrafficPermitted` is the platform's own answer;
+  before, a release build stored the URL and every upload failed in the socket with
+  a message that named the network, not the mistake.
 - **An absent restrictions service is not a withdrawn policy.**
   `ManagedConfig.read` returns `null` when there is no `RestrictionsManager`, and
   `applyConfiguration` then leaves the managed configuration alone; only a service
   that answers with an empty bundle means the policy was withdrawn. Mapping both
   to empty unlocked the form on a managed handset whenever the service was
   unavailable, which is the invariant above it turned inside out.
+- **The call-log cursor is `LAST_MODIFIED`, not `DATE`.** Android writes a call's row
+  when the call ends, stamped with its start. Cursoring on `DATE` lost any call that
+  ended after a shorter, later one had been synced (call waiting during a long call
+  spanning a worker run): its row landed behind the cursor and was never read.
+  `LAST_MODIFIED` catches late rows and later edits; a re-sent call comes back as a
+  `duplicate`, which is a delivery. `CallLogCursorTest` constructs the loss.
 - **A bounded read counts what it reads, not what it keeps.** `CallLogReader`
   stopped at 1 000 *stored* rows, so a log whose numbers are mostly blank walked
   the whole provider in one pass while still reporting `moreWaiting = false`.
@@ -302,7 +320,15 @@ machine at `http://10.0.2.2:<port>`.
   the handset. So `revivals` is a column, a revival grants `ATTEMPTS_AFTER_REVIVAL`
   (one probe, not a fresh 25 — delivery is known to work, one attempt settles it),
   and `markUnreachable` turns a row that has spent `MAX_REVIVALS` into `refused`,
-  where it stays visible. `reviveUndecodable` resets `revivals` too: a new build is
+  where it stays visible — **only if its last failure was a server verdict.**
+  `markFailed` records `serverFault` (a 5xx other than 502/503/504, or a single
+  row over a cap) and `markUnreachable` requires it. **A 500 on a batch is
+  narrowed like a 413**: the ingest wraps one row's exception, so the batch halves
+  until the row that raises stands alone, and only that row is charged — before,
+  one poison row retired ninety-nine good ones after three revivals. Before that, a 401 with no positions flowing
+  reached `refused` in about thirty drains: budget-dead, one-row probe, 401, dead
+  again, three times — and a rotated token fixed afterwards revived nothing.
+  `LinkFaultTest` constructs it. `reviveUndecodable` resets `revivals` too: a new build is
   a genuinely new condition.
 - **A payload cap is a server setting, so a 413 is kept — but it is not retried
   unchanged.** `_payload_too_large` puts the device's real limit in the body
@@ -312,7 +338,11 @@ machine at `http://10.0.2.2:<port>`.
   `UploadOutcome.TooLarge` carries the declared limit: a multi-row batch halves and
   retries within the same drain, a single row is charged and kept (raising the cap
   is an operator action, so `refused` would be wrong) and the revival bound above is
-  what stops it cycling.
+  what stops it cycling. **`MAX_RECORDING_BYTES` is the same policy, not a second
+  one**: it is the 50 MB mobile-category cap divided by base64's 4/3, and a file over
+  it takes the kept-and-charged path too, where it used to be `refused` outright.
+  A 413 body now also carries `limit_bytes`, which the client prefers to the
+  kilobyte-rounded message when it is there.
   **The limit is also stored, because not sending is the whole point.** A 2 MB
   recording against a 1 MB cap pushed **74 MB** before it settled — 28 attempts, each
   streaming the full base64 body, because nothing remembered what the server had

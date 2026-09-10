@@ -134,6 +134,16 @@ class ManagedConfigTest {
     }
 
     @Test
+    fun `a policy whose every value is unusable is still a policy, not a withdrawal`() {
+        val bundle = Bundle().apply { putString("base_url", "odoo.example.com") }
+
+        val values = ManagedConfig.fromBundle(bundle)
+
+        assertNull(values.baseUrl)
+        assertTrue("the form stays locked while an MDM is speaking", !values.isEmpty)
+    }
+
+    @Test
     fun `a base url that cannot build a request is ignored like a blank one`() {
         val bundle = Bundle().apply {
             putString("base_url", "odoo.example.com")

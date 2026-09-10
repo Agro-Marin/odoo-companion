@@ -30,6 +30,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.io.RandomAccessFile
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -263,6 +264,81 @@ class DeliverySemanticsTest {
         assertEquals("everything still gets there", 0, dao.countOf(OutboxKind.CALL_LOG))
         assertTrue("the batch was narrowed, not retried unchanged", narrowedTo <= 2)
         assertEquals(0, dao.countDead())
+    }
+
+    @Test
+    fun `a 500 narrows the batch to the row that raises, not the whole batch`() = runTest {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val body = request.body!!.utf8()
+                if ("+52550003" in body) {
+                    return MockResponse(code = 500, body = """{"error":"processing_error"}""")
+                }
+                val calls = body.split("\"number\"").size - 1
+                return MockResponse(body = """{"status":"success","accepted":$calls}""")
+            }
+        }
+        repeat(8) { queueCall(it) }
+
+        val report = drainer().drainAll()
+
+        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        val left = dao.take(OutboxKind.CALL_LOG, 100)
+        assertEquals("only the row the server chokes on is still queued", 1, left.size)
+        assertEquals(1, left.single().attempts)
+        assertTrue("and it alone carries the server's verdict", left.single().serverFault)
+    }
+
+    @Test
+    fun `a 503 is the link, so the batch is charged as one and not narrowed`() = runTest {
+        var requests = 0
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests++
+                return MockResponse(code = 503, body = """{"error":"unavailable"}""")
+            }
+        }
+        repeat(8) { queueCall(it) }
+
+        drainer().drainAll()
+
+        assertEquals(1, requests)
+        assertTrue(dao.take(OutboxKind.CALL_LOG, 100).none { it.serverFault })
+    }
+
+    @Test
+    fun `a 413 that states its cap in bytes is read exactly`() = runTest {
+        respond(413, """{"error":"payload_too_large","message":"x","limit_bytes":1500}""")
+        var learned = 0L
+        queueCall(1)
+
+        OutboxDrainer(dao, OdooClient(), { 5_000L }, { learned = it }, ::settings).drainAll()
+
+        assertEquals(1500L, learned)
+    }
+
+    @Test
+    fun `a recording over what any mobile device accepts is kept, charged and bounded`() = runTest {
+        val audio = File.createTempFile("huge", ".m4a").apply { deleteOnExit() }
+        RandomAccessFile(audio, "rw").use { it.setLength(OutboxDrainer.MAX_RECORDING_BYTES + 1) }
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.RECORDING,
+                payload = """{"recorded_at":1,"file_name":"huge.m4a","mimetype":"audio/mp4"}""",
+                filePath = audio.absolutePath,
+                createdAt = 1L,
+            ),
+        )
+
+        val report = drainer().drainAll()
+
+        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        assertEquals(0, server.requestCount)
+        val row = dao.take(OutboxKind.RECORDING, 1).single()
+        assertEquals("kept, not refused: the bound on revivals settles it", 1, row.attempts)
+        assertTrue(row.serverFault)
+        assertTrue(audio.exists())
+        audio.delete()
     }
 
     @Test

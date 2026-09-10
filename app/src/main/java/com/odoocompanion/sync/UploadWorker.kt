@@ -22,6 +22,7 @@ class UploadWorker(context: Context, params: WorkerParameters) :
             learnPayloadLimit = { app.config.learnPayloadLimit(it) },
         )
         val report = drainer.drainAll()
+        if (report.deferred) return@withContext Result.success()
         app.config.recordUpload(System.currentTimeMillis(), report.delivered, report.lastError)
 
         if (report.deadLettered > 0 ||
@@ -55,10 +56,7 @@ class UploadWorker(context: Context, params: WorkerParameters) :
 
             OutboxDrainer.Outcome.DONE -> {
                 if (report.moreWorkPending) {
-                    SyncScheduler.continueUpload(
-                        applicationContext,
-                        app.config.current().wifiOnlyUploads,
-                    )
+                    SyncScheduler.continueUpload(applicationContext, settings.wifiOnlyUploads)
                 }
                 Result.success()
             }

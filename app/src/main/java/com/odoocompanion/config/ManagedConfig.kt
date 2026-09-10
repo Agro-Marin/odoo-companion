@@ -14,9 +14,11 @@ data class ManagedValues(
     val wifiOnlyUploads: Boolean? = null,
     val locationIntervalSeconds: Long? = null,
     val uploadWindowSeconds: Long? = null,
+    val policyPresent: Boolean = false,
 ) {
     val isEmpty: Boolean
-        get() = baseUrl == null &&
+        get() = !policyPresent &&
+            baseUrl == null &&
             identifier == null &&
             token == null &&
             callLogEnabled == null &&
@@ -55,6 +57,7 @@ object ManagedConfig {
                 minimum = MIN_UPLOAD_WINDOW_SECONDS,
                 maximum = MAX_UPLOAD_WINDOW_SECONDS,
             ),
+            policyPresent = true,
         )
     }
 

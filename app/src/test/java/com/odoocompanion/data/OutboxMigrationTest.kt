@@ -221,6 +221,23 @@ class OutboxMigrationTest {
     }
 
     @Test
+    fun `migrating to v6 treats every existing failure as the link's, not the row's`() {
+        val db = openV1()
+        db.execSQL(
+            "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
+                "('calllog', '{\"number\":\"+52\"}', 10, 30)",
+        )
+        for (version in 1..5) migrate(db, version, version + 1)
+
+        db.query("SELECT serverFault FROM outbox").use { cursor ->
+            assertEquals(1, cursor.count)
+            cursor.moveToFirst()
+            assertEquals("no server verdict was recorded, so none is assumed", 0, cursor.getInt(0))
+        }
+        db.close()
+    }
+
+    @Test
     fun `migrating to v5 bounds revivals and marks the queue format of existing rows`() {
         val db = openV1()
         db.execSQL(

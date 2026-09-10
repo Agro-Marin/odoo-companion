@@ -38,6 +38,7 @@ data class OutboxEntry(
     val deadReason: String? = null,
     val revivals: Int = 0,
     val payloadVersion: Int = CURRENT_PAYLOAD_VERSION,
+    val serverFault: Boolean = false,
 )
 
 const val CURRENT_PAYLOAD_VERSION = 1
@@ -84,14 +85,17 @@ interface OutboxDao {
     suspend fun delete(ids: List<Long>)
 
     @Query(
-        "UPDATE outbox SET attempts = attempts + 1, lastError = :error WHERE id IN (:ids)"
+        """
+        UPDATE outbox SET attempts = attempts + 1, lastError = :error, serverFault = :serverFault
+        WHERE id IN (:ids)
+        """,
     )
-    suspend fun markFailed(ids: List<Long>, error: String?)
+    suspend fun markFailed(ids: List<Long>, error: String?, serverFault: Boolean = false)
 
     @Query(
         """
         UPDATE outbox SET deadAt = :now, deadReason = '${DeadReason.REFUSED}'
-        WHERE deadAt IS NULL AND attempts >= :maxAttempts
+        WHERE deadAt IS NULL AND attempts >= :maxAttempts AND serverFault
             AND revivals >= :maxRevivals AND kind IN (:keptKinds)
         """,
     )
@@ -207,7 +211,7 @@ object OutboxLimits {
     const val DEAD_RETENTION_MILLIS = 90L * 24 * 60 * 60 * 1000
 }
 
-@Database(entities = [OutboxEntry::class], version = 5, exportSchema = true)
+@Database(entities = [OutboxEntry::class], version = 6, exportSchema = true)
 abstract class CompanionDatabase : RoomDatabase() {
     abstract fun outbox(): OutboxDao
 }
@@ -252,6 +256,13 @@ val COMPANION_MIGRATIONS: Array<Migration> = arrayOf(
 
             db.execSQL(
                 "ALTER TABLE `outbox` ADD COLUMN `payloadVersion` INTEGER NOT NULL DEFAULT 1",
+            )
+        }
+    },
+    object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE `outbox` ADD COLUMN `serverFault` INTEGER NOT NULL DEFAULT 0",
             )
         }
     },

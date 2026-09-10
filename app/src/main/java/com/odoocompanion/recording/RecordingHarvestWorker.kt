@@ -24,7 +24,7 @@ class RecordingHarvestWorker(context: Context, params: WorkerParameters) :
             root = Environment.getExternalStorageDirectory(),
         ).queueNew(since)
 
-        if (batch.queued > 0) {
+        if (batch.queued > 0 && SyncScheduler.UPLOAD_FOLLOWS !in tags) {
             SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
         }
         if (batch.cursor > since) app.config.setRecordingCursor(batch.cursor)

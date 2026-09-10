@@ -166,7 +166,10 @@ still discovered on the next pass.
 
 **Nothing is retried for ever.** A row put back by `reviveExhausted` gets one probe
 attempt, not a fresh budget of 25, and `revivals` is counted: after `MAX_REVIVALS` it is
-marked `refused` and stays on the undeliverable line. Without that bound a row the server
+marked `refused` and stays on the undeliverable line — but only when the last failure was
+the server's verdict on the row (a 5xx, or a single row over the cap). A 401, a 404, a
+captive portal or a dropped connection is a fault of the link, and a row whose last failure
+was one of those goes back to `budget`, where fixing the link revives it. Without that bound a row the server
 chokes on — an oversized recording, or a record whose ingest raises, which the endpoint
 answers **500** and the client is right to treat as retryable — was revived on every drain
 for ever, and was *never* visible, because it was killed at the start of a drain and put
@@ -256,8 +259,9 @@ three conditions that stop reporting outright:
   to see: `MANAGE_EXTERNAL_STORAGE` is declared in the manifest and granted by MDM policy,
   but nothing checked it. Without it `RecordingScanner` reads an empty directory listing,
   the harvest queues zero rows and returns success, and the screen reported no blocker at
-  all. `READ_MEDIA_AUDIO`, which the app *does* request at runtime, does not cover
-  `getExternalStorageDirectory()`. Shown only when recordings are switched on; "Grant
+  all. `READ_MEDIA_AUDIO` does not cover `getExternalStorageDirectory()`, so the app
+  neither declares nor requests it; on Android 10 the manifest's
+  `requestLegacyExternalStorage` is what makes the folder readable. Shown only when recordings are switched on; "Grant
   permissions" then also opens the all-files-access screen.
 - **Location set to "while using the app"** — collection works until the phone reboots
   or the app updates, then the service cannot restart from the background and the phone

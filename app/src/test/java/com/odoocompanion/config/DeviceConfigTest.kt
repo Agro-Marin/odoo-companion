@@ -48,6 +48,25 @@ class DeviceConfigTest {
     }
 
     @Test
+    fun `a build that cannot send cleartext refuses an http base url at enrolment`() = runTest {
+        val file = File.createTempFile("companion", ".preferences_pb")
+        temporaryFiles += file
+        val config = DeviceConfig(
+            PreferenceDataStoreFactory.create { file },
+            cleartextPermitted = false,
+        )
+
+        assertEquals(
+            EnrollmentResult.CleartextRefused,
+            config.saveEnrollment("http://odoo.example.com", "phone-01", "token"),
+        )
+        assertEquals(
+            EnrollmentResult.Saved,
+            config.saveEnrollment("https://odoo.example.com", "phone-01", "token"),
+        )
+    }
+
+    @Test
     fun `a usable base url is stored`() = runTest {
         val config = config()
 

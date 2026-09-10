@@ -157,17 +157,33 @@ class OutboxTest {
         addCalls(1)
         val id = dao.take(OutboxKind.CALL_LOG, 1).first().id
         repeat(3) {
-            repeat(25) { dao.markFailed(listOf(id), "server 500") }
+            repeat(25) { dao.markFailed(listOf(id), "server 500", serverFault = true) }
             dao.markDead(OutboxKind.IRREPLACEABLE, 25, 1_000L)
             dao.reviveExhausted(attempts = 24)
         }
-        repeat(25) { dao.markFailed(listOf(id), "server 500") }
+        repeat(25) { dao.markFailed(listOf(id), "server 500", serverFault = true) }
 
         assertEquals(1, dao.markUnreachable(OutboxKind.IRREPLACEABLE, 25, 3, 2_000L))
 
         assertEquals(1, dao.countDead())
         assertEquals("a refused row is never put back", 0, dao.reviveExhausted(attempts = 24))
         assertEquals(1, dao.countDead())
+    }
+
+    @Test
+    fun `a row whose last failure never reached the server is not retired`() = runTest {
+        addCalls(1)
+        val id = dao.take(OutboxKind.CALL_LOG, 1).first().id
+        repeat(3) {
+            repeat(25) { dao.markFailed(listOf(id), "server 500", serverFault = true) }
+            dao.markDead(OutboxKind.IRREPLACEABLE, 25, 1_000L)
+            dao.reviveExhausted(attempts = 24)
+        }
+        repeat(25) { dao.markFailed(listOf(id), "auth rejected (401)") }
+
+        assertEquals(0, dao.markUnreachable(OutboxKind.IRREPLACEABLE, 25, 3, 2_000L))
+        assertEquals(1, dao.markDead(OutboxKind.IRREPLACEABLE, 25, 2_000L))
+        assertEquals("a fixed link puts it back", 1, dao.reviveExhausted(attempts = 24))
     }
 
     @Test

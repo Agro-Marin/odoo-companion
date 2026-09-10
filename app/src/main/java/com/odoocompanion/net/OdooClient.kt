@@ -10,6 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -30,7 +31,7 @@ sealed interface UploadOutcome {
 
     data object Duplicate : UploadOutcome
 
-    data class Retry(val reason: String) : UploadOutcome
+    data class Retry(val reason: String, val serverFault: Boolean = false) : UploadOutcome
 
     data class TooLarge(val limitBytes: Long?) : UploadOutcome
 }
@@ -105,14 +106,15 @@ class OdooClient(private val http: OkHttpClient = defaultClient()) {
 
             code in PERMANENTLY_REFUSED -> UploadOutcome.Rejected(code)
 
-            code == HTTP_TOO_LARGE -> UploadOutcome.TooLarge(declaredLimit(text))
+            code == HTTP_TOO_LARGE -> UploadOutcome.TooLarge(declaredLimit(text, body))
 
-            else -> UploadOutcome.Retry(reasonFor(code, text))
+            else -> UploadOutcome.Retry(reasonFor(code, text), serverFault = code in ROW_FAULTS)
         }
     }
 
-    private fun declaredLimit(text: String): Long? =
-        DECLARED_KILOBYTES.find(text)?.groupValues?.get(1)?.toLongOrNull()?.times(1024)
+    private fun declaredLimit(text: String, body: JsonObject?): Long? =
+        body?.get("limit_bytes")?.jsonPrimitive?.longOrNull
+            ?: DECLARED_KILOBYTES.find(text)?.groupValues?.get(1)?.toLongOrNull()?.times(1024)
 
     private fun removesRows(code: Int): Boolean =
         code in 200..299 || code == HTTP_CONFLICT || code in PERMANENTLY_REFUSED
@@ -169,6 +171,8 @@ class OdooClient(private val http: OkHttpClient = defaultClient()) {
         val JSON = "application/json; charset=utf-8".toMediaType()
 
         val PERMANENTLY_REFUSED = setOf(400, HTTP_UNPROCESSABLE)
+
+        val ROW_FAULTS = (500..599) - setOf(502, 503, 504)
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)

@@ -52,8 +52,11 @@ class CallLogSyncWorkerTest {
         app.config.saveEnrollment("https://odoo.example.com", "phone-01", "token")
     }
 
-    private suspend fun run(): ListenableWorker.Result =
-        TestListenableWorkerBuilder<CallLogSyncWorker>(app).build().doWork()
+    private suspend fun run(vararg tags: String): ListenableWorker.Result =
+        TestListenableWorkerBuilder<CallLogSyncWorker>(app).setTags(tags.toList()).build().doWork()
+
+    private fun uploadsAsked(): Int = WorkManager.getInstance(app)
+        .getWorkInfosForUniqueWork("upload-now").get().size
 
     private suspend fun reset() {
         app.config.clearEnrollment()
@@ -111,6 +114,21 @@ class CallLogSyncWorkerTest {
 
         assertEquals(2, app.database.outbox().countOf(OutboxKind.CALL_LOG))
         assertEquals(20, app.config.callLogCursor())
+    }
+
+    @Test
+    fun `a collector chained ahead of an upload does not ask for a second one`() = runTest {
+        reset()
+        enroll()
+        grantCallLog()
+        FakeCallLogProvider.calls = listOf(Call(number = "+525511111111", date = 10))
+
+        run(SyncScheduler.UPLOAD_FOLLOWS)
+        assertEquals(0, uploadsAsked())
+
+        FakeCallLogProvider.calls += Call(number = "+525522222222", date = 20)
+        run()
+        assertEquals(1, uploadsAsked())
     }
 
     @Test

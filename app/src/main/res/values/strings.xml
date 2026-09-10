@@ -14,6 +14,7 @@
     <string name="notification_location_text">Sending position to Odoo</string>
     <string name="status_managed">Configured by your organization</string>
     <string name="status_bad_base_url">Not saved: the base URL must start with http:// or https://</string>
+    <string name="status_cleartext_refused">Not saved: this build only talks to https:// servers</string>
     <string name="status_bad_identifier">Not saved: the device identifier may contain only letters, digits, and - _ . ~</string>
     <string name="status_enrolled">Enrolled</string>
     <string name="status_not_enrolled">Not enrolled</string>

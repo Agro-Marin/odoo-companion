@@ -122,11 +122,22 @@ class OutboxDrainer(
         val outcome = if (results.any { it == Outcome.RETRY }) Outcome.RETRY else Outcome.DONE
         reviveWhatOnlyRanOutOfRetries(tally, outcome)
 
-        if (outcome == Outcome.DONE && !tally.moreWork) tally.moreWork = anythingArrivedLate()
+        if (outcome == Outcome.DONE && !tally.moreWork) {
+            tally.moreWork = anythingArrivedLate(settings.uploadWindowSeconds)
+        }
         return tally.report(outcome)
     }
 
-    private suspend fun anythingArrivedLate(): Boolean = QUEUES.any { dao.countOf(it) > 0 }
+    private suspend fun anythingArrivedLate(windowSeconds: Long): Boolean {
+        if (OutboxKind.IRREPLACEABLE.any { dao.countOf(it) > 0 }) return true
+        val positions = dao.depthOf(OutboxKind.LOCATION)
+        return UploadCadence.dueNow(
+            queued = positions.queued,
+            oldestCreatedAt = positions.oldestCreatedAt,
+            windowSeconds = windowSeconds,
+            now = now(),
+        )
+    }
 
     private suspend fun retireWhatWillNeverBeTaken(tally: DrainTally) {
         tally.unreachable = dao.markUnreachable(
@@ -196,13 +207,15 @@ class OutboxDrainer(
     ): Outcome {
         var budget = BATCHES_PER_DRAIN
         var size = wire.batchSize
+        val poisoned = mutableSetOf<Long>()
+        val settled = { if (poisoned.isEmpty()) Outcome.DONE else Outcome.RETRY }
         while (true) {
             if (budget-- <= 0) {
                 tally.moreWork = true
-                return Outcome.DONE
+                return settled()
             }
-            val entries = dao.take(wire.kind, size)
-            if (entries.isEmpty()) return Outcome.DONE
+            val entries = dao.take(wire.kind, size + poisoned.size).filter { it.id !in poisoned }
+            if (entries.isEmpty()) return settled()
             val kind = wire.kind
 
             val unreadable = mutableListOf<OutboxEntry>()
@@ -265,12 +278,18 @@ class OutboxDrainer(
                 }
 
                 is UploadOutcome.Retry -> {
-                    dao.markFailed(sent, outcome.reason)
+                    if (outcome.serverFault && sent.size > 1) {
+                        size = halved(size, kind, outcome.reason)
+                        continue
+                    }
+                    dao.markFailed(sent, outcome.reason, outcome.serverFault)
                     tally.lastError = outcome.reason
-                    return Outcome.RETRY
+                    if (!outcome.serverFault) return Outcome.RETRY
+                    poisoned += sent
+                    continue
                 }
             }
-            if (entries.size < size) return Outcome.DONE
+            if (entries.size < size) return settled()
         }
     }
 
@@ -307,13 +326,12 @@ class OutboxDrainer(
                     continue
                 }
                 if (file.length() > MAX_RECORDING_BYTES) {
-                    abandon(
+                    return failLargeBatch(
                         tally,
-                        OutboxKind.RECORDING,
                         listOf(entry.id),
-                        "recording too large to upload: ${file.length()} bytes",
+                        "recording of ${file.length()} bytes is over the " +
+                            "${MAX_RECORDING_BYTES / 1024 / 1024} MB any mobile device accepts",
                     )
-                    continue
                 }
                 if (budget <= 0) {
                     tally.moreWork = true
@@ -369,7 +387,7 @@ class OutboxDrainer(
                     }
 
                     is UploadOutcome.Retry -> {
-                        dao.markFailed(listOf(entry.id), outcome.reason)
+                        dao.markFailed(listOf(entry.id), outcome.reason, outcome.serverFault)
                         tally.lastError = outcome.reason
                         return Outcome.RETRY
                     }
@@ -446,7 +464,7 @@ class OutboxDrainer(
         reason: String,
     ): Outcome {
         Log.w(TAG, "Keeping ${ids.size} row(s) the server would not take: $reason")
-        dao.markFailed(ids, reason)
+        dao.markFailed(ids, reason, serverFault = true)
         tally.lastError = reason
         return Outcome.RETRY
     }
@@ -475,12 +493,6 @@ class OutboxDrainer(
         const val BATCHES_PER_DRAIN = 25
 
         const val REVIVAL_PROBE = 1
-
-        private val QUEUES = listOf(
-            OutboxKind.LOCATION,
-            OutboxKind.CALL_LOG,
-            OutboxKind.RECORDING,
-        )
 
         private const val TAG = "OutboxDrainer"
 

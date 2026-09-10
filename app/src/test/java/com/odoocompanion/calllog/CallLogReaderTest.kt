@@ -27,6 +27,7 @@ internal data class Call(
     val date: Long,
     val duration: Long = 30,
     val cachedName: String? = null,
+    val modified: Long = date,
 )
 
 internal class FakeCallLogProvider : ContentProvider() {
@@ -43,8 +44,10 @@ internal class FakeCallLogProvider : ContentProvider() {
         if (returnsNull) return null
         val since = selectionArgs?.firstOrNull()?.toLong() ?: 0
         val cursor = MatrixCursor(projection ?: emptyArray())
-        calls.filter { it.date > since }.sortedBy { it.date }.forEach {
-            cursor.addRow(arrayOf<Any?>(it.number, it.type, it.date, it.duration, it.cachedName))
+        calls.filter { it.modified > since }.sortedBy { it.modified }.forEach {
+            cursor.addRow(
+                arrayOf<Any?>(it.number, it.type, it.date, it.duration, it.cachedName, it.modified),
+            )
         }
         return cursor
     }
@@ -141,7 +144,7 @@ class CallLogReaderTest {
             listOf("+new"),
             payloadsOf(batch).map { it.getValue("number").jsonPrimitive.content },
         )
-        assertEquals("${CallLog.Calls.DATE} > ?", FakeCallLogProvider.lastSelection)
+        assertEquals("${CallLog.Calls.LAST_MODIFIED} > ?", FakeCallLogProvider.lastSelection)
     }
 
     @Test
@@ -261,5 +264,43 @@ class CallLogReaderTest {
         assertTrue("a filtered row is still read work", batch.moreWaiting)
         assertEquals(0, batch.entries.size)
         assertEquals(1_004L, batch.cursor)
+    }
+}
+
+@RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class)
+class CallLogCursorTest {
+    private val context: Application get() = ApplicationProvider.getApplicationContext()
+
+    @Before
+    fun setUp() {
+        FakeCallLogProvider.calls = emptyList()
+        FakeCallLogProvider.returnsNull = false
+        ShadowContentResolver.registerProviderInternal(
+            CallLog.AUTHORITY,
+            FakeCallLogProvider().apply { onCreate() },
+        )
+    }
+
+    @Test
+    fun `a long call that ends after a shorter one was synced is read on the next pass`() {
+        // Android inserts a call-log row when the call ENDS, stamped with its START time.
+        // A: starts at 100, still in progress. B: call-waiting at 200, missed, row written.
+        FakeCallLogProvider.calls = listOf(Call(number = "+B", date = 200))
+        val reader = CallLogReader(context.contentResolver) { 1_000 }
+        val first = reader.readSince(0)
+        assertEquals(1, first.entries.size)
+
+        // A ends now; its row lands with DATE 100, behind a cursor kept on DATE.
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+B", date = 200),
+            Call(number = "+A", date = 100, modified = 700),
+        )
+        val second = reader.readSince(first.cursor)
+
+        val payload = Json.parseToJsonElement(second.entries.single().payload).jsonObject
+        assertEquals("+A", payload.getValue("number").jsonPrimitive.content)
+        assertEquals(100, payload.getValue("timestamp").jsonPrimitive.content.toLong())
+        assertEquals(700, second.cursor)
     }
 }

@@ -67,6 +67,15 @@ class MainActivity : AppCompatActivity() {
 
         binding.save.setOnClickListener {
             lifecycleScope.launch {
+                app.config.setFeature(
+                    callLog = binding.callLogEnabled.isChecked,
+                    recordings = binding.recordingsEnabled.isChecked,
+                )
+                app.config.setWifiOnlyUploads(binding.wifiOnly.isChecked)
+                binding.uploadWindow.text.toString().trim().toLongOrNull()
+                    ?.let { app.config.setUploadWindow(it) }
+                binding.locationInterval.text.toString().trim().toLongOrNull()
+                    ?.let { app.config.setLocationInterval(it) }
                 when (
                     app.config.saveEnrollment(
                         baseUrl = binding.baseUrl.text.toString(),
@@ -84,18 +93,13 @@ class MainActivity : AppCompatActivity() {
                         return@launch
                     }
 
+                    EnrollmentResult.CleartextRefused -> {
+                        binding.status.text = getString(R.string.status_cleartext_refused)
+                        return@launch
+                    }
+
                     EnrollmentResult.Saved -> Unit
                 }
-                app.config.setFeature(
-                    callLog = binding.callLogEnabled.isChecked,
-                    recordings = binding.recordingsEnabled.isChecked,
-                )
-                app.config.setWifiOnlyUploads(binding.wifiOnly.isChecked)
-
-                binding.uploadWindow.text.toString().trim().toLongOrNull()
-                    ?.let { app.config.setUploadWindow(it) }
-                binding.locationInterval.text.toString().trim().toLongOrNull()
-                    ?.let { app.config.setLocationInterval(it) }
                 app.applyConfiguration()
                 val settings = app.config.current()
                 if (settings.isEnrolled && !LocationForegroundService.canRun(this@MainActivity)) {
@@ -126,12 +130,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-
-        lifecycleScope.launch { render(CompanionApp.from(this@MainActivity).config.current()) }
-    }
-
     private fun requestPermissions() {
         val wanted = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -140,7 +138,8 @@ class MainActivity : AppCompatActivity() {
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             wanted += Manifest.permission.POST_NOTIFICATIONS
-            wanted += Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            wanted += Manifest.permission.READ_EXTERNAL_STORAGE
         }
         permissionLauncher.launch(wanted.toTypedArray())
     }

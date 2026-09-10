@@ -24,7 +24,9 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
 
         if (batch.entries.isNotEmpty()) {
             app.database.outbox().insertAll(batch.entries)
-            SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
+            if (SyncScheduler.UPLOAD_FOLLOWS !in tags) {
+                SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
+            }
         }
         if (batch.cursor > since) app.config.setCallLogCursor(batch.cursor)
 

@@ -1,6 +1,7 @@
 package com.odoocompanion.system
 
 import android.app.Application
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -34,5 +35,21 @@ class MinSdkStartupTest {
             PackageManager.PERMISSION_GRANTED,
             app.packageManager.checkPermission(name, app.packageName),
         )
+    }
+
+    @Test
+    fun `the manifest opts into legacy storage, or Android 10 can never see a recording`() {
+        val app = RuntimeEnvironment.getApplication()
+        val info = app.packageManager.getApplicationInfo(app.packageName, 0)
+        val privateFlags = ApplicationInfo::class.java.getField("privateFlags").getInt(info)
+
+        assertTrue(
+            "isExternalStorageLegacy() is false without it, and the harvest walks the SD card",
+            privateFlags and PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE != 0,
+        )
+    }
+
+    private companion object {
+        const val PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE = 1 shl 29
     }
 }

@@ -1,6 +1,7 @@
 package com.odoocompanion.config
 
 import android.content.Context
+import android.security.NetworkSecurityPolicy
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -44,7 +45,7 @@ data class Settings(
             "lastUploadAt=$lastUploadAt, lastAttemptAt=$lastAttemptAt, " +
             "lastUploadError=$lastUploadError)"
 
-    fun endpoint(suffix: String): String = baseUrl.trim().toHttpUrl()
+    fun endpoint(suffix: String): String = baseUrl.toHttpUrl()
         .newBuilder()
         .addPathSegment("remote")
         .addPathSegment("mobile")
@@ -69,7 +70,10 @@ sealed interface EnrollmentResult {
     data object Saved : EnrollmentResult
     data object InvalidBaseUrl : EnrollmentResult
     data object InvalidIdentifier : EnrollmentResult
+    data object CleartextRefused : EnrollmentResult
 }
+
+fun isCleartextUrl(value: String): Boolean = value.trim().toHttpUrlOrNull()?.isHttps == false
 
 fun isUsableBaseUrl(value: String): Boolean = value.trim().toHttpUrlOrNull() != null
 
@@ -78,8 +82,11 @@ fun isUsableIdentifier(value: String): Boolean =
 
 private val IDENTIFIER_PATTERN = Regex("[A-Za-z0-9._~-]+")
 
-class DeviceConfig(private val store: DataStore<Preferences>) {
-    constructor(context: Context) : this(storeFor(context))
+class DeviceConfig(
+    private val store: DataStore<Preferences>,
+    private val cleartextPermitted: Boolean = true,
+) {
+    constructor(context: Context) : this(storeFor(context), cleartextPermittedOn(context))
 
     val settings: Flow<Settings> = store.data.map { it.toSettings() }
 
@@ -107,6 +114,7 @@ class DeviceConfig(private val store: DataStore<Preferences>) {
         token: String,
     ): EnrollmentResult {
         if (!isUsableBaseUrl(baseUrl)) return EnrollmentResult.InvalidBaseUrl
+        if (!cleartextPermitted && isCleartextUrl(baseUrl)) return EnrollmentResult.CleartextRefused
         if (!isUsableIdentifier(identifier)) return EnrollmentResult.InvalidIdentifier
         store.edit { prefs ->
             prefs[BASE_URL] = baseUrl.trim()
@@ -235,6 +243,9 @@ class DeviceConfig(private val store: DataStore<Preferences>) {
 
     companion object {
         internal const val STORE_NAME = "companion_config"
+
+        private fun cleartextPermittedOn(context: Context): Boolean =
+            NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted
 
         internal fun storeFor(context: Context): DataStore<Preferences> =
             PreferenceDataStoreFactory.create(
