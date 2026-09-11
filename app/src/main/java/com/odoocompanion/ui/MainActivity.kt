@@ -206,14 +206,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyManagedLock(managed: Boolean) {
-        for (field in listOf(binding.baseUrl, binding.identifier, binding.token)) {
-            field.isEnabled = !managed
+        // Both halves of each field: disabling only the inner edit text leaves
+        // the box and its label drawn as though they were still editable.
+        val fields = listOf(
+            binding.baseUrl,
+            binding.identifier,
+            binding.token,
+            binding.locationInterval,
+            binding.uploadWindow,
+        )
+        val boxes = listOf(
+            binding.baseUrlLayout,
+            binding.identifierLayout,
+            binding.tokenLayout,
+            binding.locationIntervalLayout,
+            binding.uploadWindowLayout,
+        )
+        for (view in fields + boxes) {
+            view.isEnabled = !managed
         }
         binding.callLogEnabled.isEnabled = !managed
         binding.recordingsEnabled.isEnabled = !managed
         binding.wifiOnly.isEnabled = !managed
-        binding.locationInterval.isEnabled = !managed
-        binding.uploadWindow.isEnabled = !managed
         binding.save.isEnabled = !managed
     }
 
