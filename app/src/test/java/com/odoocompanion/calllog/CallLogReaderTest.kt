@@ -28,6 +28,9 @@ internal data class Call(
     val duration: Long = 30,
     val cachedName: String? = null,
     val modified: Long = date,
+    // Zero means "let the provider assign one", which it does by position, the
+    // way an insert would. A test that cares about ids sets them itself.
+    val id: Long = 0,
 )
 
 internal class FakeCallLogProvider : ContentProvider() {
@@ -42,14 +45,47 @@ internal class FakeCallLogProvider : ContentProvider() {
     ): Cursor? {
         lastSelection = selection
         if (returnsNull) return null
-        val since = selectionArgs?.firstOrNull()?.toLong() ?: 0
-        val cursor = MatrixCursor(projection ?: emptyArray())
-        calls.filter { it.modified > since }.sortedBy { it.modified }.forEach {
-            cursor.addRow(
-                arrayOf<Any?>(it.number, it.type, it.date, it.duration, it.cachedName, it.modified),
-            )
+
+        val argument = selectionArgs?.firstOrNull()?.toLong() ?: 0
+        var rows = withIds().filter { row ->
+            when {
+                selection == null -> true
+                selection.startsWith(CallLog.Calls._ID) -> row.id > argument
+                selection.startsWith(CallLog.Calls.LAST_MODIFIED) -> row.modified <= argument
+                else -> true
+            }
+        }
+        rows = if (sortOrder?.contains("DESC") == true) {
+            rows.sortedByDescending { it.id }
+        } else {
+            rows.sortedBy { it.id }
+        }
+        uri.getQueryParameter(CallLog.Calls.LIMIT_PARAM_KEY)?.toIntOrNull()?.let {
+            rows = rows.take(it)
+        }
+
+        val columns = projection ?: emptyArray()
+        val cursor = MatrixCursor(columns)
+        rows.forEach { row ->
+            val values: List<Any?> = columns.map { column ->
+                when (column) {
+                    CallLog.Calls._ID -> row.id
+                    CallLog.Calls.NUMBER -> row.number
+                    CallLog.Calls.TYPE -> row.type
+                    CallLog.Calls.DATE -> row.date
+                    CallLog.Calls.DURATION -> row.duration
+                    CallLog.Calls.CACHED_NAME -> row.cachedName
+                    CallLog.Calls.LAST_MODIFIED -> row.modified
+                    else -> null
+                }
+            }
+            cursor.addRow(values)
         }
         return cursor
+    }
+
+    private fun withIds(): List<Call> = calls.mapIndexed { index, call ->
+        if (call.id == 0L) call.copy(id = index + 1L) else call
     }
 
     override fun getType(uri: Uri): String? = null
@@ -123,7 +159,7 @@ class CallLogReaderTest {
             Call(number = "+3", date = 20),
         )
 
-        assertEquals(30, reader().readSince(0).cursor)
+        assertEquals(3, reader().readSince(0).cursor)
     }
 
     @Test
@@ -138,13 +174,13 @@ class CallLogReaderTest {
             Call(number = "+new", date = 20),
         )
 
-        val batch = reader().readSince(10)
+        val batch = reader().readSince(1)
 
         assertEquals(
             listOf("+new"),
             payloadsOf(batch).map { it.getValue("number").jsonPrimitive.content },
         )
-        assertEquals("${CallLog.Calls.LAST_MODIFIED} > ?", FakeCallLogProvider.lastSelection)
+        assertEquals("${CallLog.Calls._ID} > ?", FakeCallLogProvider.lastSelection)
     }
 
     @Test
@@ -157,7 +193,7 @@ class CallLogReaderTest {
         val batch = reader().readSince(0)
 
         assertEquals(0, batch.entries.size)
-        assertEquals(20, batch.cursor)
+        assertEquals(2, batch.cursor)
     }
 
     @Test
@@ -181,8 +217,11 @@ class CallLogReaderTest {
         assertEquals(250, numbers.toSet().size)
     }
 
+    // The rule this replaces let a batch overrun its limit to avoid cutting
+    // through rows that shared a timestamp, because a cursor set mid-run would
+    // skip the rest of it. Ids do not tie, so the limit is now exactly a limit.
     @Test
-    fun `a batch is never cut through calls sharing a millisecond`() {
+    fun `a batch stops at its limit, since ids cannot tie across the boundary`() {
         FakeCallLogProvider.calls = listOf(
             Call(number = "+1", date = 10),
             Call(number = "+2", date = 20),
@@ -193,8 +232,9 @@ class CallLogReaderTest {
         val first = reader().readSince(0, limit = 2)
         val second = reader().readSince(first.cursor, limit = 2)
 
-        assertEquals(4, first.entries.size)
-        assertEquals(0, second.entries.size)
+        assertEquals(2, first.entries.size)
+        assertEquals(2, second.entries.size)
+        assertEquals(4, second.cursor)
     }
 
     @Test
@@ -205,6 +245,73 @@ class CallLogReaderTest {
 
         assertEquals(0, batch.entries.size)
         assertEquals(77, batch.cursor)
+    }
+
+    // Proven against the LAST_MODIFIED cursor before this change: it read
+    // nothing at all, for ever, and the worker reported success.
+    @Test
+    fun `rows the provider never stamped are still read`() {
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+52migrated", date = 1_000, modified = 0),
+            Call(number = "+52alsomigrated", date = 2_000, modified = 0),
+        )
+
+        val batch = reader().readSince(0)
+
+        assertEquals(2, batch.entries.size)
+        assertEquals(2, batch.cursor)
+    }
+
+    // Proven against the LAST_MODIFIED cursor before this change: the call
+    // stamped after the correction landed below the cursor and was lost.
+    @Test
+    fun `a call stamped after the clock stepped backwards is still read`() {
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+52before", date = 5_000, modified = 5_000),
+        )
+        val first = reader().readSince(0)
+
+        FakeCallLogProvider.calls = FakeCallLogProvider.calls +
+            Call(number = "+52after", date = 4_000, modified = 4_000)
+
+        val second = reader().readSince(first.cursor)
+
+        assertEquals(
+            listOf("+52after"),
+            payloadsOf(second).map { it.getValue("number").jsonPrimitive.content },
+        )
+    }
+
+    @Test
+    fun `the id cursor is carried across from the moment the old one reached`() {
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+52sent", date = 1_000, modified = 1_000),
+            Call(number = "+52alsosent", date = 2_000, modified = 2_000),
+            Call(number = "+52unsent", date = 3_000, modified = 3_000),
+        )
+
+        assertEquals(2, reader().idAt(2_000))
+    }
+
+    @Test
+    fun `an untouched timestamp cursor carries across to the beginning`() {
+        FakeCallLogProvider.calls = listOf(Call(number = "+52", date = 1_000))
+
+        assertEquals(0, reader().idAt(0))
+    }
+
+    @Test
+    fun `the newest id is what says whether the log was replaced`() {
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+1", date = 10),
+            Call(number = "+2", date = 20),
+        )
+
+        assertEquals(2L, reader().newestId())
+
+        FakeCallLogProvider.calls = emptyList()
+
+        assertNull(reader().newestId())
     }
 
     private companion object {
@@ -263,7 +370,7 @@ class CallLogReaderTest {
 
         assertTrue("a filtered row is still read work", batch.moreWaiting)
         assertEquals(0, batch.entries.size)
-        assertEquals(1_004L, batch.cursor)
+        assertEquals(5L, batch.cursor)
     }
 }
 
@@ -301,6 +408,8 @@ class CallLogCursorTest {
         val payload = Json.parseToJsonElement(second.entries.single().payload).jsonObject
         assertEquals("+A", payload.getValue("number").jsonPrimitive.content)
         assertEquals(100, payload.getValue("timestamp").jsonPrimitive.content.toLong())
-        assertEquals(700, second.cursor)
+        // The cursor is the row's id now, not the moment it was stamped. What
+        // this test pins is unchanged: the late row is read on the next pass.
+        assertEquals(2, second.cursor)
     }
 }

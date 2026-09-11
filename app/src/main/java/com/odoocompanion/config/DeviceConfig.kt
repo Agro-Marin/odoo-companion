@@ -259,6 +259,21 @@ class DeviceConfig(
 
     suspend fun callLogCursor(): Long = store.data.first()[CALL_LOG_CURSOR] ?: 0L
 
+    // Null until an id cursor has been written. The timestamp cursor's key is
+    // left alone rather than reinterpreted: its value is an epoch in the
+    // billions, and read as an id it would match no row ever again.
+    suspend fun callLogIdCursor(): Long? = store.data.first()[CALL_LOG_ID_CURSOR]
+
+    suspend fun setCallLogIdCursor(value: Long) {
+        store.edit { prefs -> prefs[CALL_LOG_ID_CURSOR] = value }
+    }
+
+    // Absent is not the same as zero here: absent is what a handset upgrading
+    // from a build that cursored on a timestamp looks like.
+    internal suspend fun clearCallLogIdCursor() {
+        store.edit { prefs -> prefs.remove(CALL_LOG_ID_CURSOR) }
+    }
+
     suspend fun setCallLogCursor(value: Long) {
         store.edit { prefs -> prefs[CALL_LOG_CURSOR] = value }
     }
@@ -297,6 +312,7 @@ class DeviceConfig(
         private val LAST_UPLOAD_ERROR = stringPreferencesKey("last_upload_error")
         private val LAST_BUILD = longPreferencesKey("last_build")
         private val CALL_LOG_CURSOR = longPreferencesKey("call_log_cursor")
+        private val CALL_LOG_ID_CURSOR = longPreferencesKey("call_log_id_cursor")
         private val RECORDING_CURSOR = longPreferencesKey("recording_cursor")
     }
 }
