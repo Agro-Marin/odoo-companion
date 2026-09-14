@@ -38,7 +38,7 @@ where the data arrives.
 
 ## Build / test / lint
 
-Requires JDK 21+ (CI builds on the 25 pinned in `tools/versions.env`) and Android
+Requires JDK 25, the version pinned in `tools/versions.env`, and Android
 SDK 37; `local.properties` must point at the SDK
 (`sdk.dir=…`, git-ignored).
 
