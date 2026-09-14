@@ -14,7 +14,7 @@ to whatever Odoo instance those point at.
 |-------|---------|
 | Odoo | 19.0 with the `remote_mobile` module installed |
 | Android | 10 (API 29) minimum, targets API 36 |
-| Build | JDK 21+ (CI builds on 25), Android SDK 37, Gradle 9.7.1 |
+| Build | JDK 25 (the version CI builds on), Android SDK 37, Gradle 9.7.1 |
 
 ## Endpoints used
 
