@@ -66,6 +66,26 @@ jobs:
           ./gradlew assembleRelease
           tools/check-release-wire.sh
 
+      # proguard-rules.pro keeps SourceFile and LineNumberTable precisely so a
+      # crash off a fleet handset names a file and a line -- but only through
+      # the mapping.txt of the build that produced the APK, and every run was
+      # discarding it. A trace arriving next month against a build whose
+      # mapping no longer exists is unreadable, which is the outcome the keep
+      # rules were written to avoid. The two are uploaded together, and only
+      # together, because either one alone diagnoses nothing.
+      - name: Keep the release build and the mapping that decodes its traces
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ github.sha }}
+          # The APK is unsigned: this repository declares no signing config, so
+          # what is kept here is the artifact a signing step would consume, not
+          # something a handset can install.
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          retention-days: 90
+
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
