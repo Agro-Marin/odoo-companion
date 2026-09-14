@@ -19,39 +19,82 @@ class CallLogReader(
     private val resolver: ContentResolver,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    fun readSince(since: Long, limit: Int = DEFAULT_LIMIT): CallLogBatch {
+    // The cursor is a row id, not a moment. Every timestamp this table carries
+    // comes from a clock the app does not control, and a row stamped at or
+    // below the cursor is invisible for ever: DATE lost a call that started
+    // before a shorter one and was written after it, and LAST_MODIFIED, which
+    // fixed that, still loses one stamped after the clock is corrected
+    // backwards and reads none at all from a provider that leaves the column
+    // at its default. An id is assigned by the insert itself.
+    fun readSince(sinceId: Long, limit: Int = DEFAULT_LIMIT): CallLogBatch {
         val cursor = resolver.query(
             CallLog.Calls.CONTENT_URI,
             PROJECTION,
-            "${CallLog.Calls.LAST_MODIFIED} > ?",
-            arrayOf(since.toString()),
-            "${CallLog.Calls.LAST_MODIFIED} ASC",
-        ) ?: return CallLogBatch(emptyList(), since)
-        return cursor.use { read(it, since, limit) }
+            "${CallLog.Calls._ID} > ?",
+            arrayOf(sinceId.toString()),
+            "${CallLog.Calls._ID} ASC",
+        ) ?: return CallLogBatch(emptyList(), sinceId)
+        return cursor.use { read(it, sinceId, limit) }
     }
 
-    private fun read(cursor: Cursor, since: Long, limit: Int): CallLogBatch {
+    // The id of the newest row the provider holds, or null when it holds none.
+    // Read only to answer a question the batch cannot: whether a pass that
+    // returned nothing did so because there is nothing new, or because the call
+    // log was cleared and its ids restarted below the cursor.
+    fun newestId(): Long? {
+        val cursor = resolver.query(
+            CallLog.Calls.CONTENT_URI.buildUpon()
+                .appendQueryParameter(CallLog.Calls.LIMIT_PARAM_KEY, "1")
+                .build(),
+            arrayOf(CallLog.Calls._ID),
+            null,
+            null,
+            "${CallLog.Calls._ID} DESC",
+        ) ?: return null
+        return cursor.use { if (it.moveToFirst()) it.getLong(0) else null }
+    }
+
+    // The id to start from when the id cursor has never been written, given
+    // whatever the timestamp cursor had reached. Rows at or below the moment
+    // already delivered are skipped; everything after it is read again and
+    // comes back as a duplicate, which is a delivery. A stored value left by a
+    // build that cursored on DATE rather than LAST_MODIFIED matches fewer rows
+    // and so seeds lower, which re-reads more -- the safe direction.
+    fun idAt(moment: Long): Long {
+        if (moment <= 0) return 0
+        val cursor = resolver.query(
+            CallLog.Calls.CONTENT_URI.buildUpon()
+                .appendQueryParameter(CallLog.Calls.LIMIT_PARAM_KEY, "1")
+                .build(),
+            arrayOf(CallLog.Calls._ID),
+            "${CallLog.Calls.LAST_MODIFIED} <= ?",
+            arrayOf(moment.toString()),
+            "${CallLog.Calls._ID} DESC",
+        ) ?: return 0
+        return cursor.use { if (it.moveToFirst()) it.getLong(0) else 0 }
+    }
+
+    private fun read(cursor: Cursor, sinceId: Long, limit: Int): CallLogBatch {
+        val idIndex = cursor.getColumnIndexOrThrow(CallLog.Calls._ID)
         val numberIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
         val typeIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.TYPE)
         val dateIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DATE)
         val durationIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION)
         val nameIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)
-        val modifiedIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.LAST_MODIFIED)
 
         val entries = mutableListOf<OutboxEntry>()
-        var reached = since
+        var reached = sinceId
         var scanned = 0
         var stoppedAtLimit = false
         while (cursor.moveToNext()) {
-            val modified = cursor.getLong(modifiedIndex)
-
-            if (scanned >= limit && modified != reached) {
+            // Ids are unique, so unlike a timestamp there is no run of rows
+            // sharing one value that a batch boundary could cut through.
+            if (scanned >= limit) {
                 stoppedAtLimit = true
                 break
             }
             scanned++
-            reached = modified
-            val date = cursor.getLong(dateIndex)
+            reached = cursor.getLong(idIndex)
             val number = cursor.getString(numberIndex).orEmpty()
             if (number.isBlank()) continue
             entries += OutboxEntry(
@@ -60,7 +103,7 @@ class CallLogReader(
                     CallRecord(
                         number = number,
                         direction = CallDirection.of(cursor.getInt(typeIndex)),
-                        timestamp = date,
+                        timestamp = cursor.getLong(dateIndex),
                         duration = cursor.getLong(durationIndex),
                         contactName = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() },
                     ),
@@ -75,12 +118,12 @@ class CallLogReader(
         const val DEFAULT_LIMIT = 1_000
 
         private val PROJECTION = arrayOf(
+            CallLog.Calls._ID,
             CallLog.Calls.NUMBER,
             CallLog.Calls.TYPE,
             CallLog.Calls.DATE,
             CallLog.Calls.DURATION,
             CallLog.Calls.CACHED_NAME,
-            CallLog.Calls.LAST_MODIFIED,
         )
     }
 }

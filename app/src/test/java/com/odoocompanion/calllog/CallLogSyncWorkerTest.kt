@@ -61,6 +61,7 @@ class CallLogSyncWorkerTest {
     private suspend fun reset() {
         app.config.clearEnrollment()
         app.config.setCallLogCursor(0)
+        app.config.setCallLogIdCursor(0)
         app.config.setFeature(callLog = true)
         val dao = app.database.outbox()
         dao.delete(dao.take(OutboxKind.CALL_LOG, 1000).map { it.id })
@@ -85,7 +86,7 @@ class CallLogSyncWorkerTest {
 
         assertEquals(ListenableWorker.Result.success(), run())
         assertEquals(0, app.database.outbox().countOf(OutboxKind.CALL_LOG))
-        assertEquals(0, app.config.callLogCursor())
+        assertEquals(0L, app.config.callLogIdCursor())
     }
 
     @Test
@@ -113,7 +114,7 @@ class CallLogSyncWorkerTest {
         assertEquals(ListenableWorker.Result.success(), run())
 
         assertEquals(2, app.database.outbox().countOf(OutboxKind.CALL_LOG))
-        assertEquals(20, app.config.callLogCursor())
+        assertEquals(2L, app.config.callLogIdCursor())
     }
 
     @Test
@@ -145,6 +146,48 @@ class CallLogSyncWorkerTest {
     }
 
     @Test
+    fun `a call log cleared on the handset is read again from the beginning`() = runTest {
+        reset()
+        enroll()
+        grantCallLog()
+        FakeCallLogProvider.calls = (1..4).map { Call(number = "+5255$it", date = it.toLong()) }
+        run()
+        assertEquals(4L, app.config.callLogIdCursor())
+
+        // Cleared and used again: ids restart below the cursor, and reading on
+        // from it would return nothing for ever while reporting success.
+        FakeCallLogProvider.calls = listOf(Call(number = "+52fresh", date = 99, id = 1))
+        val dao = app.database.outbox()
+        dao.delete(dao.take(OutboxKind.CALL_LOG, 1000).map { it.id })
+
+        assertEquals(ListenableWorker.Result.success(), run())
+
+        assertEquals(1, app.database.outbox().countOf(OutboxKind.CALL_LOG))
+        assertEquals(1L, app.config.callLogIdCursor())
+    }
+
+    @Test
+    fun `the first pass on this build carries the old cursor across`() = runTest {
+        reset()
+        enroll()
+        grantCallLog()
+        // What the previous build left behind: a moment, not an id, and no id
+        // cursor at all.
+        app.config.setCallLogCursor(2_000)
+        app.config.clearCallLogIdCursor()
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+52sent", date = 1_000, modified = 1_000),
+            Call(number = "+52alsosent", date = 2_000, modified = 2_000),
+            Call(number = "+52unsent", date = 3_000, modified = 3_000),
+        )
+
+        assertEquals(ListenableWorker.Result.success(), run())
+
+        assertEquals(1, app.database.outbox().countOf(OutboxKind.CALL_LOG))
+        assertEquals(3L, app.config.callLogIdCursor())
+    }
+
+    @Test
     fun `an unavailable provider leaves the cursor alone`() = runTest {
         reset()
         enroll()
@@ -152,7 +195,7 @@ class CallLogSyncWorkerTest {
         FakeCallLogProvider.returnsNull = true
 
         assertEquals(ListenableWorker.Result.success(), run())
-        assertEquals(0, app.config.callLogCursor())
+        assertEquals(0L, app.config.callLogIdCursor())
     }
 
     @Test
