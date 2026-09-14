@@ -16,6 +16,10 @@ data class ManagedValues(
     val uploadWindowSeconds: Long? = null,
     val minMoveMetres: Long? = null,
     val policyPresent: Boolean = false,
+    // The restriction keys the bundle actually carried, whatever their values
+    // turned out to be worth. A key that arrived unusable is still a key the
+    // administrator is managing; a key that never arrived is not.
+    val presentKeys: Set<String> = emptySet(),
 ) {
     val isEmpty: Boolean
         get() = !policyPresent &&
@@ -67,6 +71,7 @@ object ManagedConfig {
                 maximum = MAX_MIN_MOVE_METRES,
             ),
             policyPresent = true,
+            presentKeys = MANAGED_KEYS.filterTo(mutableSetOf(), bundle::containsKey),
         )
     }
 
@@ -123,6 +128,20 @@ object ManagedConfig {
         }
         return clamped
     }
+
+    // Every key this app reads, in one place, so "was it in the bundle" can be
+    // asked without asking it nine times.
+    val MANAGED_KEYS = setOf(
+        "base_url",
+        "identifier",
+        "token",
+        "call_log_enabled",
+        "recordings_enabled",
+        "wifi_only_uploads",
+        "upload_window_seconds",
+        "location_interval_seconds",
+        "min_move_metres",
+    )
 
     private const val TAG = "ManagedConfig"
 }

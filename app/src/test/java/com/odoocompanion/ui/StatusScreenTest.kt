@@ -2,6 +2,7 @@ package com.odoocompanion.ui
 
 import android.Manifest
 import android.content.Context
+import android.os.Bundle
 import android.os.PowerManager
 import android.view.View
 import android.widget.TextView
@@ -11,6 +12,7 @@ import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
+import com.odoocompanion.config.ManagedConfig
 import com.odoocompanion.config.ManagedValues
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
@@ -175,9 +177,36 @@ class StatusScreenTest {
         assertFalse(shown, text(R.string.status_undeliverable_hint) in shown)
     }
 
+    private fun policy(vararg entries: Pair<String, Any>) = ManagedConfig.fromBundle(
+        Bundle().apply {
+            entries.forEach { (key, value) ->
+                when (value) {
+                    is String -> putString(key, value)
+                    is Boolean -> putBoolean(key, value)
+                    is Int -> putInt(key, value)
+                    else -> error("unsupported restriction type for $key")
+                }
+            }
+        },
+    )
+
+    // Every key, which is what a console that has actually been filled in
+    // sends. Save goes with them: there is nothing left on the form to save.
     @Test
-    fun `a managed device has its form locked, including the interval`() = runTest {
-        app.config.applyManaged(ManagedValues(identifier = "phone-01"))
+    fun `a device managed in full has its form locked, including the interval`() = runTest {
+        app.config.applyManaged(
+            policy(
+                "base_url" to "https://odoo.example.com",
+                "identifier" to "phone-01",
+                "token" to "token",
+                "location_interval_seconds" to 120,
+                "upload_window_seconds" to 60,
+                "min_move_metres" to 25,
+                "call_log_enabled" to true,
+                "recordings_enabled" to false,
+                "wifi_only_uploads" to true,
+            ),
+        )
 
         val activity = open()
 
@@ -186,6 +215,62 @@ class StatusScreenTest {
         assertFalse(activity.findViewById<View>(R.id.uploadWindow).isEnabled)
 
         assertTrue(activity.findViewById<View>(R.id.syncNow).isEnabled)
+    }
+
+    // Save is the form's button, not any one field's: while a single field the
+    // policy left alone is still editable, there is something to save.
+    @Test
+    fun `a partly managed form can still be saved`() = runTest {
+        app.config.applyManaged(
+            policy(
+                "base_url" to "https://odoo.example.com",
+                "identifier" to "phone-01",
+                "token" to "token",
+            ),
+        )
+
+        val activity = open()
+
+        assertFalse(activity.findViewById<View>(R.id.baseUrl).isEnabled)
+        assertTrue(activity.findViewById<View>(R.id.wifiOnly).isEnabled)
+        assertTrue(activity.findViewById<View>(R.id.save).isEnabled)
+    }
+
+    // The case this whole distinction exists for: a console that publishes the
+    // declared defaults of app_restrictions.xml and nothing an administrator
+    // typed. The device is managed -- a policy did arrive -- but the fields it
+    // never mentioned stay usable, so the handset can still be enrolled.
+    @Test
+    fun `a policy that never mentioned enrolment leaves those fields usable`() = runTest {
+        app.config.applyManaged(
+            policy(
+                "call_log_enabled" to true,
+                "recordings_enabled" to false,
+                "wifi_only_uploads" to false,
+            ),
+        )
+
+        val activity = open()
+
+        assertTrue(activity.findViewById<View>(R.id.baseUrl).isEnabled)
+        assertTrue(activity.findViewById<View>(R.id.identifier).isEnabled)
+        assertTrue(activity.findViewById<View>(R.id.token).isEnabled)
+        assertTrue(activity.findViewById<View>(R.id.save).isEnabled)
+        // What the policy did mention is still governed by it.
+        assertFalse(activity.findViewById<View>(R.id.callLogEnabled).isEnabled)
+    }
+
+    // A key that arrived and turned out unusable is still a key the
+    // administrator is setting, so it stays locked. This is the case that
+    // policyPresent was added for, and it must keep behaving that way.
+    @Test
+    fun `a base URL the policy got wrong still locks the base URL`() = runTest {
+        app.config.applyManaged(policy("base_url" to "not a url at all"))
+
+        val activity = open()
+
+        assertFalse(activity.findViewById<View>(R.id.baseUrl).isEnabled)
+        assertTrue(activity.findViewById<View>(R.id.identifier).isEnabled)
     }
 
     @Test

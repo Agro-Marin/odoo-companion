@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -29,6 +30,10 @@ data class Settings(
     val callLogEnabled: Boolean = true,
     val recordingsEnabled: Boolean = false,
     val managed: Boolean = false,
+    // Which fields the policy is actually managing. Being managed is one
+    // question -- is there a policy at all -- and which fields it governs is
+    // another, and the form needs the second one.
+    val managedKeys: Set<String> = emptySet(),
     val maxPayloadBytes: Long = 0,
     val maxPayloadLearnedAt: Long = 0,
     val serverNamesItself: Boolean = false,
@@ -124,6 +129,7 @@ class DeviceConfig(
         callLogEnabled = this[CALL_LOG_ENABLED] ?: true,
         recordingsEnabled = this[RECORDINGS_ENABLED] ?: false,
         managed = this[MANAGED] ?: false,
+        managedKeys = this[MANAGED_KEYS] ?: emptySet(),
         maxPayloadBytes = this[MAX_PAYLOAD] ?: 0,
         maxPayloadLearnedAt = this[MAX_PAYLOAD_LEARNED_AT] ?: 0,
         serverNamesItself = this[SERVER_NAMES_ITSELF] ?: false,
@@ -157,6 +163,7 @@ class DeviceConfig(
             val before = prefs.toSettings().managedFacet()
 
             prefs[MANAGED] = !values.isEmpty
+            prefs[MANAGED_KEYS] = values.presentKeys
             values.baseUrl?.let {
                 if (prefs[BASE_URL] != it) prefs.remove(SERVER_NAMES_ITSELF)
                 prefs[BASE_URL] = it
@@ -177,6 +184,7 @@ class DeviceConfig(
 
     private data class ManagedFacet(
         val managed: Boolean,
+        val managedKeys: Set<String>,
         val baseUrl: String,
         val identifier: String,
         val token: String,
@@ -190,6 +198,7 @@ class DeviceConfig(
 
     private fun Settings.managedFacet() = ManagedFacet(
         managed = managed,
+        managedKeys = managedKeys,
         baseUrl = baseUrl,
         identifier = identifier,
         token = token,
@@ -320,6 +329,7 @@ class DeviceConfig(
         private val CALL_LOG_ENABLED = booleanPreferencesKey("call_log_enabled")
         private val RECORDINGS_ENABLED = booleanPreferencesKey("recordings_enabled")
         private val MANAGED = booleanPreferencesKey("managed_by_mdm")
+        private val MANAGED_KEYS = stringSetPreferencesKey("managed_keys")
         private val MAX_PAYLOAD = longPreferencesKey("max_payload_bytes")
         private val MAX_PAYLOAD_LEARNED_AT = longPreferencesKey("max_payload_learned_at")
         private val SERVER_NAMES_ITSELF = booleanPreferencesKey("server_names_itself")
