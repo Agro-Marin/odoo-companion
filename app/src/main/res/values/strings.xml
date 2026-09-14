@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Odoo Companion</string>
+    <!-- The product name, the same in every locale: no MissingTranslation. -->
+    <string name="app_name" translatable="false">Odoo Companion</string>
     <string name="config_server">Odoo base URL</string>
     <string name="config_identifier">Device identifier</string>
     <string name="config_token">Bearer token</string>
