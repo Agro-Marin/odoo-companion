@@ -1,9 +1,21 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+}
+
+// The signing material for a fleet build, read from a file that is never
+// committed. Absent -- on CI, and on any checkout that has not been given the
+// keystore -- the release build stays unsigned and behaves exactly as it did
+// before this existed, which is what keeps the gate honest: a missing keystore
+// must not turn into a green build that quietly ships an unsigned APK under a
+// name that suggests otherwise.
+val signingProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use(::load)
 }
 
 android {
@@ -27,8 +39,29 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            // storeFile decides whether this config is used at all. A file
+            // that names a store but omits a password therefore fails in the
+            // signing task, loudly, rather than falling back to an unsigned
+            // build that looks like a successful one.
+            signingProperties.getProperty("storeFile")?.let { path ->
+                storeFile = rootProject.file(path)
+                storePassword = signingProperties.getProperty("storePassword")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Null when no keystore was supplied: an unsigned release, same as
+            // before. AGP names the output app-release-unsigned.apk in that
+            // case, so which one a build produced is visible from the filename.
+            signingConfig = signingConfigs.getByName("release").takeIf {
+                it.storeFile != null
+            }
             isMinifyEnabled = true
             // R8 was shrinking code while every resource shipped regardless. The
             // APK reaches handsets over MDM, one full download each time, so the
