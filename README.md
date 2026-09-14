@@ -315,8 +315,34 @@ them.
 `adb logcat -s OdooClient LocationService CompanionApp` shows upload failures, permission
 refusals and applied managed configuration.
 
+## Before shipping a build
+
+There are no instrumented tests: the whole suite is Robolectric, which is exactly the
+wrong instrument for what this app risks — OEM dialer folders, scoped storage, a
+foreground service, and a battery killer that varies per vendor. `tools/smoke-test.sh`
+is the compensating step, and it is worth running against a real instance before any
+build reaches a handset:
+
+```bash
+tools/smoke-test.sh https://odoo.example.com phone-01 <bearer-token>
+```
+
+It replays the exact payloads the app sends — a two-fix location batch, a call log
+entry, a recording — and prints the status code for each. What it proves is the half
+the unit tests cannot: that the device exists in Odoo, that the token authenticates,
+that the category grants the 50 MB cap, and that the three routes are reachable
+through whatever proxy sits in front. Use a device record created for testing, since
+every row it posts is stored.
+
 ## Known constraints
 
+- **An uploaded recording is deleted from the phone.** Once the endpoint accepts it,
+  the drain removes the audio file from the OEM dialer's folder, and a row purged
+  after 90 days undeliverable takes its file too. This is deliberate — a fleet
+  handset would otherwise fill its storage with audio already safe in Odoo — but it
+  means the phone is not a second copy, and a recording lost between the dialer
+  writing it and Odoo storing it is lost outright. Anyone who expects the dialer's
+  own folder to keep a history needs to know this before the app is deployed.
 - **Recording capture is not something this app can do.** Android removed the
   voice-call audio source in 10 and the accessibility workaround in 11; a Device Owner
   privilege does not restore it. `RecordingHarvestWorker` only picks up files an OEM
