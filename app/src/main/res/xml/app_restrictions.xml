@@ -51,6 +51,13 @@
         android:defaultValue="180" />
 
     <restriction
+        android:key="min_move_metres"
+        android:restrictionType="integer"
+        android:title="@string/restriction_min_move_title"
+        android:description="@string/restriction_min_move_description"
+        android:defaultValue="0" />
+
+    <restriction
         android:key="location_interval_seconds"
         android:restrictionType="integer"
         android:title="@string/restriction_interval_title"

@@ -51,6 +51,8 @@
     <string name="restriction_wifi_only_description">Hold uploads until an unmetered network is available</string>
     <string name="restriction_upload_window_title">Upload window (seconds)</string>
     <string name="restriction_upload_window_description">How long a position may wait to be sent with others. Higher means fewer uploads and less battery; 0 sends every position immediately.</string>
+    <string name="restriction_min_move_title">Minimum movement (metres)</string>
+    <string name="restriction_min_move_description">Skip a position that is closer than this to the last one sent. 0 sends every position. A stationary phone is still heard from every 10 minutes, so it stays distinguishable from one that stopped reporting.</string>
     <string name="restriction_interval_title">Location interval (seconds)</string>
     <string name="restriction_interval_description">Seconds between position reports</string>
 </resources>

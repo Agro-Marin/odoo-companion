@@ -24,6 +24,7 @@ data class Settings(
     val token: String = "",
     val locationIntervalSeconds: Long = DEFAULT_LOCATION_INTERVAL_SECONDS,
     val uploadWindowSeconds: Long = DEFAULT_UPLOAD_WINDOW_SECONDS,
+    val minMoveMetres: Long = DEFAULT_MIN_MOVE_METRES,
     val wifiOnlyUploads: Boolean = false,
     val callLogEnabled: Boolean = true,
     val recordingsEnabled: Boolean = false,
@@ -41,7 +42,8 @@ data class Settings(
     override fun toString(): String =
         "Settings(baseUrl=$baseUrl, identifier=$identifier, token=${token.redacted()}, " +
             "locationIntervalSeconds=$locationIntervalSeconds, " +
-            "uploadWindowSeconds=$uploadWindowSeconds, wifiOnlyUploads=$wifiOnlyUploads, " +
+            "uploadWindowSeconds=$uploadWindowSeconds, minMoveMetres=$minMoveMetres, " +
+            "wifiOnlyUploads=$wifiOnlyUploads, " +
             "callLogEnabled=$callLogEnabled, recordingsEnabled=$recordingsEnabled, " +
             "managed=$managed, maxPayloadBytes=$maxPayloadBytes, " +
             "serverNamesItself=$serverNamesItself, " +
@@ -73,6 +75,15 @@ const val PAYLOAD_LIMIT_TTL_MILLIS = 24L * 60 * 60 * 1000
 
 const val MIN_LOCATION_INTERVAL_SECONDS = 15L
 const val MAX_LOCATION_INTERVAL_SECONDS = 24L * 60 * 60
+
+// Zero keeps every fix, which is what this app has always done. It is the
+// default because how finely a fleet is tracked is a decision for whoever runs
+// the fleet, not something a release should change under them.
+const val DEFAULT_MIN_MOVE_METRES = 0L
+
+// Past this a threshold stops filtering noise and starts dropping journeys: a
+// car covers it in a couple of seconds.
+const val MAX_MIN_MOVE_METRES = 500L
 
 const val DEFAULT_UPLOAD_WINDOW_SECONDS = 180L
 const val MAX_UPLOAD_WINDOW_SECONDS = 3600L
@@ -108,6 +119,7 @@ class DeviceConfig(
         token = this[TOKEN].orEmpty(),
         locationIntervalSeconds = this[LOCATION_INTERVAL] ?: DEFAULT_LOCATION_INTERVAL_SECONDS,
         uploadWindowSeconds = this[UPLOAD_WINDOW] ?: DEFAULT_UPLOAD_WINDOW_SECONDS,
+        minMoveMetres = this[MIN_MOVE] ?: DEFAULT_MIN_MOVE_METRES,
         wifiOnlyUploads = this[WIFI_ONLY] ?: false,
         callLogEnabled = this[CALL_LOG_ENABLED] ?: true,
         recordingsEnabled = this[RECORDINGS_ENABLED] ?: false,
@@ -156,6 +168,7 @@ class DeviceConfig(
             values.wifiOnlyUploads?.let { prefs[WIFI_ONLY] = it }
 
             values.uploadWindowSeconds?.let { prefs[UPLOAD_WINDOW] = it }
+            values.minMoveMetres?.let { prefs[MIN_MOVE] = it }
             values.locationIntervalSeconds?.let { prefs[LOCATION_INTERVAL] = it }
             changed = prefs.toSettings().managedFacet() != before
         }
@@ -172,6 +185,7 @@ class DeviceConfig(
         val wifiOnlyUploads: Boolean,
         val uploadWindowSeconds: Long,
         val locationIntervalSeconds: Long,
+        val minMoveMetres: Long,
     )
 
     private fun Settings.managedFacet() = ManagedFacet(
@@ -184,6 +198,7 @@ class DeviceConfig(
         wifiOnlyUploads = wifiOnlyUploads,
         uploadWindowSeconds = uploadWindowSeconds,
         locationIntervalSeconds = locationIntervalSeconds,
+        minMoveMetres = minMoveMetres,
     )
 
     internal suspend fun clearEnrollment() {
@@ -300,6 +315,7 @@ class DeviceConfig(
         private val TOKEN = stringPreferencesKey("token")
         private val LOCATION_INTERVAL = longPreferencesKey("location_interval_seconds")
         private val UPLOAD_WINDOW = longPreferencesKey("upload_window_seconds")
+        private val MIN_MOVE = longPreferencesKey("min_move_metres")
         private val WIFI_ONLY = booleanPreferencesKey("wifi_only_uploads")
         private val CALL_LOG_ENABLED = booleanPreferencesKey("call_log_enabled")
         private val RECORDINGS_ENABLED = booleanPreferencesKey("recordings_enabled")

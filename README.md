@@ -239,6 +239,7 @@ push enrollment per device:
 | `wifi_only_uploads` | bool | hold uploads for an unmetered network |
 | `location_interval_seconds` | integer | seconds between position reports, clamped to 15 s … 24 h; it is also the *fastest* rate accepted, so the figure is the rate |
 | `upload_window_seconds` | integer | how long a position may wait to travel with others; 0 sends each one immediately. Clamped to 0 … 1 h |
+| `min_move_metres` | integer | skip a fix closer than this to the last one kept; **0, the default, keeps every fix**. Clamped to 0 … 500 m |
 
 The app applies them at launch and whenever the EMM changes them, starts reporting
 without anyone opening it, and disables the on-device form so a provisioned phone
@@ -263,6 +264,30 @@ through a managed configuration. Both are clamped to the same bounds an MDM push
 is, and the form shows the stored value back rather than what was typed. Leaving
 either blank keeps whatever is stored. "Sync now" collects from every producer
 and then uploads.
+
+## A phone that is standing still
+
+A parked phone reports as often as a moving one. At the default interval that is
+**1,440 fixes a day** saying the same thing, and each is a row in the outbox, a row in
+the upload, and a row kept in Odoo for as long as the retention allows. For a fleet that
+spends its nights parked and its days waiting at client sites, most of that is the same
+coordinate repeated.
+
+`min_move_metres` skips a fix that is closer than that to the **last fix kept** — not to
+the last one seen, so a slow drift still registers once it adds up. It is `0` by default,
+which keeps every fix and is what the app has always done: how finely a fleet is tracked
+is a decision for whoever runs the fleet, not something a release should change under
+them.
+
+**A filtered phone is not a silent one.** Whatever the threshold, a fix is kept at least
+every 10 minutes, so a device that is merely still still looks different from one that
+stopped reporting — which matters, because the status screen and `last_seen` in Odoo are
+how anyone finds out that a handset has gone quiet.
+
+What it does not buy is battery. The radio is still asked for a fix on the same interval
+at the same priority; what is saved is the row, the upload and the storage behind it. A
+starting point worth trying is **25 m**: past the jitter a stationary GPS produces, well
+inside the distance a vehicle covers between two fixes.
 
 ## HTTP vs HTTPS
 
