@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Every field is wrapped in a TextInputLayout rather than carrying a hint of
+     its own. A hint is only drawn while the field is empty, so the moment a
+     phone is enrolled the whole form turns into five unlabelled values, two of
+     them bare numbers whose unit lives only in the string the user can no
+     longer see. A floating label survives the field being filled in. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -16,45 +21,85 @@
             android:paddingBottom="16dp"
             android:textIsSelectable="true" />
 
-        <EditText
-            android:id="@+id/baseUrl"
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/baseUrlLayout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="url"
-            android:hint="@string/config_server"
-            android:inputType="textUri" />
+            android:layout_marginBottom="8dp"
+            android:hint="@string/config_server">
 
-        <EditText
-            android:id="@+id/identifier"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="username"
-            android:hint="@string/config_identifier"
-            android:inputType="text" />
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/baseUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints="url"
+                android:inputType="textUri" />
+        </com.google.android.material.textfield.TextInputLayout>
 
-        <EditText
-            android:id="@+id/token"
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/identifierLayout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="password"
-            android:hint="@string/config_token"
-            android:inputType="textPassword" />
+            android:layout_marginBottom="8dp"
+            android:hint="@string/config_identifier">
 
-        <EditText
-            android:id="@+id/locationInterval"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints=""
-            android:hint="@string/config_location_interval"
-            android:inputType="number" />
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/identifier"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints="username"
+                android:inputType="text" />
+        </com.google.android.material.textfield.TextInputLayout>
 
-        <EditText
-            android:id="@+id/uploadWindow"
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tokenLayout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints=""
-            android:hint="@string/config_upload_window"
-            android:inputType="number" />
+            android:layout_marginBottom="8dp"
+            android:hint="@string/config_token">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/token"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints="password"
+                android:inputType="textPassword" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/locationIntervalLayout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:hint="@string/config_location_interval">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/locationInterval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints=""
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/uploadWindowLayout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:hint="@string/config_upload_window">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/uploadWindow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints=""
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
 
         <CheckBox
             android:id="@+id/callLogEnabled"
