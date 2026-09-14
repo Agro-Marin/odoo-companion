@@ -12,6 +12,8 @@ import android.widget.EditText
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -49,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        keepContentOutFromUnderTheSystemBars()
 
         val app = CompanionApp.from(this)
 
@@ -128,6 +131,38 @@ class MainActivity : AppCompatActivity() {
                 requestBatteryExemption()
                 if (settings.recordingsEnabled) requestRecordingStorageAccess()
             }
+        }
+    }
+
+    // targetSdk 36 means Android draws this window edge to edge and does not
+    // ask: without this the first line of the status text sits under the clock
+    // and the battery icon, and that line is the one that says whether the
+    // phone is enrolled -- the first thing anyone reads when a phone stopped
+    // reporting.
+    private fun keepContentOutFromUnderTheSystemBars() {
+        val root = binding.root
+        // Captured once. The listener runs again on rotation and whenever the
+        // keyboard opens, and padding added to whatever is currently set would
+        // grow a little further each time.
+        val base = listOf(
+            root.paddingLeft,
+            root.paddingTop,
+            root.paddingRight,
+            root.paddingBottom,
+        )
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
+            view.setPadding(
+                base[0] + bars.left,
+                base[1] + bars.top,
+                base[2] + bars.right,
+                // The keyboard is taller than the navigation bar it covers, so
+                // the larger of the two is what keeps Save reachable while a
+                // field is being typed into.
+                base[3] + maxOf(bars.bottom, keyboard.bottom),
+            )
+            insets
         }
     }
 
