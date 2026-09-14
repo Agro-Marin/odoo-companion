@@ -63,6 +63,87 @@ class LocationQueueTest {
         }
     }
 
+    // A fix 1.11 m north of the last one: what a phone standing still produces.
+    private fun nudged(metres: Double) = LocationFix(
+        latitude = 19.4326 + metres / 111_320.0,
+        longitude = -99.1332,
+        timestamp = clock,
+    )
+
+    @Test
+    fun `with no threshold every fix is kept, exactly as before`() = runTest {
+        val queue = queue()
+
+        queue.record(listOf(nudged(0.0)), windowSeconds = 0)
+        queue.record(listOf(nudged(1.0)), windowSeconds = 0)
+
+        assertEquals(2, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
+    fun `a phone standing still stops paying for a row a minute`() = runTest {
+        val queue = queue()
+
+        queue.record(listOf(nudged(0.0)), windowSeconds = 0, minMoveMetres = 25)
+        repeat(5) { queue.record(listOf(nudged(2.0 + it)), windowSeconds = 0, minMoveMetres = 25) }
+
+        assertEquals(1, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
+    fun `a phone that moved past the threshold is kept`() = runTest {
+        val queue = queue()
+
+        queue.record(listOf(nudged(0.0)), windowSeconds = 0, minMoveMetres = 25)
+        queue.record(listOf(nudged(40.0)), windowSeconds = 0, minMoveMetres = 25)
+
+        assertEquals(2, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
+    fun `movement is measured from the last fix kept, not the last one seen`() = runTest {
+        val queue = queue()
+
+        queue.record(listOf(nudged(0.0)), windowSeconds = 0, minMoveMetres = 25)
+        // Three drifts of 10 m each: none alone clears the threshold, but they
+        // add up to 30 m from where the phone was last recorded.
+        queue.record(listOf(nudged(10.0)), windowSeconds = 0, minMoveMetres = 25)
+        queue.record(listOf(nudged(20.0)), windowSeconds = 0, minMoveMetres = 25)
+        queue.record(listOf(nudged(30.0)), windowSeconds = 0, minMoveMetres = 25)
+
+        assertEquals(2, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
+    fun `a still phone is heard from on the heartbeat, so it is not a dead one`() = runTest {
+        val queue = queue()
+        queue.record(listOf(nudged(0.0)), windowSeconds = 0, minMoveMetres = 25)
+
+        clock += LocationQueue.HEARTBEAT_MILLIS
+        queue.record(listOf(nudged(1.0)), windowSeconds = 0, minMoveMetres = 25)
+
+        assertEquals(2, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
+    fun `a batch whose every fix is filtered asks for no upload`() = runTest {
+        val queue = queue()
+        queue.record(listOf(nudged(0.0)), windowSeconds = 0, minMoveMetres = 25)
+
+        assertFalse(queue.record(listOf(nudged(1.0)), windowSeconds = 0, minMoveMetres = 25))
+    }
+
+    @Test
+    fun `the distance is real metres, not degrees`() {
+        // One degree of latitude is about 111 km anywhere on Earth.
+        val metres = LocationQueue.metresBetween(
+            LocationFix(latitude = 19.0, longitude = -99.0, timestamp = 0),
+            LocationFix(latitude = 20.0, longitude = -99.0, timestamp = 0),
+        )
+
+        assertTrue("was $metres", metres in 110_000.0..112_000.0)
+    }
+
     @Test
     fun `a fix is queued as the payload the endpoint reads`() = runTest {
         queue().record(listOf(fix()), windowSeconds = 180)

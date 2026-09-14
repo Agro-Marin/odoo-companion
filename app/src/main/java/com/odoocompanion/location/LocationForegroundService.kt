@@ -43,7 +43,7 @@ class LocationForegroundService : LifecycleService() {
             if (fixes.isEmpty()) return
             lifecycleScope.launch {
                 val settings = app.config.current()
-                val due = queue.record(fixes, settings.uploadWindowSeconds)
+                val due = queue.record(fixes, settings.uploadWindowSeconds, settings.minMoveMetres)
                 if (due) SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
             }
         }

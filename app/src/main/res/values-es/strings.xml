@@ -49,6 +49,8 @@
     <string name="restriction_wifi_only_description">Retiene los envíos hasta que haya una red sin límite de datos</string>
     <string name="restriction_upload_window_title">Ventana de envío (segundos)</string>
     <string name="restriction_upload_window_description">Cuánto puede esperar una posición para enviarse junto con otras. Un valor más alto significa menos envíos y menos batería; 0 envía cada posición de inmediato.</string>
+    <string name="restriction_min_move_title">Movimiento mínimo (metros)</string>
+    <string name="restriction_min_move_description">Omite una posición que esté más cerca que esto de la última enviada. 0 envía todas. Un teléfono detenido igual se reporta cada 10 minutos, así que sigue siendo distinguible de uno que dejó de reportar.</string>
     <string name="restriction_interval_title">Intervalo de ubicación (segundos)</string>
     <string name="restriction_interval_description">Segundos entre reportes de posición</string>
 </resources>

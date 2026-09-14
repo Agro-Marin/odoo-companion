@@ -14,6 +14,7 @@ data class ManagedValues(
     val wifiOnlyUploads: Boolean? = null,
     val locationIntervalSeconds: Long? = null,
     val uploadWindowSeconds: Long? = null,
+    val minMoveMetres: Long? = null,
     val policyPresent: Boolean = false,
 ) {
     val isEmpty: Boolean
@@ -25,7 +26,8 @@ data class ManagedValues(
             recordingsEnabled == null &&
             wifiOnlyUploads == null &&
             locationIntervalSeconds == null &&
-            uploadWindowSeconds == null
+            uploadWindowSeconds == null &&
+            minMoveMetres == null
 }
 
 object ManagedConfig {
@@ -56,6 +58,13 @@ object ManagedConfig {
                 "upload_window_seconds",
                 minimum = MIN_UPLOAD_WINDOW_SECONDS,
                 maximum = MAX_UPLOAD_WINDOW_SECONDS,
+            ),
+            // Metres rather than seconds, but parsed the same way: a number, or
+            // a number in a string, clamped rather than refused.
+            minMoveMetres = bundle.secondsOrNull(
+                "min_move_metres",
+                minimum = DEFAULT_MIN_MOVE_METRES,
+                maximum = MAX_MIN_MOVE_METRES,
             ),
             policyPresent = true,
         )
