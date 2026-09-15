@@ -39,6 +39,11 @@ data class OutboxEntry(
     val revivals: Int = 0,
     val payloadVersion: Int = CURRENT_PAYLOAD_VERSION,
     val serverFault: Boolean = false,
+    // The earliest moment this row may be sent again. A row the server has
+    // ruled on -- a 500 from an ingest that raises on it -- waits here on its
+    // own, so the queue around it keeps moving instead of inheriting its
+    // backoff. Zero, the default, means no wait.
+    val retryAfter: Long = 0,
 )
 
 const val CURRENT_PAYLOAD_VERSION = 1
@@ -61,22 +66,26 @@ interface OutboxDao {
 
     @Query(
         """
-        SELECT * FROM outbox WHERE kind = :kind AND deadAt IS NULL
+        SELECT * FROM outbox WHERE kind = :kind AND deadAt IS NULL AND retryAfter <= :now
         ORDER BY createdAt ASC, id ASC LIMIT :limit
         """,
     )
-    suspend fun take(kind: String, limit: Int): List<OutboxEntry>
+    suspend fun take(kind: String, limit: Int, now: Long = Long.MAX_VALUE): List<OutboxEntry>
 
-    @Query("SELECT COUNT(*) FROM outbox WHERE kind = :kind AND deadAt IS NULL")
-    suspend fun countOf(kind: String): Int
+    // `now` narrows to rows that are due. The default counts every live row,
+    // which is what the status screen wants: a deferred row is still queued.
+    @Query(
+        "SELECT COUNT(*) FROM outbox WHERE kind = :kind AND deadAt IS NULL AND retryAfter <= :now",
+    )
+    suspend fun countOf(kind: String, now: Long = Long.MAX_VALUE): Int
 
     @Query(
         """
         SELECT COUNT(*) AS queued, MIN(createdAt) AS oldestCreatedAt FROM outbox
-        WHERE kind = :kind AND deadAt IS NULL
+        WHERE kind = :kind AND deadAt IS NULL AND retryAfter <= :now
         """,
     )
-    suspend fun depthOf(kind: String): QueueDepth
+    suspend fun depthOf(kind: String, now: Long = Long.MAX_VALUE): QueueDepth
 
     @Query("SELECT COUNT(*) FROM outbox WHERE deadAt IS NOT NULL")
     suspend fun countDead(): Int
@@ -86,11 +95,17 @@ interface OutboxDao {
 
     @Query(
         """
-        UPDATE outbox SET attempts = attempts + 1, lastError = :error, serverFault = :serverFault
+        UPDATE outbox SET attempts = attempts + 1, lastError = :error, serverFault = :serverFault,
+            retryAfter = :retryAfter
         WHERE id IN (:ids)
         """,
     )
-    suspend fun markFailed(ids: List<Long>, error: String?, serverFault: Boolean = false)
+    suspend fun markFailed(
+        ids: List<Long>,
+        error: String?,
+        serverFault: Boolean = false,
+        retryAfter: Long = 0,
+    )
 
     @Query(
         """
@@ -211,7 +226,7 @@ object OutboxLimits {
     const val DEAD_RETENTION_MILLIS = 90L * 24 * 60 * 60 * 1000
 }
 
-@Database(entities = [OutboxEntry::class], version = 6, exportSchema = true)
+@Database(entities = [OutboxEntry::class], version = 7, exportSchema = true)
 abstract class CompanionDatabase : RoomDatabase() {
     abstract fun outbox(): OutboxDao
 }
@@ -263,6 +278,15 @@ val COMPANION_MIGRATIONS: Array<Migration> = arrayOf(
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL(
                 "ALTER TABLE `outbox` ADD COLUMN `serverFault` INTEGER NOT NULL DEFAULT 0",
+            )
+        }
+    },
+    object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Zero for every existing row: whatever it was waiting on before,
+            // it is due now, and the next drain decides afresh.
+            db.execSQL(
+                "ALTER TABLE `outbox` ADD COLUMN `retryAfter` INTEGER NOT NULL DEFAULT 0",
             )
         }
     },

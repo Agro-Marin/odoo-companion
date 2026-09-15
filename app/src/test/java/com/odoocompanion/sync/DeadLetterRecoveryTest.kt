@@ -47,7 +47,7 @@ class DeadLetterRecoveryTest {
         database.close()
     }
 
-    private fun drainer() = OutboxDrainer(dao, OdooClient(), { 5_000L }) {
+    private fun drainer(now: () -> Long = { 5_000L }) = OutboxDrainer(dao, OdooClient(), now) {
         Settings(
             baseUrl = server.url("/").toString().trimEnd('/'),
             identifier = "phone-01",
@@ -208,11 +208,15 @@ class DeadLetterRecoveryTest {
                     MockResponse(body = """{"status":"success","accepted":1}""")
                 }
         }
-        val drainer = drainer()
+        // Each pass sits past the longest per-row deferral, or the poisoned
+        // row is simply skipped and never accrues the attempts this pins.
+        var clock = 5_000L
+        val drainer = drainer { clock }
 
         var revivals = 0
         var retired = 0
         repeat(200) {
+            clock += OutboxDrainer.ROW_BACKOFF_MAX_MILLIS + 1
             dao.insert(
                 OutboxEntry(
                     kind = OutboxKind.LOCATION,

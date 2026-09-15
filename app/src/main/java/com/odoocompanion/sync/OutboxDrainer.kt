@@ -129,14 +129,24 @@ class OutboxDrainer(
     }
 
     private suspend fun anythingArrivedLate(windowSeconds: Long): Boolean {
-        if (OutboxKind.IRREPLACEABLE.any { dao.countOf(it) > 0 }) return true
-        val positions = dao.depthOf(OutboxKind.LOCATION)
+        val now = now()
+        if (OutboxKind.IRREPLACEABLE.any { dao.countOf(it, now) > 0 }) return true
+        val positions = dao.depthOf(OutboxKind.LOCATION, now)
         return UploadCadence.dueNow(
             queued = positions.queued,
             oldestCreatedAt = positions.oldestCreatedAt,
             windowSeconds = windowSeconds,
-            now = now(),
+            now = now,
         )
+    }
+
+    // When a row the server ruled on may be offered again: doubling from a
+    // minute, capped at an hour. Twenty-five attempts at that pace retire the
+    // row within a day, and in the meantime every drain leaves it alone and
+    // gets on with the rows around it.
+    private fun deferral(attemptsSoFar: Int): Long {
+        val step = minOf(attemptsSoFar, ROW_BACKOFF_DOUBLINGS)
+        return now() + minOf(ROW_BACKOFF_MAX_MILLIS, ROW_BACKOFF_BASE_MILLIS shl step)
     }
 
     private suspend fun retireWhatWillNeverBeTaken(tally: DrainTally) {
@@ -207,14 +217,19 @@ class OutboxDrainer(
     ): Outcome {
         var budget = BATCHES_PER_DRAIN
         var size = wire.batchSize
+        // Rows the server ruled on during this drain. They are excluded from
+        // every further take of this pass and scheduled on their own retryAfter,
+        // so the drain's own outcome no longer carries their verdict: what was
+        // due and deliverable went, and there is nothing transient to wait for.
         val poisoned = mutableSetOf<Long>()
-        val settled = { if (poisoned.isEmpty()) Outcome.DONE else Outcome.RETRY }
+        val settled = { Outcome.DONE }
         while (true) {
             if (budget-- <= 0) {
                 tally.moreWork = true
                 return settled()
             }
-            val entries = dao.take(wire.kind, size + poisoned.size).filter { it.id !in poisoned }
+            val entries = dao.take(wire.kind, size + poisoned.size, now())
+                .filter { it.id !in poisoned }
             if (entries.isEmpty()) return settled()
             val kind = wire.kind
 
@@ -288,9 +303,19 @@ class OutboxDrainer(
                         size = halved(size, kind, outcome.reason)
                         continue
                     }
-                    dao.markFailed(sent, outcome.reason, outcome.serverFault)
+                    if (!outcome.serverFault) {
+                        dao.markFailed(sent, outcome.reason)
+                        tally.lastError = outcome.reason
+                        return Outcome.RETRY
+                    }
+                    val worst = entries.filter { it.id in sent }.maxOf { it.attempts }
+                    dao.markFailed(
+                        sent,
+                        outcome.reason,
+                        serverFault = true,
+                        retryAfter = deferral(worst)
+                    )
                     tally.lastError = outcome.reason
-                    if (!outcome.serverFault) return Outcome.RETRY
                     poisoned += sent
                     continue
                 }
@@ -322,10 +347,14 @@ class OutboxDrainer(
 
     private suspend fun drainRecordings(settings: Settings, tally: DrainTally): Outcome {
         var budget = RECORDING_BYTES_PER_DRAIN
+        // Rows the server ruled on during this drain. They are excluded from
+        // every further take of this pass and scheduled on their own retryAfter,
+        // so the drain's own outcome no longer carries their verdict: what was
+        // due and deliverable went, and there is nothing transient to wait for.
         val poisoned = mutableSetOf<Long>()
-        val settled = { if (poisoned.isEmpty()) Outcome.DONE else Outcome.RETRY }
+        val settled = { Outcome.DONE }
         while (true) {
-            val entries = dao.take(OutboxKind.RECORDING, RECORDING_BATCH + poisoned.size)
+            val entries = dao.take(OutboxKind.RECORDING, RECORDING_BATCH + poisoned.size, now())
                 .filter { it.id !in poisoned }
             if (entries.isEmpty()) return settled()
             for (entry in entries) {
@@ -400,9 +429,18 @@ class OutboxDrainer(
                     }
 
                     is UploadOutcome.Retry -> {
-                        dao.markFailed(listOf(entry.id), outcome.reason, outcome.serverFault)
+                        if (!outcome.serverFault) {
+                            dao.markFailed(listOf(entry.id), outcome.reason)
+                            tally.lastError = outcome.reason
+                            return Outcome.RETRY
+                        }
+                        dao.markFailed(
+                            listOf(entry.id),
+                            outcome.reason,
+                            serverFault = true,
+                            retryAfter = deferral(entry.attempts),
+                        )
                         tally.lastError = outcome.reason
-                        if (!outcome.serverFault) return Outcome.RETRY
                         poisoned += entry.id
                     }
                 }
@@ -505,6 +543,10 @@ class OutboxDrainer(
         const val RECORDING_BYTES_PER_DRAIN = 64L * 1024 * 1024
 
         const val BATCHES_PER_DRAIN = 25
+
+        const val ROW_BACKOFF_BASE_MILLIS = 60_000L
+        const val ROW_BACKOFF_MAX_MILLIS = 60L * 60 * 1000
+        private const val ROW_BACKOFF_DOUBLINGS = 6
 
         const val REVIVAL_PROBE = 1
 
