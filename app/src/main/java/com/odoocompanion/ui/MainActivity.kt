@@ -237,33 +237,40 @@ class MainActivity : AppCompatActivity() {
         binding.wifiOnly.isChecked = settings.wifiOnlyUploads
         binding.locationInterval.showSeconds(settings.locationIntervalSeconds)
         binding.uploadWindow.showSeconds(settings.uploadWindowSeconds)
-        applyManagedLock(settings.managed)
+        applyManagedLock(settings)
     }
 
-    private fun applyManagedLock(managed: Boolean) {
+    // A field is locked when the policy is managing THAT field, not merely
+    // when a policy exists. A console that publishes the declared defaults of
+    // app_restrictions.xml -- and several do, whether or not an administrator
+    // filled anything in -- sends the five non-text keys and none of the three
+    // that enrol. Locking the whole form on that leaves a phone nobody can
+    // configure: not the MDM, which never supplied an identity, and not the
+    // person holding it, whose fields are greyed out. A key that arrived and
+    // turned out unusable is still managed, because the administrator is
+    // plainly setting it; that is why this reads the keys the bundle carried
+    // rather than the values that survived parsing.
+    private fun applyManagedLock(settings: Settings) {
+        val keys = settings.managedKeys.takeIf { settings.managed }.orEmpty()
         // Both halves of each field: disabling only the inner edit text leaves
         // the box and its label drawn as though they were still editable.
-        val fields = listOf(
-            binding.baseUrl,
-            binding.identifier,
-            binding.token,
-            binding.locationInterval,
-            binding.uploadWindow,
+        val governed = listOf(
+            "base_url" to listOf(binding.baseUrl, binding.baseUrlLayout),
+            "identifier" to listOf(binding.identifier, binding.identifierLayout),
+            "token" to listOf(binding.token, binding.tokenLayout),
+            "location_interval_seconds" to
+                listOf(binding.locationInterval, binding.locationIntervalLayout),
+            "upload_window_seconds" to listOf(binding.uploadWindow, binding.uploadWindowLayout),
+            "call_log_enabled" to listOf(binding.callLogEnabled),
+            "recordings_enabled" to listOf(binding.recordingsEnabled),
+            "wifi_only_uploads" to listOf(binding.wifiOnly),
         )
-        val boxes = listOf(
-            binding.baseUrlLayout,
-            binding.identifierLayout,
-            binding.tokenLayout,
-            binding.locationIntervalLayout,
-            binding.uploadWindowLayout,
-        )
-        for (view in fields + boxes) {
-            view.isEnabled = !managed
+        for ((key, views) in governed) {
+            views.forEach { it.isEnabled = key !in keys }
         }
-        binding.callLogEnabled.isEnabled = !managed
-        binding.recordingsEnabled.isEnabled = !managed
-        binding.wifiOnly.isEnabled = !managed
-        binding.save.isEnabled = !managed
+        // Save writes every field at once, so it belongs to the form rather
+        // than to any one key: it goes only when there is nothing left to save.
+        binding.save.isEnabled = governed.any { (key, _) -> key !in keys }
     }
 
     private fun format(line: StatusLine): String = when (line) {
@@ -282,7 +289,7 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun render(settings: Settings) {
         val outbox = CompanionApp.from(this).database.outbox()
-        applyManagedLock(settings.managed)
+        applyManagedLock(settings)
         val queues = QueueDepths(
             positions = outbox.countOf(OutboxKind.LOCATION),
             calls = outbox.countOf(OutboxKind.CALL_LOG),
