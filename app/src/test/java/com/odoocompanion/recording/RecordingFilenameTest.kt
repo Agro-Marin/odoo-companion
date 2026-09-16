@@ -9,6 +9,9 @@ import java.io.File
 import java.util.Calendar
 
 class RecordingFilenameTest {
+    // 40 days past any stamp used in these names.
+    private val movedLater = 1_800_000_000_000L
+
     @get:Rule
     val folder = TemporaryFolder()
 
@@ -87,5 +90,54 @@ class RecordingFilenameTest {
 
         assertNull(parsed.number)
         assertEquals(target.lastModified(), parsed.recordedAtMillis)
+    }
+
+    // Every case below is the same file after its write time stopped agreeing
+    // with the stamp in its name: copied off the handset, restored from a
+    // backup, or touched by a file manager. Before this, all three uploaded the
+    // stamp as the caller's number.
+    private val longAfterTheStamp = movedLater
+
+    @Test
+    fun `a stamp is not the caller even when the file was written much later`() {
+        val parsed = RecordingFilename.of(
+            File("20260915143022_5512345678.m4a"),
+            longAfterTheStamp,
+        )
+
+        assertEquals("5512345678", parsed.number)
+    }
+
+    @Test
+    fun `a name that is only a stamp yields no number rather than inventing one`() {
+        val parsed = RecordingFilename.of(
+            File("Call recording 20260915143022.m4a"),
+            longAfterTheStamp,
+        )
+
+        assertNull(parsed.number)
+    }
+
+    @Test
+    fun `a stamp down to the minute is a stamp too`() {
+        val parsed = RecordingFilename.of(File("grabacion_202609151430.amr"), longAfterTheStamp)
+
+        assertNull(parsed.number)
+    }
+
+    // The rule is the shape, and it has to stop where the shape stops being
+    // certain: fourteen digits that are not a real clock are just digits.
+    @Test
+    fun `fourteen digits with an impossible hour are still a number`() {
+        val parsed = RecordingFilename.of(File("20260915993022.m4a"), longAfterTheStamp)
+
+        assertEquals("20260915993022", parsed.number)
+    }
+
+    @Test
+    fun `a ten digit number that starts like a year is left alone`() {
+        val parsed = RecordingFilename.of(File("2012251430_llamada.m4a"), longAfterTheStamp)
+
+        assertEquals("2012251430", parsed.number)
     }
 }
