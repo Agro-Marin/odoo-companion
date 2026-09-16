@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.data.CompanionDatabase
+import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.net.RecordingMetadata
@@ -60,7 +61,7 @@ class RecordingHarvestTest {
     fun `a settled recording is queued with the metadata the endpoint reads`() = runTest {
         recording("call_5512345678_20260728.m4a")
 
-        val batch = harvest().queueNew(since = 0)
+        val batch = harvest().queueNew()
 
         assertEquals(1, batch.queued)
         val entry = dao.take(OutboxKind.RECORDING, 10).single()
@@ -74,7 +75,7 @@ class RecordingHarvestTest {
     fun `a file still being written is left for the next pass`() = runTest {
         recording("fresh.m4a", modifiedAt = clock - 1_000)
 
-        val batch = harvest().queueNew(since = 0)
+        val batch = harvest().queueNew()
 
         assertEquals(0, batch.queued)
         assertEquals(0, dao.countOf(OutboxKind.RECORDING))
@@ -84,8 +85,8 @@ class RecordingHarvestTest {
     fun `a recording already queued is not queued again`() = runTest {
         recording("a.m4a")
 
-        val first = harvest().queueNew(since = 0)
-        val second = harvest().queueNew(since = 0)
+        val first = harvest().queueNew()
+        val second = harvest().queueNew()
 
         assertEquals(1, first.queued)
         assertEquals(0, second.queued)
@@ -93,42 +94,59 @@ class RecordingHarvestTest {
     }
 
     @Test
-    fun `the cursor advances past an already queued file`() = runTest {
-        val file = recording("a.m4a")
-
-        harvest().queueNew(since = 0)
-        val second = harvest().queueNew(since = 0)
-
-        assertEquals(file.lastModified(), second.cursor)
+    fun `nothing on disk queues nothing`() = runTest {
+        assertEquals(0, harvest().queueNew().queued)
     }
 
     @Test
-    fun `nothing on disk leaves the cursor where it was`() = runTest {
-        val batch = harvest().queueNew(since = 12_345)
-
-        assertEquals(12_345, batch.cursor)
-        assertEquals(0, batch.queued)
-    }
-
-    @Test
-    fun `only files newer than the cursor are queued`() = runTest {
+    fun `every settled recording on disk is queued, however old`() = runTest {
         recording("old.m4a", modifiedAt = clock - 500_000)
-        val newer = recording("new.m4a", modifiedAt = clock - 100_000)
+        recording("new.m4a", modifiedAt = clock - 100_000)
 
-        val batch = harvest().queueNew(since = clock - 300_000)
+        assertEquals(2, harvest().queueNew().queued)
+    }
 
-        assertEquals(1, batch.queued)
-        assertEquals(newer.lastModified(), batch.cursor)
+    // Proven on the previous tree: the second file was never queued, because
+    // its write time fell below where the cursor had already reached.
+    @Test
+    fun `a recording stamped before an earlier harvest is still queued`() = runTest {
+        recording("first.m4a", modifiedAt = clock - 120_000)
+        harvest().queueNew()
+
+        // The phone's clock is corrected an hour backwards before the next call.
+        clock -= 3_600_000
+        recording("second.m4a", modifiedAt = clock - 120_000)
+        clock += 7_200_000
+
+        assertEquals(1, harvest().queueNew().queued)
+        assertEquals(2, dao.countOf(OutboxKind.RECORDING))
+    }
+
+    // Delivered, file left behind because it would not delete: the row is kept
+    // dead precisely so that this pass does not treat the file as new.
+    @Test
+    fun `a recording delivered but left on disk is not queued again`() = runTest {
+        recording("a.m4a")
+        harvest().queueNew()
+        val id = dao.take(OutboxKind.RECORDING, 1).single().id
+        dao.markDeadIds(
+            listOf(id),
+            now = clock,
+            reason = "uploaded",
+            deadReason = DeadReason.KEPT_ON_DISK
+        )
+
+        assertEquals(0, harvest().queueNew().queued)
     }
 
     @Test
     fun `a recording set aside as undeliverable is not harvested again`() = runTest {
         recording("a.m4a")
-        harvest().queueNew(since = 0)
+        harvest().queueNew()
         val id = dao.take(OutboxKind.RECORDING, 1).single().id
         dao.markDeadIds(listOf(id), now = clock, reason = "refused")
 
-        val second = harvest().queueNew(since = 0)
+        val second = harvest().queueNew()
 
         assertEquals(0, second.queued)
         assertEquals(1, dao.countDead())
@@ -142,7 +160,7 @@ class RecordingHarvestTest {
             setLastModified(clock - 120_000)
         }
 
-        assertEquals(0, harvest().queueNew(since = 0).queued)
+        assertEquals(0, harvest().queueNew().queued)
     }
 
     @Test

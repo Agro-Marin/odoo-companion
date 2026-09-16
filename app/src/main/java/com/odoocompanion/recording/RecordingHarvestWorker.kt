@@ -18,16 +18,14 @@ class RecordingHarvestWorker(context: Context, params: WorkerParameters) :
             return@withContext Result.success()
         }
 
-        val since = app.config.recordingCursor()
         val batch = RecordingHarvest(
             dao = app.database.outbox(),
             root = Environment.getExternalStorageDirectory(),
-        ).queueNew(since)
+        ).queueNew()
 
         if (batch.queued > 0 && SyncScheduler.UPLOAD_FOLLOWS !in tags) {
             SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
         }
-        if (batch.cursor > since) app.config.setRecordingCursor(batch.cursor)
         Result.success()
     }
 }
