@@ -379,8 +379,19 @@ class OutboxDrainer(
                         } else {
                             tally.note(tally.accepted, OutboxKind.RECORDING, 1)
                         }
-                        dao.delete(listOf(entry.id))
-                        deleteAudio(file)
+                        if (deleteAudio(file)) {
+                            dao.delete(listOf(entry.id))
+                        } else {
+                            // With no cursor, the harvest's only memory is
+                            // this table. Drop the row and the file comes
+                            // straight back as a new recording.
+                            dao.markDeadIds(
+                                listOf(entry.id),
+                                now(),
+                                "uploaded, but the file could not be deleted",
+                                DeadReason.KEPT_ON_DISK,
+                            )
+                        }
                     }
 
                     is UploadOutcome.Rejected -> abandon(
@@ -451,11 +462,11 @@ class OutboxDrainer(
         Log.i(TAG, "Purged $purged row(s) that had been undeliverable for 90 days")
     }
 
-    private fun deleteAudio(file: File) {
-        if (file.exists() && !file.delete()) {
-            val folder = file.absolutePath.loggableDirectory()
-            Log.w(TAG, "Could not delete an uploaded recording under $folder")
-        }
+    private fun deleteAudio(file: File): Boolean {
+        if (!file.exists() || file.delete()) return true
+        val folder = file.absolutePath.loggableDirectory()
+        Log.w(TAG, "Could not delete an uploaded recording under $folder")
+        return false
     }
 
     private fun noteSkipped(tally: DrainTally, kind: String, count: Int) {
