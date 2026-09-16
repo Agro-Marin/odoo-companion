@@ -8,7 +8,16 @@ class RecordingScanner(
     private val root: File,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    fun scan(since: Long): List<ScannedRecording> {
+    // Every settled recording on disk. There is deliberately no cursor: a
+    // recording is filed by its write time, and a write time is a clock the
+    // app does not control. A file stamped below wherever a cursor had reached
+    // -- the phone's clock corrected backwards, a folder restored from a
+    // backup, a dialer that stamps the call's start rather than its end -- was
+    // never harvested, and nothing said so. What has already been handled is
+    // the outbox's to answer, and it does: an uploaded file is deleted, a
+    // failed one stays queued or dead, and either way it is not on this list
+    // twice.
+    fun scan(): List<ScannedRecording> {
         val settledBefore = now() - SETTLE_MILLIS
         return CANDIDATE_DIRECTORIES
             .map { File(root, it) }
@@ -18,7 +27,7 @@ class RecordingScanner(
             .filterNot { it.parentFile?.name?.lowercase() in NOT_CALL_DIRECTORIES }
             .distinctBy { it.absolutePath }
             .map { ScannedRecording(it, it.lastModified()) }
-            .filter { it.modifiedAt > since && it.modifiedAt <= settledBefore }
+            .filter { it.modifiedAt <= settledBefore }
             .sortedBy { it.modifiedAt }
     }
 

@@ -683,4 +683,42 @@ class DeliverySemanticsTest {
         assertEquals(1, dao.countDead())
         refuse = false
     }
+
+    // With no harvest cursor, this table is the harvest's whole memory of what
+    // it has already handled: a delivered file that stays on disk must stay in
+    // the table too, or it comes straight back as a new recording.
+    @Test
+    fun `a delivered recording that will not delete is kept as dead, not forgotten`() = runTest {
+        // A folder of our own: /tmp itself is root's, and a chmod there is a
+        // silent no-op, which is exactly how this test once skipped itself.
+        val locked = java.nio.file.Files.createTempDirectory("locked").toFile()
+        val file = File(locked, "rec.m4a").apply { writeBytes(ByteArray(32)) }
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.RECORDING,
+                payload = """{"number":"+52","recorded_at":1,""" +
+                    """"file_name":"a.m4a","mimetype":"audio/mp4"}""",
+                filePath = file.absolutePath,
+                createdAt = file.lastModified(),
+            ),
+        )
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) =
+                MockResponse(body = """{"status":"success","recording_id":1}""")
+        }
+        locked.setWritable(false)
+        org.junit.Assume.assumeFalse("root deletes regardless; nothing to test", locked.canWrite())
+        try {
+            val report = drainer().drainAll()
+
+            assertEquals(1, report.accepted[OutboxKind.RECORDING])
+            assertTrue("the file is still there", file.exists())
+            assertEquals(0, dao.countOf(OutboxKind.RECORDING))
+            assertEquals(1, dao.countDead())
+            assertTrue(file.absolutePath in dao.filesQueued(OutboxKind.RECORDING))
+        } finally {
+            locked.setWritable(true)
+            locked.deleteRecursively()
+        }
+    }
 }

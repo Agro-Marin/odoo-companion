@@ -22,7 +22,7 @@ class RecordingScannerTest {
         return file
     }
 
-    private fun names(since: Long = 0) = scanner().scan(since).map { it.file.name }
+    private fun names() = scanner().scan().map { it.file.name }
 
     @Test
     fun `a settled recording in a known directory is found`() {
@@ -49,11 +49,11 @@ class RecordingScannerTest {
     }
 
     @Test
-    fun `holding a file back never moves the cursor past it`() {
+    fun `a file still being written is held back while settled ones go`() {
         val settled = recording("Recordings/Call/done.m4a", ageMillis = 10 * 60_000)
         val writing = recording("Recordings/Call/writing.m4a", ageMillis = 1_000)
 
-        val newestScanned = scanner().scan(0).maxOf { it.modifiedAt }
+        val newestScanned = scanner().scan().maxOf { it.modifiedAt }
 
         assertEquals(settled.lastModified(), newestScanned)
         assertEquals(true, newestScanned < writing.lastModified())
@@ -63,7 +63,7 @@ class RecordingScannerTest {
     fun `the scan reports the modification time it filtered on`() {
         val settled = recording("Recordings/Call/done.m4a", ageMillis = 10 * 60_000)
 
-        val scanned = scanner().scan(0).single()
+        val scanned = scanner().scan().single()
 
         assertEquals(settled.absolutePath, scanned.file.absolutePath)
         assertEquals(settled.lastModified(), scanned.modifiedAt)
@@ -73,15 +73,15 @@ class RecordingScannerTest {
     fun `a file reachable through two candidate directories is returned once`() {
         recording("Recordings/Call/twice.m4a", ageMillis = 10 * 60_000)
 
-        assertEquals(1, scanner().scan(0).size)
+        assertEquals(1, scanner().scan().size)
     }
 
     @Test
-    fun `files at or before the cursor are not returned again`() {
-        val old = recording("Recordings/Call/old.m4a", ageMillis = 60 * 60_000)
+    fun `every settled file is returned, however old`() {
+        recording("Recordings/Call/old.m4a", ageMillis = 60 * 60_000)
         recording("Recordings/Call/new.m4a", ageMillis = 10 * 60_000)
 
-        assertEquals(listOf("new.m4a"), names(since = old.lastModified()))
+        assertEquals(listOf("old.m4a", "new.m4a"), names())
     }
 
     @Test
@@ -93,7 +93,7 @@ class RecordingScannerTest {
     }
 
     @Test
-    fun `results are ordered oldest first so the cursor advances monotonically`() {
+    fun `results are ordered oldest first`() {
         recording("Recordings/Call/c.m4a", ageMillis = 10 * 60_000)
         recording("Recordings/Call/a.m4a", ageMillis = 30 * 60_000)
         recording("Recordings/Call/b.m4a", ageMillis = 20 * 60_000)

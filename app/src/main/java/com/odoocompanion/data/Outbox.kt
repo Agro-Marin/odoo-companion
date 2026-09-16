@@ -54,6 +54,11 @@ object DeadReason {
     const val REFUSED = "refused"
 
     const val UNDECODABLE = "undecodable"
+
+    // Delivered, and the audio could not be removed from the dialer's folder.
+    // The row is kept so the harvest does not find the file and queue it
+    // again; the purge takes the file with it when it can.
+    const val KEPT_ON_DISK = "kept_on_disk"
 }
 
 @Dao
