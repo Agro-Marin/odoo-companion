@@ -284,4 +284,20 @@ class OutboxMigrationTest {
     private fun migrate(db: SupportSQLiteDatabase, from: Int, to: Int) = COMPANION_MIGRATIONS
         .single { it.startVersion == from && it.endVersion == to }
         .migrate(db)
+
+    @Test
+    fun `migrating to v7 makes every existing row due at once`() {
+        val db = openV1()
+        db.execSQL(
+            "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
+                "('calllog', '{\"number\":\"+52\"}', 10, 3)",
+        )
+        for (version in 1..6) migrate(db, version, version + 1)
+
+        db.query("SELECT retryAfter FROM outbox").use { cursor ->
+            assertEquals(1, cursor.count)
+            cursor.moveToFirst()
+            assertEquals("no deferral was recorded, so none is imposed", 0L, cursor.getLong(0))
+        }
+    }
 }

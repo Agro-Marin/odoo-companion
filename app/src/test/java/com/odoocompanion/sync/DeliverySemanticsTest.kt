@@ -283,7 +283,8 @@ class DeliverySemanticsTest {
 
         val report = drainer().drainAll()
 
-        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        // The raising row waits on its own retryAfter; the drain is done.
+        assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
         val left = dao.take(OutboxKind.CALL_LOG, 100)
         assertEquals("only the row the server chokes on is still queued", 1, left.size)
         assertEquals(1, left.single().attempts)
@@ -412,7 +413,7 @@ class DeliverySemanticsTest {
 
         val report = drainer().drainAll()
 
-        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
         assertEquals(1, report.accepted[OutboxKind.RECORDING])
         assertFalse("the good one is uploaded and gone", fine.exists())
         assertTrue("the bad one is kept and charged", poison.exists())

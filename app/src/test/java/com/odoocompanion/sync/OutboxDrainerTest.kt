@@ -73,6 +73,18 @@ class OutboxDrainerTest {
         }
     }
 
+    private suspend fun queueFixes(count: Int) {
+        dao.insertAll(
+            (0 until count).map { i ->
+                OutboxEntry(
+                    kind = OutboxKind.LOCATION,
+                    payload = """{"latitude":19.4,"longitude":-99.1,"timestamp":${100 + i}}""",
+                    createdAt = 100L + i,
+                )
+            },
+        )
+    }
+
     private suspend fun queueCalls(count: Int) {
         dao.insertAll(
             (0 until count).map { i ->
@@ -122,17 +134,73 @@ class OutboxDrainerTest {
         assertEquals(0, dao.countOf(OutboxKind.CALL_LOG))
     }
 
+    // A 500 is the server's verdict on the row, so the rows are kept and
+    // charged -- and then set to wait on their own, which is why the drain
+    // itself is done rather than asking to be retried.
     @Test
-    fun `a server error keeps the rows and reports retry`() = runTest {
+    fun `a server error keeps the rows, charges them, and defers them`() = runTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest) = MockResponse(code = 500)
         }
         queueCalls(2)
 
-        assertEquals(OutboxDrainer.Outcome.RETRY, drainer().drainAll().outcome)
+        assertEquals(OutboxDrainer.Outcome.DONE, drainer().drainAll().outcome)
 
         assertEquals(2, dao.countOf(OutboxKind.CALL_LOG))
-        assertEquals(1, dao.take(OutboxKind.CALL_LOG, 10).first().attempts)
+        val row = dao.take(OutboxKind.CALL_LOG, 10).first()
+        assertEquals(1, row.attempts)
+        assertTrue("deferred on its own clock", row.retryAfter > 0)
+        assertEquals(
+            "and not offered again until then",
+            0,
+            dao.countOf(OutboxKind.CALL_LOG, now = 0)
+        )
+    }
+
+    // The link failing is not a verdict on any row, so that path still asks
+    // the worker to retry, backoff and all.
+    @Test
+    fun `a link fault still reports retry`() = runTest {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse(code = 503)
+        }
+        queueCalls(2)
+
+        assertEquals(OutboxDrainer.Outcome.RETRY, drainer().drainAll().outcome)
+        assertEquals(0L, dao.take(OutboxKind.CALL_LOG, 10).first().retryAfter)
+    }
+
+    // Proven on the previous tree: both passes ended RETRY, so one call the
+    // server could not ingest put every upload on WorkManager's backoff.
+    @Test
+    fun `a poisoned call no longer throttles the positions behind it`() = runTest {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val body = request.body?.utf8() ?: ""
+                return if ("POISON" in body) {
+                    MockResponse(code = 500, body = """{"error":"processing_error"}""")
+                } else {
+                    MockResponse(body = """{"status":"success","accepted":1}""")
+                }
+            }
+        }
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.CALL_LOG,
+                createdAt = 1,
+                payload = """{"number":"POISON","direction":"1","timestamp":1,"duration":1}""",
+            ),
+        )
+        queueFixes(3)
+
+        val first = drainer().drainAll()
+        queueFixes(2)
+        val second = drainer().drainAll()
+
+        assertEquals(OutboxDrainer.Outcome.DONE, first.outcome)
+        assertEquals(OutboxDrainer.Outcome.DONE, second.outcome)
+        assertEquals("every position went, both times", 0, dao.countOf(OutboxKind.LOCATION))
+        assertEquals("the poison row is still there, waiting", 1, dao.countOf(OutboxKind.CALL_LOG))
     }
 
     @Test
