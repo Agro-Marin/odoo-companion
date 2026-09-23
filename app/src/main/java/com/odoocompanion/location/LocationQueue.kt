@@ -9,6 +9,7 @@ import com.odoocompanion.data.QueueDepth
 import com.odoocompanion.net.LocationFix
 import com.odoocompanion.net.WireJson
 import com.odoocompanion.sync.UploadCadence
+import com.odoocompanion.system.debug
 import kotlinx.serialization.encodeToString
 import kotlin.math.asin
 import kotlin.math.cos
@@ -34,7 +35,10 @@ class LocationQueue(
     ): Boolean {
         if (fixes.isEmpty()) return false
         val moving = fixes.filter { worthKeeping(it, minMoveMetres) }
-        if (moving.isEmpty()) return false
+        if (moving.isEmpty()) {
+            debug(TAG) { "dropped ${fixes.size} fix(es) under $minMoveMetres m of the last kept" }
+            return false
+        }
         val queuedAt = now()
         dao.insertAll(
             moving.map { fix ->
@@ -53,11 +57,14 @@ class LocationQueue(
             windowSeconds = windowSeconds,
             now = at,
         )
-        if (!due) return false
         val last = askedAt
-        if (last != null && at - last < windowSeconds * 1_000) return false
-        askedAt = at
-        return true
+        val asked = due && (last == null || at - last >= windowSeconds * 1_000)
+        debug(TAG) {
+            "kept ${moving.size} of ${fixes.size} fix(es), ${depth.queued} queued, " +
+                "due=$due, asking=$asked"
+        }
+        if (asked) askedAt = at
+        return asked
     }
 
     // A phone standing still still reports: at the default interval that is
@@ -90,6 +97,8 @@ class LocationQueue(
         const val HEARTBEAT_MILLIS = 10L * 60 * 1000
 
         private const val EARTH_RADIUS_METRES = 6_371_000.0
+
+        private const val TAG = "LocationQueue"
 
         // Haversine, written out rather than taken from android.location, so it
         // is arithmetic a unit test can exercise without a framework under it.

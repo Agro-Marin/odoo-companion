@@ -6,30 +6,31 @@ import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.net.RecordingMetadata
 import com.odoocompanion.net.WireJson
+import com.odoocompanion.system.debug
 import kotlinx.serialization.encodeToString
 import java.io.File
-
-data class HarvestBatch(val queued: Int)
 
 class RecordingHarvest(
     private val dao: OutboxDao,
     private val root: File,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun queueNew(): HarvestBatch {
+    suspend fun queueNew(): Int {
         // Live and dead rows alike: a recording set aside, or one uploaded
         // whose file could not be removed, must not be queued a second time.
         val alreadyQueued = dao.filesQueued(OutboxKind.RECORDING).toHashSet()
         val fresh = mutableListOf<OutboxEntry>()
-        for (scanned in RecordingScanner(root, now).scan()) {
+        val found = RecordingScanner(root, now).scan()
+        for (scanned in found) {
             if (!alreadyQueued.add(scanned.file.absolutePath)) continue
             fresh += entryFor(scanned)
         }
+        debug(TAG) { "found ${found.size} settled recording(s), ${fresh.size} not yet queued" }
         if (fresh.isNotEmpty()) {
             dao.insertAll(fresh)
             Log.i(TAG, "Queued ${fresh.size} recording(s)")
         }
-        return HarvestBatch(fresh.size)
+        return fresh.size
     }
 
     private fun entryFor(scanned: ScannedRecording): OutboxEntry {

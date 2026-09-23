@@ -63,7 +63,7 @@ class RecordingHarvestTest {
 
         val batch = harvest().queueNew()
 
-        assertEquals(1, batch.queued)
+        assertEquals(1, batch)
         val entry = dao.take(OutboxKind.RECORDING, 10).single()
         val metadata = WireJson.decodeFromString<RecordingMetadata>(entry.payload)
         assertEquals("5512345678", metadata.number)
@@ -77,7 +77,7 @@ class RecordingHarvestTest {
 
         val batch = harvest().queueNew()
 
-        assertEquals(0, batch.queued)
+        assertEquals(0, batch)
         assertEquals(0, dao.countOf(OutboxKind.RECORDING))
     }
 
@@ -88,14 +88,14 @@ class RecordingHarvestTest {
         val first = harvest().queueNew()
         val second = harvest().queueNew()
 
-        assertEquals(1, first.queued)
-        assertEquals(0, second.queued)
+        assertEquals(1, first)
+        assertEquals(0, second)
         assertEquals(1, dao.countOf(OutboxKind.RECORDING))
     }
 
     @Test
     fun `nothing on disk queues nothing`() = runTest {
-        assertEquals(0, harvest().queueNew().queued)
+        assertEquals(0, harvest().queueNew())
     }
 
     @Test
@@ -103,7 +103,7 @@ class RecordingHarvestTest {
         recording("old.m4a", modifiedAt = clock - 500_000)
         recording("new.m4a", modifiedAt = clock - 100_000)
 
-        assertEquals(2, harvest().queueNew().queued)
+        assertEquals(2, harvest().queueNew())
     }
 
     // Proven on the previous tree: the second file was never queued, because
@@ -118,7 +118,7 @@ class RecordingHarvestTest {
         recording("second.m4a", modifiedAt = clock - 120_000)
         clock += 7_200_000
 
-        assertEquals(1, harvest().queueNew().queued)
+        assertEquals(1, harvest().queueNew())
         assertEquals(2, dao.countOf(OutboxKind.RECORDING))
     }
 
@@ -136,7 +136,7 @@ class RecordingHarvestTest {
             deadReason = DeadReason.KEPT_ON_DISK
         )
 
-        assertEquals(0, harvest().queueNew().queued)
+        assertEquals(0, harvest().queueNew())
     }
 
     @Test
@@ -148,7 +148,7 @@ class RecordingHarvestTest {
 
         val second = harvest().queueNew()
 
-        assertEquals(0, second.queued)
+        assertEquals(0, second)
         assertEquals(1, dao.countDead())
     }
 
@@ -160,7 +160,7 @@ class RecordingHarvestTest {
             setLastModified(clock - 120_000)
         }
 
-        assertEquals(0, harvest().queueNew().queued)
+        assertEquals(0, harvest().queueNew())
     }
 
     @Test

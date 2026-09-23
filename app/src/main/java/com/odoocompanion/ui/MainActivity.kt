@@ -20,12 +20,16 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.EnrollmentResult
+import com.odoocompanion.config.FormValues
+import com.odoocompanion.config.ManagedConfig
 import com.odoocompanion.config.Settings
-import com.odoocompanion.data.OutboxKind
+import com.odoocompanion.data.OutboxCounts
 import com.odoocompanion.databinding.ActivityMainBinding
 import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.DeviceHealth
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -33,16 +37,23 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-
-            if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true &&
-                !DeviceHealth.report(this).backgroundLocationGranted
-            ) {
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            val health = DeviceHealth.report(this)
+            if (health.locationGranted && !health.backgroundLocationGranted) {
                 backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             } else {
                 startIfEnrolled()
             }
         }
+
+    private val healthChecks = MutableStateFlow(0)
+
+    private val refusal = MutableStateFlow<Int?>(null)
+
+    override fun onResume() {
+        super.onResume()
+        healthChecks.value++
+    }
 
     private val backgroundLocationLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { startIfEnrolled() }
@@ -55,54 +66,44 @@ class MainActivity : AppCompatActivity() {
 
         val app = CompanionApp.from(this)
 
+        // Every field once, then only the ones a policy governs: the store
+        // re-emits on every write -- each upload records its attempt -- and
+        // repainting the whole form put the stored values back over whatever
+        // was being typed into the fields the policy leaves to the user.
         var populated = false
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                app.config.settings.distinctUntilChanged().collect { settings ->
-                    if (!populated || settings.managed) {
-                        showForm(settings)
+                launch {
+                    app.config.settings.distinctUntilChanged().collect { settings ->
+                        showForm(settings, if (populated) settings.governedKeys else FORM_KEYS)
                         populated = true
                     }
-                    render(settings)
                 }
+                // Redrawn from what it shows: the settings, the queue -- which
+                // changes on every fix and every upload without touching a
+                // setting -- a refused save, and the permissions, which change
+                // behind a dialog that only pauses this screen.
+                combine(
+                    app.config.settings,
+                    app.database.outbox().counts(),
+                    refusal,
+                    healthChecks,
+                ) { settings, counts, refused, _ -> statusText(settings, counts, refused) }
+                    .distinctUntilChanged()
+                    .collect { binding.status.text = it }
             }
         }
 
         binding.save.setOnClickListener {
+            val form = formValues()
             lifecycleScope.launch {
-                app.config.setFeature(
-                    callLog = binding.callLogEnabled.isChecked,
-                    recordings = binding.recordingsEnabled.isChecked,
-                )
-                app.config.setWifiOnlyUploads(binding.wifiOnly.isChecked)
-                binding.uploadWindow.text.toString().trim().toLongOrNull()
-                    ?.let { app.config.setUploadWindow(it) }
-                binding.locationInterval.text.toString().trim().toLongOrNull()
-                    ?.let { app.config.setLocationInterval(it) }
-                when (
-                    app.config.saveEnrollment(
-                        baseUrl = binding.baseUrl.text.toString(),
-                        identifier = binding.identifier.text.toString(),
-                        token = binding.token.text.toString(),
-                    )
-                ) {
-                    EnrollmentResult.InvalidBaseUrl -> {
-                        binding.status.text = getString(R.string.status_bad_base_url)
-                        return@launch
-                    }
-
-                    EnrollmentResult.InvalidIdentifier -> {
-                        binding.status.text = getString(R.string.status_bad_identifier)
-                        return@launch
-                    }
-
-                    EnrollmentResult.CleartextRefused -> {
-                        binding.status.text = getString(R.string.status_cleartext_refused)
-                        return@launch
-                    }
-
-                    EnrollmentResult.Saved -> Unit
+                refusal.value = when (app.config.saveForm(form)) {
+                    EnrollmentResult.InvalidBaseUrl -> R.string.status_bad_base_url
+                    EnrollmentResult.InvalidIdentifier -> R.string.status_bad_identifier
+                    EnrollmentResult.CleartextRefused -> R.string.status_cleartext_refused
+                    EnrollmentResult.Saved -> null
                 }
+                if (refusal.value != null) return@launch
                 app.applyConfiguration()
                 val settings = app.config.current()
                 if (settings.isEnrolled && !LocationForegroundService.canRun(this@MainActivity)) {
@@ -111,7 +112,6 @@ class MainActivity : AppCompatActivity() {
 
                 binding.locationInterval.showSeconds(settings.locationIntervalSeconds)
                 binding.uploadWindow.showSeconds(settings.uploadWindowSeconds)
-                render(settings)
             }
         }
 
@@ -167,19 +167,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestPermissions(settings: Settings) {
-        val wanted = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
+        val wanted = DeviceHealth.wantedPermissions(
+            callLogWanted = settings.callLogEnabled,
+            recordingsWanted = settings.recordingsEnabled,
         )
-        if (settings.callLogEnabled) wanted += Manifest.permission.READ_CALL_LOG
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            wanted += Manifest.permission.POST_NOTIFICATIONS
-        } else {
-            wanted += Manifest.permission.READ_EXTERNAL_STORAGE
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-                wanted += Manifest.permission.WRITE_EXTERNAL_STORAGE
-            }
-        }
         permissionLauncher.launch(wanted.toTypedArray())
     }
 
@@ -224,19 +215,39 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val app = CompanionApp.from(this@MainActivity)
             app.applyConfiguration()
-            render(app.config.current())
+            healthChecks.value++
         }
     }
 
-    private fun showForm(settings: Settings) {
-        binding.baseUrl.setText(settings.baseUrl)
-        binding.identifier.setText(settings.identifier)
-        binding.token.setText(settings.token)
-        binding.callLogEnabled.isChecked = settings.callLogEnabled
-        binding.recordingsEnabled.isChecked = settings.recordingsEnabled
-        binding.wifiOnly.isChecked = settings.wifiOnlyUploads
-        binding.locationInterval.showSeconds(settings.locationIntervalSeconds)
-        binding.uploadWindow.showSeconds(settings.uploadWindowSeconds)
+    private fun formValues() = FormValues(
+        baseUrl = binding.baseUrl.text.toString(),
+        identifier = binding.identifier.text.toString(),
+        token = binding.token.text.toString(),
+        callLogEnabled = binding.callLogEnabled.isChecked,
+        recordingsEnabled = binding.recordingsEnabled.isChecked,
+        wifiOnlyUploads = binding.wifiOnly.isChecked,
+        locationIntervalSeconds = binding.locationInterval.text.toString().trim().toLongOrNull(),
+        uploadWindowSeconds = binding.uploadWindow.text.toString().trim().toLongOrNull(),
+    )
+
+    private fun showForm(settings: Settings, keys: Set<String>) {
+        fun paint(key: String, show: () -> Unit) {
+            if (key in keys) show()
+        }
+        paint("base_url") { binding.baseUrl.setText(settings.baseUrl) }
+        paint("identifier") { binding.identifier.setText(settings.identifier) }
+        paint("token") { binding.token.setText(settings.token) }
+        paint("call_log_enabled") { binding.callLogEnabled.isChecked = settings.callLogEnabled }
+        paint("recordings_enabled") {
+            binding.recordingsEnabled.isChecked = settings.recordingsEnabled
+        }
+        paint("wifi_only_uploads") { binding.wifiOnly.isChecked = settings.wifiOnlyUploads }
+        paint("location_interval_seconds") {
+            binding.locationInterval.showSeconds(settings.locationIntervalSeconds)
+        }
+        paint("upload_window_seconds") {
+            binding.uploadWindow.showSeconds(settings.uploadWindowSeconds)
+        }
         applyManagedLock(settings)
     }
 
@@ -251,7 +262,7 @@ class MainActivity : AppCompatActivity() {
     // plainly setting it; that is why this reads the keys the bundle carried
     // rather than the values that survived parsing.
     private fun applyManagedLock(settings: Settings) {
-        val keys = settings.managedKeys.takeIf { settings.managed }.orEmpty()
+        val keys = settings.governedKeys
         // Both halves of each field: disabling only the inner edit text leaves
         // the box and its label drawn as though they were still editable.
         val governed = listOf(
@@ -287,21 +298,15 @@ class MainActivity : AppCompatActivity() {
             getString(line.text, DateUtils.getRelativeTimeSpanString(line.at))
     }
 
-    private suspend fun render(settings: Settings) {
-        val outbox = CompanionApp.from(this).database.outbox()
-        applyManagedLock(settings)
-        val queues = QueueDepths(
-            positions = outbox.countOf(OutboxKind.LOCATION),
-            calls = outbox.countOf(OutboxKind.CALL_LOG),
-            recordings = outbox.countOf(OutboxKind.RECORDING),
-            undeliverable = outbox.countDead(),
+    private fun statusText(settings: Settings, counts: OutboxCounts, refused: Int?): String = (
+        listOfNotNull(refused?.let(::getString)) +
+            StatusScreen.lines(settings, DeviceHealth.report(this), counts).map(::format)
         )
-        binding.status.text = StatusScreen
-            .lines(settings, DeviceHealth.report(this), queues)
-            .joinToString(separator = "\n", postfix = "\n", transform = ::format)
-    }
+        .joinToString(separator = "\n", postfix = "\n")
 
     private companion object {
         const val TAG = "MainActivity"
+
+        val FORM_KEYS = ManagedConfig.MANAGED_KEYS
     }
 }

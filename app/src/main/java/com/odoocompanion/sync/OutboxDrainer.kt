@@ -16,6 +16,7 @@ import com.odoocompanion.net.OdooClient
 import com.odoocompanion.net.RecordingMetadata
 import com.odoocompanion.net.UploadOutcome
 import com.odoocompanion.net.WireJson
+import com.odoocompanion.system.debug
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.KSerializer
@@ -61,6 +62,9 @@ private class DrainTally {
     var revived = 0
     var moreWork = false
 
+    var payloadLimit = 0L
+    var persistedLimit: Long? = null
+
     fun note(counter: MutableMap<String, Int>, kind: String, count: Int) {
         counter[kind] = (counter[kind] ?: 0) + count
     }
@@ -87,7 +91,7 @@ class OutboxDrainer(
     private val dao: OutboxDao,
     private val client: OdooClient,
     private val now: () -> Long = System::currentTimeMillis,
-    private val learnPayloadLimit: suspend (Long) -> Unit = {},
+    private val learnPayloadLimit: suspend (bytes: Long, at: Long) -> Unit = { _, _ -> },
     private val settingsProvider: suspend () -> Settings,
 ) {
     enum class Outcome { DONE, RETRY }
@@ -114,6 +118,7 @@ class OutboxDrainer(
         val settings = attempt { settingsProvider() }.getOrElse { cause ->
             return reportUnreadableSettings(tally, cause)
         }
+        tally.payloadLimit = settings.payloadLimit(now())
         val results = listOf(
             drainBatch(LOCATIONS, settings, tally),
             drainBatch(CALLS, settings, tally),
@@ -125,7 +130,7 @@ class OutboxDrainer(
         if (outcome == Outcome.DONE && !tally.moreWork) {
             tally.moreWork = anythingArrivedLate(settings.uploadWindowSeconds)
         }
-        return tally.report(outcome)
+        return tally.report(outcome).also { debug(TAG) { "drain finished: $it" } }
     }
 
     private suspend fun anythingArrivedLate(windowSeconds: Long): Boolean {
@@ -186,13 +191,21 @@ class OutboxDrainer(
             else -> 0
         }
         if (tally.revived > 0) {
-            learnPayloadLimit(0)
+            learnPayloadLimit(0, now())
             Log.i(
                 TAG,
                 "Queueing ${tally.revived} row(s) that had only run out of retries " +
                     if (tally.delivered) "; delivery is working again" else " to test delivery",
             )
         }
+    }
+
+    private suspend fun learn(tally: DrainTally, limitBytes: Long?) {
+        if (limitBytes == null || limitBytes <= 0) return
+        tally.payloadLimit = limitBytes
+        if (tally.persistedLimit == limitBytes) return
+        learnPayloadLimit(limitBytes, now())
+        tally.persistedLimit = limitBytes
     }
 
     private fun reportUnreadableSettings(tally: DrainTally, cause: Throwable): DrainReport {
@@ -221,16 +234,21 @@ class OutboxDrainer(
         // every further take of this pass and scheduled on their own retryAfter,
         // so the drain's own outcome no longer carries their verdict: what was
         // due and deliverable went, and there is nothing transient to wait for.
+        // retryAfter alone does not exclude them: a pass carrying recordings
+        // runs for minutes, longer than the shortest deferral.
         val poisoned = mutableSetOf<Long>()
-        val settled = { Outcome.DONE }
         while (true) {
             if (budget-- <= 0) {
                 tally.moreWork = true
-                return settled()
+                return Outcome.DONE
             }
             val entries = dao.take(wire.kind, size + poisoned.size, now())
                 .filter { it.id !in poisoned }
-            if (entries.isEmpty()) return settled()
+            debug(TAG) {
+                "${wire.kind}: took ${entries.size} at batch size $size, " +
+                    "${poisoned.size} deferred this pass, $budget batch(es) left"
+            }
+            if (entries.isEmpty()) return Outcome.DONE
             val kind = wire.kind
 
             val unreadable = mutableListOf<OutboxEntry>()
@@ -258,15 +276,17 @@ class OutboxDrainer(
             val outcome = attempt {
                 client.post(settings, wire.suffix, wire.encodeBatch(items))
             }.getOrElse { return failBatch(tally, sent, it) }
+            debug(TAG) { "${wire.suffix} with ${sent.size} row(s) answered $outcome" }
             when (outcome) {
                 is UploadOutcome.Success -> {
                     tally.delivered = true
-                    outcome.limitBytes?.let { learnPayloadLimit(it) }
+                    learn(tally, outcome.limitBytes)
                     if (outcome.accepted > 0) tally.note(tally.accepted, kind, outcome.accepted)
                     if (outcome.duplicates > 0) {
                         tally.note(tally.duplicates, kind, outcome.duplicates)
                     }
-                    val refused = outcome.skippedIndexes.mapNotNull { sent.getOrNull(it) }
+                    val refused = outcome.skippedIndexes.distinct()
+                        .mapNotNull { sent.getOrNull(it) }
                     if (refused.isNotEmpty()) {
                         abandon(tally, kind, refused, "server read it and could not store it")
                     } else if (outcome.skipped > 0) {
@@ -286,16 +306,17 @@ class OutboxDrainer(
                 }
 
                 is UploadOutcome.TooLarge -> {
-                    outcome.limitBytes?.let { learnPayloadLimit(it) }
+                    learn(tally, outcome.limitBytes)
                     if (sent.size > 1) {
                         size = halved(size, kind, outcome.describe())
                         continue
                     }
-                    return failLargeBatch(
+                    poisoned += deferRuledOn(
                         tally,
-                        sent,
+                        entries.single { it.id in sent },
                         "one row on its own is ${outcome.describe()}",
                     )
+                    continue
                 }
 
                 is UploadOutcome.Retry -> {
@@ -308,19 +329,13 @@ class OutboxDrainer(
                         tally.lastError = outcome.reason
                         return Outcome.RETRY
                     }
-                    val worst = entries.filter { it.id in sent }.maxOf { it.attempts }
-                    dao.markFailed(
-                        sent,
-                        outcome.reason,
-                        serverFault = true,
-                        retryAfter = deferral(worst)
-                    )
-                    tally.lastError = outcome.reason
-                    poisoned += sent
+                    poisoned +=
+                        deferRuledOn(tally, entries.single { it.id in sent }, outcome.reason)
+                    size = wire.batchSize
                     continue
                 }
             }
-            if (entries.size < size) return settled()
+            if (entries.size < size) return Outcome.DONE
         }
     }
 
@@ -347,16 +362,12 @@ class OutboxDrainer(
 
     private suspend fun drainRecordings(settings: Settings, tally: DrainTally): Outcome {
         var budget = RECORDING_BYTES_PER_DRAIN
-        // Rows the server ruled on during this drain. They are excluded from
-        // every further take of this pass and scheduled on their own retryAfter,
-        // so the drain's own outcome no longer carries their verdict: what was
-        // due and deliverable went, and there is nothing transient to wait for.
+        // The same exclusion as drainBatch's, for the same reason.
         val poisoned = mutableSetOf<Long>()
-        val settled = { Outcome.DONE }
         while (true) {
             val entries = dao.take(OutboxKind.RECORDING, RECORDING_BATCH + poisoned.size, now())
                 .filter { it.id !in poisoned }
-            if (entries.isEmpty()) return settled()
+            if (entries.isEmpty()) return Outcome.DONE
             for (entry in entries) {
                 val file = entry.filePath?.let(::File)
                 if (file == null || !file.exists()) {
@@ -364,45 +375,60 @@ class OutboxDrainer(
                     continue
                 }
                 if (file.length() > MAX_RECORDING_BYTES) {
-                    return failLargeBatch(
+                    poisoned += deferRuledOn(
                         tally,
-                        listOf(entry.id),
+                        entry,
                         "recording of ${file.length()} bytes is over the " +
                             "${MAX_RECORDING_BYTES / 1024 / 1024} MB any mobile device accepts",
                     )
+                    continue
                 }
                 if (budget <= 0) {
                     tally.moreWork = true
-                    return settled()
+                    return Outcome.DONE
                 }
 
                 val metadata = attempt {
                     WireJson.encodeToJsonElement(
                         WireJson.decodeFromString<RecordingMetadata>(entry.payload),
                     ).jsonObject
-                }.getOrElse { return failBatch(tally, listOf(entry.id), it) }
-                val wireSize = client.recordingWireSize(file, metadata)
-                val declared = settings.payloadLimit(now())
-                if (declared in 1..<wireSize) {
-                    return failLargeBatch(
+                }.getOrElse {
+                    abandon(
                         tally,
+                        OutboxKind.RECORDING,
                         listOf(entry.id),
+                        undecodableReason(listOf(entry)),
+                        counter = tally.undecodable,
+                        deadReason = DeadReason.UNDECODABLE,
+                    )
+                    continue
+                }
+                val wireSize = client.recordingWireSize(file, metadata)
+                val declared = tally.payloadLimit
+                debug(TAG) {
+                    "recording row ${entry.id}: ${file.length()} bytes, $wireSize on the wire, " +
+                        "cap $declared, attempt ${entry.attempts + 1}, $budget budget left"
+                }
+                if (declared in 1..<wireSize) {
+                    poisoned += deferRuledOn(
+                        tally,
+                        entry,
                         "recording would send $wireSize bytes and the server declared a " +
                             "${declared / 1024} KB cap, so it is not sent",
                     )
+                    continue
                 }
-                budget -= file.length()
+                budget -= wireSize
                 tally.attempted = true
 
                 val outcome = attempt {
                     client.post(settings, "recording", file, metadata)
                 }.getOrElse { return failBatch(tally, listOf(entry.id), it) }
+                debug(TAG) { "recording row ${entry.id} answered $outcome" }
                 when (outcome) {
                     is UploadOutcome.Success, is UploadOutcome.Duplicate -> {
                         tally.delivered = true
-                        (outcome as? UploadOutcome.Success)?.limitBytes?.let {
-                            learnPayloadLimit(it)
-                        }
+                        learn(tally, (outcome as? UploadOutcome.Success)?.limitBytes)
                         if (outcome is UploadOutcome.Duplicate) {
                             tally.note(tally.duplicates, OutboxKind.RECORDING, 1)
                         } else {
@@ -431,10 +457,10 @@ class OutboxDrainer(
                     )
 
                     is UploadOutcome.TooLarge -> {
-                        outcome.limitBytes?.let { learnPayloadLimit(it) }
-                        return failLargeBatch(
+                        learn(tally, outcome.limitBytes)
+                        poisoned += deferRuledOn(
                             tally,
-                            listOf(entry.id),
+                            entry,
                             "recording of ${file.length()} bytes is ${outcome.describe()}",
                         )
                     }
@@ -445,14 +471,7 @@ class OutboxDrainer(
                             tally.lastError = outcome.reason
                             return Outcome.RETRY
                         }
-                        dao.markFailed(
-                            listOf(entry.id),
-                            outcome.reason,
-                            serverFault = true,
-                            retryAfter = deferral(entry.attempts),
-                        )
-                        tally.lastError = outcome.reason
-                        poisoned += entry.id
+                        poisoned += deferRuledOn(tally, entry, outcome.reason)
                     }
                 }
             }
@@ -491,9 +510,16 @@ class OutboxDrainer(
         }
     }
 
+    // A row whose audio will not delete is the harvest's only memory of that
+    // file: purge it and the next scan queues and uploads the file again. It
+    // starts another retention period instead.
     private suspend fun purgeExpiredDeadRows(tally: DrainTally) {
         val before = now() - OutboxLimits.DEAD_RETENTION_MILLIS
-        dao.deadFilesBefore(before).forEach { deleteAudio(File(it)) }
+        dao.deadFilesBefore(before)
+            .filterNot { deleteAudio(File(it.filePath)) }
+            .map { it.id }
+            .chunked(SQLITE_MAX_PARAMETERS)
+            .forEach { dao.restampDead(it, now()) }
         val purged = dao.deleteDeadBefore(before)
         if (purged == 0) return
         tally.purged += purged
@@ -521,15 +547,20 @@ class OutboxDrainer(
         Result.failure(failure)
     }
 
-    private suspend fun failLargeBatch(
-        tally: DrainTally,
-        ids: List<Long>,
-        reason: String,
-    ): Outcome {
-        Log.w(TAG, "Keeping ${ids.size} row(s) the server would not take: $reason")
-        dao.markFailed(ids, reason, serverFault = true)
+    // A row the server has ruled on -- it raised on it, or it is over the cap
+    // -- is charged and waits on its own retryAfter; the rest of the queue
+    // keeps moving. Returning RETRY instead parked every row behind it and
+    // walked the whole worker into WorkManager's five-hour backoff.
+    private suspend fun deferRuledOn(tally: DrainTally, entry: OutboxEntry, reason: String): Long {
+        Log.w(TAG, "Keeping ${entry.kind} row ${entry.id} the server would not take: $reason")
+        dao.markFailed(
+            listOf(entry.id),
+            reason,
+            serverFault = true,
+            retryAfter = deferral(entry.attempts),
+        )
         tally.lastError = reason
-        return Outcome.RETRY
+        return entry.id
     }
 
     private suspend fun failBatch(tally: DrainTally, ids: List<Long>, cause: Throwable): Outcome {
@@ -560,6 +591,9 @@ class OutboxDrainer(
         private const val ROW_BACKOFF_DOUBLINGS = 6
 
         const val REVIVAL_PROBE = 1
+
+        // Android 10-11 ship SQLite 3.28, whose host-parameter limit is 999.
+        private const val SQLITE_MAX_PARAMETERS = 900
 
         private const val TAG = "OutboxDrainer"
 

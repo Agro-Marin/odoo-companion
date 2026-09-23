@@ -3,6 +3,7 @@ package com.odoocompanion.ui
 import com.odoocompanion.R
 import com.odoocompanion.config.PAYLOAD_LIMIT_TTL_MILLIS
 import com.odoocompanion.config.Settings
+import com.odoocompanion.data.OutboxCounts
 import com.odoocompanion.system.Blocker
 import com.odoocompanion.system.HealthReport
 import org.junit.Assert.assertEquals
@@ -25,12 +26,12 @@ class StatusScreenPolicyTest {
         token = "t",
     )
 
-    private val empty = QueueDepths(0, 0, 0, 0)
+    private val empty = OutboxCounts(0, 0, 0, 0)
 
     private fun lines(
         settings: Settings = enrolled,
         report: HealthReport = health(),
-        queues: QueueDepths = empty,
+        queues: OutboxCounts = empty,
     ) = StatusScreen.lines(settings, report, queues)
 
     @Test
@@ -75,15 +76,21 @@ class StatusScreenPolicyTest {
     }
 
     @Test
-    fun `an error outranks a past success on the last-upload line`() {
+    fun `an error is shown beside the last delivery, not instead of it`() {
         val shown = lines(
             enrolled.copy(lastUploadAt = 500L, lastUploadError = "server 500"),
         )
 
-        assertTrue(
-            StatusLine.Detail(R.string.status_last_upload_failed, "server 500") in shown,
-        )
-        assertFalse(shown.any { it.text == R.string.status_last_upload_ok })
+        assertTrue(StatusLine.Detail(R.string.status_last_error, "server 500") in shown)
+        assertTrue(StatusLine.Since(R.string.status_last_upload_ok, 500L) in shown)
+    }
+
+    @Test
+    fun `an error with no delivery yet says there has been none`() {
+        val shown = lines(enrolled.copy(lastUploadError = "auth rejected (401)"))
+
+        assertTrue(StatusLine.Detail(R.string.status_last_error, "auth rejected (401)") in shown)
+        assertTrue(StatusLine.Say(R.string.status_last_upload_never) in shown)
     }
 
     @Test
@@ -99,7 +106,7 @@ class StatusScreenPolicyTest {
     fun `the hint only appears with something to act on`() {
         assertFalse(lines().any { it.text == R.string.status_undeliverable_hint })
 
-        val stuck = lines(queues = QueueDepths(1, 2, 3, 4))
+        val stuck = lines(queues = OutboxCounts(1, 2, 3, 4))
 
         assertTrue(StatusLine.Quantity(R.plurals.status_undeliverable, 4) in stuck)
         assertTrue(stuck.any { it.text == R.string.status_undeliverable_hint })
@@ -107,7 +114,7 @@ class StatusScreenPolicyTest {
 
     @Test
     fun `every queue is counted, including the empty ones`() {
-        val shown = lines(queues = QueueDepths(7, 8, 9, 0))
+        val shown = lines(queues = OutboxCounts(7, 8, 9, 0))
 
         assertTrue(StatusLine.Count(R.string.status_queued_positions, 7) in shown)
         assertTrue(StatusLine.Count(R.string.status_queued_calls, 8) in shown)

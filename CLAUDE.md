@@ -137,9 +137,15 @@ machine at `http://10.0.2.2:<port>`.
   `identifier` outside `[A-Za-z0-9._~-]` is rejected rather than applied.
 - **A recording's row and its audio file are removed together.** Every terminal
   path deletes the file; while a row is dead-lettered the file is deliberately
-  kept, because `RecordingScanner` filters on `lastModified() > cursor` and the
-  harvest cursor has already moved past it — an orphaned file is both
-  un-uploadable and un-rescannable.
+  kept. The scanner has no cursor, so the outbox is the harvest's only memory of
+  a file: a file whose row is gone is queued and uploaded again. That is why a
+  delivered file that will not delete stays as a `kept_on_disk` row, and why the
+  90-day purge re-stamps a dead row whose audio it still cannot delete instead
+  of forgetting it. A `kept_on_disk` row was delivered, so the status screen's
+  undeliverable count (`countUndeliverable`) leaves it out; `countDead` still
+  counts every dead row. On Android 10 without `WRITE_EXTERNAL_STORAGE` that is
+  every uploaded recording, each of which used to read as a failure with a hint
+  to go and fix the device in Odoo.
 - **The configured interval is the interval.** `app_restrictions.xml` calls
   `location_interval_seconds` "seconds between position reports" and the README
   repeats it, but `requestUpdates` set `setMinUpdateIntervalMillis` to *half* the
@@ -159,7 +165,12 @@ machine at `http://10.0.2.2:<port>`.
   and reported success, with no blocker anywhere. `READ_MEDIA_AUDIO` does not
   cover `getExternalStorageDirectory()`. `blockers()` takes `recordingsWanted`
   alongside `callLogWanted` — both parameters are required, so a new collector
-  cannot be added without deciding what makes it visibly broken.
+  cannot be added without deciding what makes it visibly broken — and
+  `DeviceHealth.wantedPermissions` takes the same two, so a collector that is
+  off costs no prompt. The legacy storage pair is asked for, and declared, only
+  up to API 29; from 11 the folder takes all-files access, which no runtime
+  prompt grants. An approximate location grant leads on to the all-the-time
+  prompt as a precise one does.
   On Android 10 the check also wants `WRITE_EXTERNAL_STORAGE` (declared to API 29):
   measured on an API 29 emulator, the harvest read and uploaded a recording owned by
   `sdcard_rw` and then could not delete it, so every uploaded recording stayed on the
@@ -240,15 +251,19 @@ machine at `http://10.0.2.2:<port>`.
   that answers with an empty bundle means the policy was withdrawn. Mapping both
   to empty unlocked the form on a managed handset whenever the service was
   unavailable, which is the invariant above it turned inside out.
-- **The call-log cursor is `LAST_MODIFIED`, not `DATE`.** Android writes a call's row
-  when the call ends, stamped with its start. Cursoring on `DATE` lost any call that
-  ended after a shorter, later one had been synced (call waiting during a long call
-  spanning a worker run): its row landed behind the cursor and was never read.
-  `LAST_MODIFIED` catches late rows and later edits; a re-sent call comes back as a
-  `duplicate`, which is a delivery. `CallLogCursorTest` constructs the loss.
-- **A bounded read counts what it reads, not what it keeps.** `CallLogReader`
-  stopped at 1 000 *stored* rows, so a log whose numbers are mostly blank walked
-  the whole provider in one pass while still reporting `moreWaiting = false`.
+- **The call-log cursor is the row `_ID`, not a timestamp.** Android writes a call's
+  row when the call ends, stamped with its start, so `DATE` lost a call that ended
+  after a shorter, later one had been synced; `LAST_MODIFIED` fixed that and still
+  lost rows stamped after a backwards clock correction. An id is assigned by the
+  insert. The timestamp cursor is read once, to seed the id cursor on upgrade, and
+  an id cursor above the provider's newest id means the log was cleared or
+  restored, so the worker reads it again from zero. `CallLogCursorTest` (in
+  `CallLogReaderTest.kt`) constructs the losses.
+- **A bounded read counts what it reads, not what it keeps, and says so.**
+  `CallLogReader` stops at 1 000 *scanned* rows and reports `moreWaiting`; the
+  worker chains another pass rather than reporting success and sleeping for its
+  period. Counting stored rows walked a mostly-blank log in one pass while
+  reporting `moreWaiting = false`. Same shape as `DrainReport.moreWorkPending`.
 - **Uploads are at-least-once, and the server deduplicates — at two layers.**
   A `remote.device` in the **Mobile Phone category** is created with
   `duplicate_detection_enabled` and a 900 s window, so a retry of a committed
@@ -349,7 +364,7 @@ machine at `http://10.0.2.2:<port>`.
   and threw away while re-sending an identical batch, because `LOCATION_BATCH`,
   `CALL_LOG_BATCH` and `MAX_RECORDING_BYTES` are compile-time constants. Now
   `UploadOutcome.TooLarge` carries the declared limit: a multi-row batch halves and
-  retries within the same drain, a single row is charged and kept (raising the cap
+  retries within the same drain, a single row is charged, kept and deferred (raising the cap
   is an operator action, so `refused` would be wrong) and the revival bound above is
   what stops it cycling. **`MAX_RECORDING_BYTES` is the same policy, not a second
   one**: it is the 50 MB mobile-category cap divided by base64's 4/3, and a file over
@@ -383,11 +398,55 @@ machine at `http://10.0.2.2:<port>`.
   when a row will not decode, so the reason names the format rather than shrugging.
   It has to exist *before* it is needed: rows already queued cannot be marked
   retroactively.
+- **A verdict on one row never parks the queue.** A row the server ruled on — a
+  500 from an ingest that raises on it, a single row over the cap, a recording over
+  the declared cap or over `MAX_RECORDING_BYTES` — goes through `deferRuledOn`:
+  charged as a server fault, given its own `retryAfter`, excluded from the rest of
+  the pass, and the drain goes on. Only the 500 took that path at first; a
+  recording over the cap returned `RETRY`, and as the oldest row it headed every
+  `take`, so no recording behind it was ever sent and the worker walked into
+  WorkManager's five-hour backoff, with the `upload-now` requests the location
+  service makes (`KEEP`) waiting behind it. `RETRY` is for the link.
+  A recording whose metadata will not decode is `undecodable`, exactly like a
+  batch row, so `reviveUndecodable` finds it; it used to be charged as a link
+  failure and went through the same head-of-line block.
+  The cap a reply states applies to the rest of the same pass (`DrainTally.payloadLimit`)
+  and is persisted once per drain, not once per batch.
 - **`lastUploadAt` means a delivery, not a drain that did not error.** `recordUpload`
   took only the error, so an empty queue — `outcome=DONE, lastError=null` — wrote a
   fresh timestamp and the screen said `Last upload: just now` on a phone that had not
   reached the server in a week. `DrainReport.delivered` was already tracked for the
-  revival logic and simply was not exposed.
+  revival logic and simply was not exposed. The converse holds too: a drain that
+  delivered stamps it even when another row failed in the same pass. The status
+  screen shows the last delivery and the last error as two lines, because a phone
+  delivering every position while one recording waits out a 500 is neither
+  "failed" nor "fine".
+- **The form is filled once, then only where a policy governs it.** The store
+  re-emits on every write — every upload records its attempt — and a managed phone
+  used to repaint the whole form on each emission. Under a partial policy (a
+  console that publishes only the switches) that wiped whatever enrolment the
+  person was typing the moment any worker wrote to the store — and Save itself
+  was such a writer: it stored each switch as its own edit before reading the
+  enrolment fields, so changing a switch alongside typing the enrolment stored
+  the switch and an empty enrolment (measured: `wifiOnlyUploads=true`,
+  `baseUrl=""`). `DeviceConfig.saveForm` is one validated edit, taken from a
+  snapshot of the form made before anything suspends, and it skips the keys the
+  policy governs; a refused base URL now stores nothing, where it used to leave
+  the switches written without a reconcile. It is the form's only write path:
+  `saveEnrollment`, `setUploadWindow` and `setLocationInterval` repeated its
+  validation and its clamping for tests alone and are gone, and the two setters
+  left (`setFeature`, `setWifiOnlyUploads`) are `@VisibleForTesting` seams for
+  states the form cannot produce.
+- **The status text is a function of what it shows, and redraws when any of it
+  changes**: the settings, `OutboxDao.counts()` (a Room `Flow`, so the queue lines
+  follow every fix and every upload), a refused save (which used to be overwritten
+  by the next redraw), and a re-read of the permissions on every `onResume`,
+  because the battery and permission prompts only pause the screen. It used to
+  redraw only when a setting changed, so the queue it showed was whatever it was
+  when the screen last happened to redraw.
+- **A learned server fact belongs to what it was learned from.** Whether the
+  server names itself is forgotten on a new base URL; the payload cap, a setting
+  on the device record, is forgotten on a new base URL *or* identifier.
 - **`skipped`, `duplicates` and `undecodable` are three different numbers.** The
   server read it and could not store it; the server already had it; this build
   could not decode it. Reporting them as one told an operator that a device
@@ -411,9 +470,6 @@ machine at `http://10.0.2.2:<port>`.
   body is an early return. Skipping the enqueue alone changes nothing on a phone
   that already has the registration, so the off branch cancels. The upload stays
   registered either way — it is what drains a queue a previous enrollment left.
-- **A bounded read says so.** `CallLogReader` stops at 1 000 rows and reports
-  `moreWaiting`; the worker chains another pass rather than reporting success
-  and sleeping for its period. Same shape as `DrainReport.moreWorkPending`.
 - **A managed value may arrive as text.** Several EMM consoles serialise every
   restriction as a string — integers *and* booleans. `Bundle.getBoolean` on a
   String returns `false`, so `wifi_only_uploads: "true"` sent call audio over
@@ -441,6 +497,17 @@ machine at `http://10.0.2.2:<port>`.
   **does not chunk** (see the generated `OutboxDao_Impl`), so any unbounded id
   list is a crash on `minSdk` that no test here can reproduce. Keep `DELETE`s
   predicate-shaped rather than id-shaped.
+
+## Debug logging
+
+`system/DebugLog.kt`'s `debug(TAG) { … }` writes only when the handset asks for
+that tag — `adb shell setprop log.tag.OutboxDrainer DEBUG`, likewise
+`LocationQueue`, `RecordingHarvest`, `CallLogSyncWorker` — so the drain's
+per-batch decisions, how it classified each reply, the batching
+cadence and the harvest counts are available on a release build without being
+in every bug report. Counts, ids and codes only; `tools/lint.sh`'s path gate
+covers `debug {}` bodies as well as `Log.*` calls. Not in `net/`: `OdooClient`'s
+tests are plain JVM, where `android.util.Log` is an unmocked stub.
 
 ## Privacy posture — what was checked, and what it costs
 

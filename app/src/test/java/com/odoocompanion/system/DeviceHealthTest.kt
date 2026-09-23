@@ -147,4 +147,42 @@ class DeviceHealthTest {
         )
         assertTrue(report.blockers(callLogWanted = false, recordingsWanted = false).isEmpty())
     }
+
+    @Test
+    fun `a collector that is off costs no prompt`() {
+        val bare = DeviceHealth.wantedPermissions(
+            callLogWanted = false,
+            recordingsWanted = false,
+            sdk = 29,
+        )
+
+        assertFalse(Manifest.permission.READ_CALL_LOG in bare)
+        assertFalse(Manifest.permission.READ_EXTERNAL_STORAGE in bare)
+        assertFalse(Manifest.permission.WRITE_EXTERNAL_STORAGE in bare)
+    }
+
+    @Test
+    fun `recordings ask for the legacy storage pair only where it is the access`() {
+        val android10 = DeviceHealth.wantedPermissions(false, recordingsWanted = true, sdk = 29)
+        val android12 = DeviceHealth.wantedPermissions(false, recordingsWanted = true, sdk = 31)
+
+        assertTrue(Manifest.permission.READ_EXTERNAL_STORAGE in android10)
+        assertTrue(Manifest.permission.WRITE_EXTERNAL_STORAGE in android10)
+        assertFalse(
+            "from 11 the folder takes all-files access; a runtime prompt grants nothing",
+            Manifest.permission.READ_EXTERNAL_STORAGE in android12,
+        )
+    }
+
+    @Test
+    fun `notifications are asked for where they are a runtime permission`() {
+        assertFalse(
+            Manifest.permission.POST_NOTIFICATIONS in
+                DeviceHealth.wantedPermissions(true, false, sdk = 32),
+        )
+        assertTrue(
+            Manifest.permission.POST_NOTIFICATIONS in
+                DeviceHealth.wantedPermissions(true, false, sdk = 33),
+        )
+    }
 }

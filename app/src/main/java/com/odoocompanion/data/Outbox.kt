@@ -10,6 +10,7 @@ import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import kotlinx.coroutines.flow.Flow
 
 object OutboxKind {
     const val LOCATION = "location"
@@ -94,6 +95,26 @@ interface OutboxDao {
 
     @Query("SELECT COUNT(*) FROM outbox WHERE deadAt IS NOT NULL")
     suspend fun countDead(): Int
+
+    // What the status screen shows, re-read whenever the table changes: a
+    // screen that read its counts only when a setting changed showed the queue
+    // as it was when the screen last happened to redraw. Undeliverable leaves
+    // out kept_on_disk: that row was delivered, and stays only so the harvest
+    // does not queue its file again.
+    @Query(
+        """
+        SELECT
+            COALESCE(SUM(deadAt IS NULL AND kind = '${OutboxKind.LOCATION}'), 0) AS positions,
+            COALESCE(SUM(deadAt IS NULL AND kind = '${OutboxKind.CALL_LOG}'), 0) AS calls,
+            COALESCE(SUM(deadAt IS NULL AND kind = '${OutboxKind.RECORDING}'), 0) AS recordings,
+            COALESCE(
+                SUM(deadAt IS NOT NULL AND deadReason IS NOT '${DeadReason.KEPT_ON_DISK}'),
+                0
+            ) AS undeliverable
+        FROM outbox
+        """,
+    )
+    fun counts(): Flow<OutboxCounts>
 
     @Query("DELETE FROM outbox WHERE id IN (:ids)")
     suspend fun delete(ids: List<Long>)
@@ -189,11 +210,14 @@ interface OutboxDao {
 
     @Query(
         """
-        SELECT filePath FROM outbox
+        SELECT id, filePath FROM outbox
         WHERE deadAt IS NOT NULL AND deadAt < :before AND filePath IS NOT NULL
         """,
     )
-    suspend fun deadFilesBefore(before: Long): List<String>
+    suspend fun deadFilesBefore(before: Long): List<QueuedFile>
+
+    @Query("UPDATE outbox SET deadAt = :now WHERE id IN (:ids)")
+    suspend fun restampDead(ids: List<Long>, now: Long)
 
     @Query("DELETE FROM outbox WHERE deadAt IS NOT NULL AND deadAt < :before")
     suspend fun deleteDeadBefore(before: Long): Int
@@ -222,6 +246,15 @@ interface OutboxDao {
 }
 
 data class QueueDepth(val queued: Int, val oldestCreatedAt: Long?)
+
+data class OutboxCounts(
+    val positions: Int,
+    val calls: Int,
+    val recordings: Int,
+    val undeliverable: Int,
+)
+
+data class QueuedFile(val id: Long, val filePath: String)
 
 object OutboxLimits {
     const val MAX_QUEUED_FIXES = 20_000

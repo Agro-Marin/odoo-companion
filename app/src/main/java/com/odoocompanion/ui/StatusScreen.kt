@@ -4,15 +4,9 @@ import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import com.odoocompanion.R
 import com.odoocompanion.config.Settings
+import com.odoocompanion.data.OutboxCounts
 import com.odoocompanion.system.Blocker
 import com.odoocompanion.system.HealthReport
-
-data class QueueDepths(
-    val positions: Int,
-    val calls: Int,
-    val recordings: Int,
-    val undeliverable: Int,
-)
 
 sealed interface StatusLine {
     // Deliberately unannotated: every variant but Quantity holds a @StringRes,
@@ -35,7 +29,7 @@ object StatusScreen {
     fun lines(
         settings: Settings,
         health: HealthReport,
-        queues: QueueDepths,
+        queues: OutboxCounts,
         now: Long = System.currentTimeMillis(),
     ): List<StatusLine> = buildList {
         val enrolment =
@@ -50,6 +44,7 @@ object StatusScreen {
             .forEach { add(StatusLine.Say(textFor(it))) }
 
         add(lastUpload(settings))
+        settings.lastUploadError?.let { add(StatusLine.Detail(R.string.status_last_error, it)) }
         if (settings.lastAttemptAt > settings.lastUploadAt) {
             add(StatusLine.Since(R.string.status_last_attempt, settings.lastAttemptAt))
         }
@@ -75,13 +70,13 @@ object StatusScreen {
         Blocker.RECORDING_STORAGE_MISSING -> R.string.status_recording_storage_missing
     }
 
-    private fun lastUpload(settings: Settings): StatusLine = when {
-        settings.lastUploadError != null ->
-            StatusLine.Detail(R.string.status_last_upload_failed, settings.lastUploadError)
-
-        settings.lastUploadAt > 0L ->
-            StatusLine.Since(R.string.status_last_upload_ok, settings.lastUploadAt)
-
-        else -> StatusLine.Say(R.string.status_last_upload_never)
+    // The last delivery and the last error are two lines, not one: a drain can
+    // deliver every position and still defer the one recording the server
+    // raised on, and a single line either hid the error or called a working
+    // phone failed.
+    private fun lastUpload(settings: Settings): StatusLine = if (settings.lastUploadAt > 0L) {
+        StatusLine.Since(R.string.status_last_upload_ok, settings.lastUploadAt)
+    } else {
+        StatusLine.Say(R.string.status_last_upload_never)
     }
 }

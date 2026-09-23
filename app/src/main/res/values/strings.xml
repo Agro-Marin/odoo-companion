@@ -34,7 +34,7 @@
     <string name="status_location_missing">Location permission missing — not reporting</string>
     <string name="status_battery_optimized">Battery optimization is on — reporting will stop when the phone idles</string>
     <string name="status_last_upload_ok">Last upload: %1$s</string>
-    <string name="status_last_upload_failed">Last upload failed: %1$s</string>
+    <string name="status_last_error">Last error: %1$s</string>
     <string name="status_last_upload_never">No upload yet</string>
     <string name="status_background_location_missing">Location set to “while using the app” — reporting will not resume after a restart until it is set to “Allow all the time”</string>
     <string name="restriction_base_url_title">Odoo base URL</string>

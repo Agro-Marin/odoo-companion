@@ -25,7 +25,7 @@ class DamagedConfigTest {
 
         assertFalse(config.current().isEnrolled)
 
-        config.saveEnrollment("https://odoo.example.com", "phone-01", "t".repeat(64))
+        config.enrol("https://odoo.example.com", "phone-01", "t".repeat(64))
 
         assertTrue(config.current().isEnrolled)
     }

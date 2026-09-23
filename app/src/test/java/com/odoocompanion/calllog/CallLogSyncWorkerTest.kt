@@ -10,6 +10,7 @@ import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
+import com.odoocompanion.config.enrol
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.sync.SyncScheduler
 import kotlinx.coroutines.test.runTest
@@ -49,7 +50,7 @@ class CallLogSyncWorkerTest {
     }
 
     private suspend fun enroll() {
-        app.config.saveEnrollment("https://odoo.example.com", "phone-01", "token")
+        app.config.enrol("https://odoo.example.com", "phone-01", "token")
     }
 
     private suspend fun run(vararg tags: String): ListenableWorker.Result =

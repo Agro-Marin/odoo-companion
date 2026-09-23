@@ -14,6 +14,8 @@ import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.ManagedConfig
 import com.odoocompanion.config.ManagedValues
+import com.odoocompanion.config.enrol
+import com.odoocompanion.config.form
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import kotlinx.coroutines.Dispatchers
@@ -168,7 +170,7 @@ class StatusScreenTest {
             Manifest.permission.READ_CALL_LOG,
         )
         batteryExemption(true)
-        app.config.saveEnrollment("https://odoo.example.com", "phone-01", "t".repeat(64))
+        app.config.enrol("https://odoo.example.com", "phone-01", "t".repeat(64))
 
         val shown = status()
 
@@ -275,18 +277,210 @@ class StatusScreenTest {
 
     @Test
     fun `the form carries the stored interval and clamps what is typed`() = runTest {
-        app.config.setLocationInterval(120)
+        app.config.saveForm(form(locationIntervalSeconds = 120))
 
         val activity = open()
         val field = activity.findViewById<android.widget.EditText>(R.id.locationInterval)
         assertTrue(field.text.toString() == "120")
 
+        // Saved against a valid enrolment and waited for: asserted straight
+        // after the click, the stored 120 satisfied ">= 15" before Save had
+        // written anything, so the clamp was never what the test observed.
+        activity.type(R.id.baseUrl, "https://odoo.example.com")
+        activity.type(R.id.identifier, "phone-01")
+        activity.type(R.id.token, "t")
         field.setText("1")
         activity.findViewById<View>(R.id.save).performClick()
+        settle()
 
         assertTrue(
-            app.config.current().locationIntervalSeconds.toString(),
-            app.config.current().locationIntervalSeconds >= 15,
+            app.config.current().toString(),
+            app.config.current().locationIntervalSeconds == 15L,
+        )
+    }
+
+    private fun settle() = repeat(50) {
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        Thread.sleep(20)
+    }
+
+    private fun MainActivity.type(id: Int, value: String) =
+        findViewById<android.widget.EditText>(id).setText(value)
+
+    // The case a partial policy exists for: the console publishes the switches
+    // and the person holding the phone types the enrolment. Save writes the
+    // switches first, every write re-emits the settings, and a managed device
+    // used to repaint the whole form on each emission -- so the typed fields
+    // were back to their stored, empty values by the time Save read them.
+    @Test
+    fun `a partly managed phone saves the enrolment typed into it`() = runTest {
+        app.config.applyManaged(policy("call_log_enabled" to true, "wifi_only_uploads" to false))
+        val activity = open()
+        settle()
+
+        activity.type(R.id.baseUrl, "https://odoo.example.com")
+        activity.type(R.id.identifier, "phone-07")
+        activity.type(R.id.token, "typed-token")
+        activity.findViewById<View>(R.id.save).performClick()
+        settle()
+
+        val saved = app.config.current()
+        assertTrue(saved.toString(), saved.identifier == "phone-07")
+        assertTrue(saved.toString(), saved.baseUrl == "https://odoo.example.com")
+    }
+
+    @Test
+    fun `a background write does not wipe what is being typed on a managed phone`() = runTest {
+        app.config.applyManaged(policy("call_log_enabled" to true))
+        val activity = open()
+        settle()
+
+        activity.type(R.id.identifier, "phone-07")
+        app.config.recordUpload(at = 1_000L, delivered = false, error = "offline")
+        settle()
+
+        assertTrue(
+            activity.findViewById<android.widget.EditText>(R.id.identifier).text.toString() ==
+                "phone-07",
+        )
+    }
+
+    // Save used to write each switch as its own edit before validating the
+    // enrolment, and on a managed phone every edit repainted the form -- so a
+    // switch the person changed was the write that put the stored, empty
+    // enrolment back into the fields Save was about to read.
+    @Test
+    fun `a partly managed phone saves the enrolment typed beside a changed switch`() = runTest {
+        app.config.applyManaged(policy("call_log_enabled" to true))
+        val activity = open()
+        settle()
+
+        activity.type(R.id.baseUrl, "https://odoo.example.com")
+        activity.type(R.id.identifier, "phone-07")
+        activity.type(R.id.token, "typed-token")
+        activity.findViewById<android.widget.CompoundButton>(R.id.wifiOnly).isChecked = true
+        activity.findViewById<View>(R.id.save).performClick()
+        settle()
+
+        val saved = app.config.current()
+        assertTrue(saved.toString(), saved.identifier == "phone-07")
+        assertTrue(saved.toString(), saved.wifiOnlyUploads)
+    }
+
+    @Test
+    fun `a refused enrolment saves none of the form`() = runTest {
+        val activity = open()
+        settle()
+
+        activity.type(R.id.baseUrl, "odoo.example.com")
+        activity.findViewById<android.widget.CompoundButton>(R.id.wifiOnly).isChecked = true
+        activity.findViewById<View>(R.id.save).performClick()
+        settle()
+
+        assertFalse(app.config.current().wifiOnlyUploads)
+    }
+
+    // A recording that was delivered and whose file would not delete is kept
+    // only as the harvest's memory of that file. It is not undeliverable, and
+    // counting it told an operator to fix a device that had delivered it.
+    @Test
+    fun `a delivered recording kept on disk is not counted as undeliverable`() = runTest {
+        val dao = app.database.outbox()
+        dao.insert(OutboxEntry(kind = OutboxKind.RECORDING, payload = "{}", createdAt = 1))
+        dao.markDeadIds(
+            dao.take(OutboxKind.RECORDING, 1).map { it.id },
+            1_000L,
+            "uploaded, but the file could not be deleted",
+            com.odoocompanion.data.DeadReason.KEPT_ON_DISK,
+        )
+
+        val shown = status()
+
+        assertFalse(shown, text(R.string.status_undeliverable_hint) in shown)
+    }
+
+    // The queue changes on every fix and every upload without a setting
+    // changing, and the screen used to redraw only when a setting did.
+    @Test
+    fun `the queue counts follow the queue while the screen is open`() = runTest {
+        val activity = open()
+        settle()
+
+        app.database.outbox().insert(
+            OutboxEntry(kind = OutboxKind.LOCATION, payload = "{}", createdAt = 1),
+        )
+        settle()
+
+        val shown = activity.findViewById<TextView>(R.id.status).text.toString()
+        assertTrue(shown, app.getString(R.string.status_queued_positions, 1) in shown)
+    }
+
+    @Test
+    fun `a refused save stays on screen through a redraw`() = runTest {
+        val activity = open()
+        settle()
+
+        activity.type(R.id.baseUrl, "odoo.example.com")
+        activity.findViewById<View>(R.id.save).performClick()
+        settle()
+        app.database.outbox().insert(
+            OutboxEntry(kind = OutboxKind.LOCATION, payload = "{}", createdAt = 1),
+        )
+        settle()
+
+        val shown = activity.findViewById<TextView>(R.id.status).text.toString()
+        assertTrue(shown, text(R.string.status_bad_base_url) in shown)
+    }
+
+    // The battery-exemption prompt and the permission dialogs only pause this
+    // screen, so nothing that restarts on STARTED ever re-read the grants.
+    @Test
+    fun `a grant made behind a dialog shows once the screen resumes`() = runTest {
+        batteryExemption(true)
+        open()
+        settle()
+        Shadows.shadowOf(app).grantPermissions(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+        )
+
+        controller!!.pause().resume()
+        settle()
+
+        val shown = controller!!.get().findViewById<TextView>(R.id.status).text.toString()
+        assertFalse(shown, text(R.string.status_location_missing) in shown)
+    }
+
+    // Android 12 lets the person choose approximate. Only a precise grant used
+    // to lead on to the all-the-time prompt, so an approximate one stopped at
+    // "while using the app" -- the grant that goes quiet after a reboot.
+    @Test
+    fun `an approximate grant still leads on to the all-the-time prompt`() = runTest {
+        val activity = open()
+        settle()
+        activity.findViewById<View>(R.id.grantPermissions).performClick()
+        settle()
+        val shadow = Shadows.shadowOf(activity)
+        val asked = shadow.lastRequestedPermission
+        Shadows.shadowOf(app).grantPermissions(Manifest.permission.ACCESS_COARSE_LOCATION)
+
+        activity.onRequestPermissionsResult(
+            asked.requestCode,
+            asked.requestedPermissions,
+            asked.requestedPermissions.map {
+                if (it == Manifest.permission.ACCESS_COARSE_LOCATION) {
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                } else {
+                    android.content.pm.PackageManager.PERMISSION_DENIED
+                }
+            }.toIntArray(),
+        )
+        settle()
+
+        assertTrue(
+            shadow.lastRequestedPermission.requestedPermissions.toList().toString(),
+            shadow.lastRequestedPermission.requestedPermissions.toList() ==
+                listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
         )
     }
 }

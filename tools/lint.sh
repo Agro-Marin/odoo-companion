@@ -92,16 +92,25 @@ import pathlib, re, sys
 bad = []
 for path in pathlib.Path("app/src/main").rglob("*.kt"):
     text = path.read_text()
-    for match in re.finditer(r"Log\.[wide]\(", text):
-        depth, index = 0, match.end() - 1
+    def closing(index, opener, closer):
+        depth = 0
         while index < len(text):
-            if text[index] == "(":
+            if text[index] == opener:
                 depth += 1
-            elif text[index] == ")":
+            elif text[index] == closer:
                 depth -= 1
                 if depth == 0:
                     break
             index += 1
+        return index
+
+    # debug {} takes its message as a trailing lambda, so the call runs to the
+    # closing brace, not the closing parenthesis.
+    for match in re.finditer(r"(?:\bLog\.[vdiwe]|\bdebug)\(", text):
+        index = closing(match.end() - 1, "(", ")")
+        rest = text[index + 1:]
+        if rest.lstrip(" ").startswith("{"):
+            index = closing(index + 1 + len(rest) - len(rest.lstrip(" ")), "{", "}")
         call = text[match.start():index + 1]
         if "absolutePath" in call or "filePath" in call:
             line = text[:match.start()].count("\n") + 1

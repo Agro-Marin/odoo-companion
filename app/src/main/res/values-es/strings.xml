@@ -32,7 +32,7 @@
     <string name="status_location_missing">Falta el permiso de ubicación: no se está reportando</string>
     <string name="status_battery_optimized">La optimización de batería está activa: el reporte se detendrá cuando el teléfono quede inactivo</string>
     <string name="status_last_upload_ok">Último envío: %1$s</string>
-    <string name="status_last_upload_failed">El último envío falló: %1$s</string>
+    <string name="status_last_error">Último error: %1$s</string>
     <string name="status_last_upload_never">Todavía no se ha enviado nada</string>
     <string name="status_background_location_missing">La ubicación está en “solo mientras usas la app”: el reporte no se reanudará después de reiniciar hasta que la pongas en “Permitir todo el tiempo”</string>
     <string name="restriction_base_url_title">URL base de Odoo</string>

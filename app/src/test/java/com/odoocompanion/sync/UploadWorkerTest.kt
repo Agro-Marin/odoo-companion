@@ -7,6 +7,7 @@ import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
+import com.odoocompanion.config.enrol
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import kotlinx.coroutines.test.runTest
@@ -47,7 +48,7 @@ class UploadWorkerTest {
     private suspend fun unenroll() = app.config.clearEnrollment()
 
     private suspend fun enroll() {
-        app.config.saveEnrollment(
+        app.config.enrol(
             server.url("/").toString().trimEnd('/'),
             "phone-01",
             "token",

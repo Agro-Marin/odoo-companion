@@ -117,7 +117,7 @@ anything again, one row is released per budget as a probe. A row the server
 | 409 | the transport layer recognised this exact request inside the dedup window | removed, counted as a duplicate |
 | 422 **reporting duplicates** | an older server's spelling of "I already hold this batch" | removed, counted as a duplicate |
 | 400, 422 | unreadable, or read and nothing storable | positions deleted; calls and recordings marked dead |
-| 413 | over the device's `max_payload_size` | a multi-row batch **halves and retries** in the same drain; one row is **kept and charged** |
+| 413 | over the device's `max_payload_size` | a multi-row batch **halves and retries** in the same drain; one row is **kept, charged and deferred** on its own clock while the rest of the queue moves |
 | 401, 403, 404, 429, 5xx, anything else | transient, or fixable from Odoo | **kept and retried** |
 | 2xx without `"status": "success"` | *nothing on this network is Odoo* | **kept and retried** |
 | any other row-removing status whose body carries neither `status` nor `error` | same | **kept and retried** |
@@ -307,7 +307,8 @@ on-premise instance genuinely must serve plain HTTP in production, add a
 The status screen is the first stop, because the usual causes are local to the handset
 and invisible from Odoo. It shows enrollment, whether an MDM configured the device, the
 depth of each queue, how many records could not be delivered at all, when the last upload
-succeeded, when it was last attempted if that is more recent (a device failing since
+delivered anything, the last error on its own line (a phone can deliver every position while
+one recording waits out a server fault), when it was last attempted if that is more recent (a device failing since
 Tuesday and one whose worker stopped running on Tuesday need different fixes), and the
 three conditions that stop reporting outright:
 
@@ -337,8 +338,19 @@ hours of `lastModified`). Nothing shorter works — `2025102814` is both a plaus
 `YYYYMMDDHH` and the real number 202-510-2814, and only the file's own mtime separates
 them.
 
-`adb logcat -s OdooClient LocationService CompanionApp` shows upload failures, permission
-refusals and applied managed configuration.
+`adb logcat -s OdooClient OutboxDrainer UploadWorker LocationService CompanionApp ManagedConfig`
+shows upload failures, rows set aside or dead-lettered, permission refusals and applied
+managed configuration. Each decision behind those — what a drain took and how it read each
+reply, whether a fix was kept and whether it asked for an upload, what a harvest or a
+call-log pass found — is logged at debug level, off until the handset is asked for it:
+
+```bash
+adb shell setprop log.tag.OutboxDrainer DEBUG      # also LocationQueue, RecordingHarvest, CallLogSyncWorker
+adb logcat -s OutboxDrainer LocationQueue RecordingHarvest CallLogSyncWorker
+```
+
+Those lines carry counts, row ids and status codes, never a number, a contact name or a
+recording's filename.
 
 ## Before shipping a build
 

@@ -19,7 +19,7 @@ class UploadWorker(context: Context, params: WorkerParameters) :
             dao = app.database.outbox(),
             client = app.client,
             settingsProvider = { app.config.current() },
-            learnPayloadLimit = { app.config.learnPayloadLimit(it) },
+            learnPayloadLimit = app.config::learnPayloadLimit,
         )
         val report = drainer.drainAll()
         if (report.deferred) return@withContext Result.success()

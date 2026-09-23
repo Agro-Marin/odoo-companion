@@ -250,7 +250,10 @@ class OutboxTest {
             dao.take(OutboxKind.CALL_LOG, 1).map { it.id }
         dao.markDeadIds(ids, now = 1_000L, reason = "gone")
 
-        assertEquals(listOf("/sdcard/Recordings/Call/a.m4a"), dao.deadFilesBefore(2_000L))
+        assertEquals(
+            listOf("/sdcard/Recordings/Call/a.m4a"),
+            dao.deadFilesBefore(2_000L).map { it.filePath },
+        )
     }
 
     @Test

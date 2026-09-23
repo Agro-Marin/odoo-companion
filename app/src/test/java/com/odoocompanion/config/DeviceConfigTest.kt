@@ -42,7 +42,7 @@ class DeviceConfigTest {
 
         assertEquals(
             EnrollmentResult.InvalidBaseUrl,
-            config.saveEnrollment("odoo.example.com", "phone-01", "token"),
+            config.enrol("odoo.example.com", "phone-01", "token"),
         )
         assertEquals("", config.current().baseUrl)
     }
@@ -58,25 +58,25 @@ class DeviceConfigTest {
 
         assertEquals(
             EnrollmentResult.CleartextRefused,
-            config.saveEnrollment("http://odoo.example.com", "phone-01", "token"),
+            config.enrol("http://odoo.example.com", "phone-01", "token"),
         )
         assertEquals(
             EnrollmentResult.Saved,
-            config.saveEnrollment("https://odoo.example.com", "phone-01", "token"),
+            config.enrol("https://odoo.example.com", "phone-01", "token"),
         )
     }
 
     @Test
     fun `what was learned about one server does not carry to another`() = runTest {
         val config = config()
-        config.saveEnrollment("https://one.example.com", "phone-01", "token")
+        config.enrol("https://one.example.com", "phone-01", "token")
         config.learnServerNamesItself()
         assertTrue(config.current().serverNamesItself)
 
-        config.saveEnrollment("https://one.example.com", "phone-02", "token")
+        config.enrol("https://one.example.com", "phone-02", "token")
         assertTrue("same server, same knowledge", config.current().serverNamesItself)
 
-        config.saveEnrollment("https://two.example.com", "phone-01", "token")
+        config.enrol("https://two.example.com", "phone-01", "token")
         assertFalse(config.current().serverNamesItself)
     }
 
@@ -86,7 +86,7 @@ class DeviceConfigTest {
 
         assertEquals(
             EnrollmentResult.Saved,
-            config.saveEnrollment(" https://odoo.example.com ", "phone-01", "token"),
+            config.enrol(" https://odoo.example.com ", "phone-01", "token"),
         )
         assertEquals("https://odoo.example.com", config.current().baseUrl)
     }
@@ -97,7 +97,7 @@ class DeviceConfigTest {
 
         assertEquals(
             EnrollmentResult.InvalidIdentifier,
-            config.saveEnrollment("https://odoo.example.com", "phone 01", "token"),
+            config.enrol("https://odoo.example.com", "phone 01", "token"),
         )
         assertEquals("", config.current().identifier)
     }
@@ -154,6 +154,39 @@ class DeviceConfigTest {
     }
 
     @Test
+    fun `a drain that delivered is an upload even when another row failed in it`() = runTest {
+        val config = config()
+        config.recordUpload(at = 100L, delivered = true, error = null)
+
+        config.recordUpload(at = 900L, delivered = true, error = "server 500")
+
+        val settings = config.current()
+        assertEquals(900L, settings.lastUploadAt)
+        assertEquals("server 500", settings.lastUploadError)
+    }
+
+    @Test
+    fun `a cap learned for one device does not carry to another`() = runTest {
+        val config = config()
+        config.enrol("https://one.example.com", "phone-01", "token")
+        config.learnPayloadLimit(1024L * 1024, at = 5_000L)
+
+        config.enrol("https://one.example.com", "phone-01", "rotated")
+        assertEquals(
+            "a rotated token is the same device",
+            1024L * 1024,
+            config.current().maxPayloadBytes
+        )
+
+        config.enrol("https://one.example.com", "phone-02", "rotated")
+        assertEquals(0L, config.current().maxPayloadBytes)
+
+        config.learnPayloadLimit(1024L * 1024, at = 5_000L)
+        config.applyManaged(ManagedValues(identifier = "phone-03", policyPresent = true))
+        assertEquals(0L, config.current().maxPayloadBytes)
+    }
+
+    @Test
     fun `a drain with nothing to send does not claim an upload`() = runTest {
         val config = config()
         config.recordUpload(at = 100L, delivered = true, error = null)
@@ -192,7 +225,7 @@ class DeviceConfigTest {
             config.current().payloadLimit(now = 5_000L + PAYLOAD_LIMIT_TTL_MILLIS),
         )
 
-        config.learnPayloadLimit(0)
+        config.learnPayloadLimit(0, at = 6_000L)
         assertEquals(
             "a revival re-probes, so the cap has to be droppable",
             0L,
@@ -204,13 +237,13 @@ class DeviceConfigTest {
     fun `the upload window is stored and clamped`() = runTest {
         val config = config()
 
-        config.setUploadWindow(300)
+        config.saveForm(form(uploadWindowSeconds = 300))
         assertEquals(300L, config.current().uploadWindowSeconds)
 
-        config.setUploadWindow(99_999)
+        config.saveForm(form(uploadWindowSeconds = 99_999))
         assertEquals(MAX_UPLOAD_WINDOW_SECONDS, config.current().uploadWindowSeconds)
 
-        config.setUploadWindow(-10)
+        config.saveForm(form(uploadWindowSeconds = -10))
         assertEquals(0L, config.current().uploadWindowSeconds)
     }
 
@@ -218,7 +251,7 @@ class DeviceConfigTest {
     fun `an upload window of zero survives being stored`() = runTest {
         val config = config()
 
-        config.setUploadWindow(0)
+        config.saveForm(form(uploadWindowSeconds = 0))
 
         assertEquals(0L, config.current().uploadWindowSeconds)
     }

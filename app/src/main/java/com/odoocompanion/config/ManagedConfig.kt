@@ -57,18 +57,20 @@ object ManagedConfig {
             callLogEnabled = bundle.booleanOrNull("call_log_enabled"),
             recordingsEnabled = bundle.booleanOrNull("recordings_enabled"),
             wifiOnlyUploads = bundle.booleanOrNull("wifi_only_uploads"),
-            locationIntervalSeconds = bundle.intervalSecondsOrNull("location_interval_seconds"),
-            uploadWindowSeconds = bundle.secondsOrNull(
-                "upload_window_seconds",
-                minimum = MIN_UPLOAD_WINDOW_SECONDS,
-                maximum = MAX_UPLOAD_WINDOW_SECONDS,
+            locationIntervalSeconds = bundle.boundedOrNull(
+                "location_interval_seconds",
+                MIN_LOCATION_INTERVAL_SECONDS..MAX_LOCATION_INTERVAL_SECONDS,
+                unit = "s",
             ),
-            // Metres rather than seconds, but parsed the same way: a number, or
-            // a number in a string, clamped rather than refused.
-            minMoveMetres = bundle.secondsOrNull(
+            uploadWindowSeconds = bundle.boundedOrNull(
+                "upload_window_seconds",
+                MIN_UPLOAD_WINDOW_SECONDS..MAX_UPLOAD_WINDOW_SECONDS,
+                unit = "s",
+            ),
+            minMoveMetres = bundle.boundedOrNull(
                 "min_move_metres",
-                minimum = DEFAULT_MIN_MOVE_METRES,
-                maximum = MAX_MIN_MOVE_METRES,
+                DEFAULT_MIN_MOVE_METRES..MAX_MIN_MOVE_METRES,
+                unit = "m",
             ),
             policyPresent = true,
             presentKeys = MANAGED_KEYS.filterTo(mutableSetOf(), bundle::containsKey),
@@ -103,14 +105,9 @@ object ManagedConfig {
         "false" to false, "0" to false, "no" to false, "off" to false, "n" to false,
     )
 
-    private fun Bundle.intervalSecondsOrNull(key: String): Long? = secondsOrNull(
-        key,
-        minimum = MIN_LOCATION_INTERVAL_SECONDS,
-        maximum = MAX_LOCATION_INTERVAL_SECONDS,
-    )
-
+    // A number, or a number in a string, clamped rather than refused.
     @Suppress("DEPRECATION")
-    private fun Bundle.secondsOrNull(key: String, minimum: Long, maximum: Long): Long? {
+    private fun Bundle.boundedOrNull(key: String, bounds: LongRange, unit: String): Long? {
         if (!containsKey(key)) return null
         val raw = when (val value = get(key)) {
             is Number -> value.toLong()
@@ -118,13 +115,13 @@ object ManagedConfig {
             else -> null
         }
 
-        if (raw == null || raw < 0 || (raw == 0L && minimum > 0)) {
+        if (raw == null || raw < 0 || (raw == 0L && bounds.first > 0)) {
             Log.w(TAG, "Ignoring unusable managed $key: ${get(key)}")
             return null
         }
-        val clamped = raw.coerceIn(minimum, maximum)
+        val clamped = raw.coerceIn(bounds)
         if (clamped != raw) {
-            Log.w(TAG, "Managed $key of $raw s is out of range; using $clamped s")
+            Log.w(TAG, "Managed $key of $raw $unit is out of range; using $clamped $unit")
         }
         return clamped
     }

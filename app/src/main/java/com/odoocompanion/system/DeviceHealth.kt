@@ -54,6 +54,25 @@ object DeviceHealth {
         exemptFromBatteryOptimization = isExemptFromBatteryOptimization(context),
     )
 
+    // What to ask for, from the same two switches blockers() reads, so a
+    // collector that is off never costs the person a prompt. Storage is the
+    // legacy pair: from Android 11 recordings need all-files access instead,
+    // which is a settings screen, not a runtime permission.
+    fun wantedPermissions(
+        callLogWanted: Boolean,
+        recordingsWanted: Boolean,
+        sdk: Int = Build.VERSION.SDK_INT,
+    ): List<String> = buildList {
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
+        add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (callLogWanted) add(Manifest.permission.READ_CALL_LOG)
+        if (sdk >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        if (recordingsWanted && sdk < Build.VERSION_CODES.R) {
+            add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
     fun hasRecordingStorageAccess(context: Context): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             runCatching { Environment.isExternalStorageManager() }.getOrDefault(false)

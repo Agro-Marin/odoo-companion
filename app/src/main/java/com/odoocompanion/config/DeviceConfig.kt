@@ -2,8 +2,10 @@ package com.odoocompanion.config
 
 import android.content.Context
 import android.security.NetworkSecurityPolicy
+import androidx.annotation.VisibleForTesting
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -44,13 +46,17 @@ data class Settings(
     val isEnrolled: Boolean
         get() = baseUrl.isNotBlank() && identifier.isNotBlank() && token.isNotBlank()
 
+    val governedKeys: Set<String>
+        get() = if (managed) managedKeys else emptySet()
+
     override fun toString(): String =
         "Settings(baseUrl=$baseUrl, identifier=$identifier, token=${token.redacted()}, " +
             "locationIntervalSeconds=$locationIntervalSeconds, " +
             "uploadWindowSeconds=$uploadWindowSeconds, minMoveMetres=$minMoveMetres, " +
             "wifiOnlyUploads=$wifiOnlyUploads, " +
             "callLogEnabled=$callLogEnabled, recordingsEnabled=$recordingsEnabled, " +
-            "managed=$managed, maxPayloadBytes=$maxPayloadBytes, " +
+            "managed=$managed, managedKeys=$managedKeys, maxPayloadBytes=$maxPayloadBytes, " +
+            "maxPayloadLearnedAt=$maxPayloadLearnedAt, " +
             "serverNamesItself=$serverNamesItself, " +
             "lastUploadAt=$lastUploadAt, lastAttemptAt=$lastAttemptAt, " +
             "lastUploadError=$lastUploadError)"
@@ -93,6 +99,17 @@ const val MAX_MIN_MOVE_METRES = 500L
 const val DEFAULT_UPLOAD_WINDOW_SECONDS = 180L
 const val MAX_UPLOAD_WINDOW_SECONDS = 3600L
 const val MIN_UPLOAD_WINDOW_SECONDS = 0L
+
+data class FormValues(
+    val baseUrl: String,
+    val identifier: String,
+    val token: String,
+    val callLogEnabled: Boolean,
+    val recordingsEnabled: Boolean,
+    val wifiOnlyUploads: Boolean,
+    val locationIntervalSeconds: Long?,
+    val uploadWindowSeconds: Long?,
+)
 
 sealed interface EnrollmentResult {
     data object Saved : EnrollmentResult
@@ -140,21 +157,70 @@ class DeviceConfig(
 
     suspend fun current(): Settings = settings.first()
 
-    suspend fun saveEnrollment(
-        baseUrl: String,
-        identifier: String,
-        token: String,
-    ): EnrollmentResult {
-        if (!isUsableBaseUrl(baseUrl)) return EnrollmentResult.InvalidBaseUrl
-        if (!cleartextPermitted && isCleartextUrl(baseUrl)) return EnrollmentResult.CleartextRefused
-        if (!isUsableIdentifier(identifier)) return EnrollmentResult.InvalidIdentifier
+    // The form as one write: validated before anything is stored, and applied
+    // in a single edit so a refused enrolment leaves the switches alone too.
+    // A field the policy governs is skipped -- the stored value is the
+    // policy's, whatever the disabled view happened to show.
+    suspend fun saveForm(form: FormValues): EnrollmentResult {
+        val owned = current().governedKeys
+        val refused = enrollmentProblem(
+            form.baseUrl.takeIf { BASE_URL.name !in owned },
+            form.identifier.takeIf { IDENTIFIER.name !in owned },
+        )
+        if (refused != null) return refused
         store.edit { prefs ->
-            if (prefs[BASE_URL] != baseUrl.trim()) prefs.remove(SERVER_NAMES_ITSELF)
-            prefs[BASE_URL] = baseUrl.trim()
-            prefs[IDENTIFIER] = identifier.trim()
-            prefs[TOKEN] = token.trim()
+            val governed = prefs.toSettings().governedKeys
+            fun <T> put(key: Preferences.Key<T>, value: T?) {
+                if (value != null && key.name !in governed) prefs[key] = value
+            }
+            prefs.pointAt(
+                form.baseUrl.trim().takeIf { BASE_URL.name !in governed },
+                form.identifier.trim().takeIf { IDENTIFIER.name !in governed },
+            )
+            put(TOKEN, form.token.trim())
+            put(CALL_LOG_ENABLED, form.callLogEnabled)
+            put(RECORDINGS_ENABLED, form.recordingsEnabled)
+            put(WIFI_ONLY, form.wifiOnlyUploads)
+            put(
+                LOCATION_INTERVAL,
+                form.locationIntervalSeconds
+                    ?.coerceIn(MIN_LOCATION_INTERVAL_SECONDS, MAX_LOCATION_INTERVAL_SECONDS),
+            )
+            put(
+                UPLOAD_WINDOW,
+                form.uploadWindowSeconds
+                    ?.coerceIn(MIN_UPLOAD_WINDOW_SECONDS, MAX_UPLOAD_WINDOW_SECONDS),
+            )
         }
         return EnrollmentResult.Saved
+    }
+
+    // A null field is not the form's to validate: the policy governs it.
+    private fun enrollmentProblem(baseUrl: String?, identifier: String?): EnrollmentResult? = when {
+        baseUrl != null && !isUsableBaseUrl(baseUrl) -> EnrollmentResult.InvalidBaseUrl
+
+        baseUrl != null && !cleartextPermitted && isCleartextUrl(baseUrl) ->
+            EnrollmentResult.CleartextRefused
+
+        identifier != null && !isUsableIdentifier(identifier) ->
+            EnrollmentResult.InvalidIdentifier
+
+        else -> null
+    }
+
+    // What was learned from a server belongs to what it was learned from:
+    // whether it names itself is a fact about the server, and its payload cap
+    // is a setting on the device record. A rotated token keeps both.
+    private fun MutablePreferences.pointAt(baseUrl: String?, identifier: String?) {
+        val newServer = baseUrl != null && this[BASE_URL] != baseUrl
+        val newDevice = newServer || (identifier != null && this[IDENTIFIER] != identifier)
+        if (newServer) remove(SERVER_NAMES_ITSELF)
+        if (newDevice) {
+            remove(MAX_PAYLOAD)
+            remove(MAX_PAYLOAD_LEARNED_AT)
+        }
+        baseUrl?.let { this[BASE_URL] = it }
+        identifier?.let { this[IDENTIFIER] = it }
     }
 
     suspend fun applyManaged(values: ManagedValues): Boolean {
@@ -164,11 +230,7 @@ class DeviceConfig(
 
             prefs[MANAGED] = !values.isEmpty
             prefs[MANAGED_KEYS] = values.presentKeys
-            values.baseUrl?.let {
-                if (prefs[BASE_URL] != it) prefs.remove(SERVER_NAMES_ITSELF)
-                prefs[BASE_URL] = it
-            }
-            values.identifier?.let { prefs[IDENTIFIER] = it }
+            prefs.pointAt(values.baseUrl, values.identifier)
             values.token?.let { prefs[TOKEN] = it }
             values.callLogEnabled?.let { prefs[CALL_LOG_ENABLED] = it }
             values.recordingsEnabled?.let { prefs[RECORDINGS_ENABLED] = it }
@@ -218,29 +280,19 @@ class DeviceConfig(
         }
     }
 
-    suspend fun setFeature(callLog: Boolean? = null, recordings: Boolean? = null) {
+    // Test seams: switches on a phone the form could not save them for, because
+    // it is not enrolled. Production writes go through saveForm or applyManaged.
+    @VisibleForTesting
+    internal suspend fun setFeature(callLog: Boolean? = null, recordings: Boolean? = null) {
         store.edit { prefs ->
             callLog?.let { prefs[CALL_LOG_ENABLED] = it }
             recordings?.let { prefs[RECORDINGS_ENABLED] = it }
         }
     }
 
-    suspend fun setWifiOnlyUploads(enabled: Boolean) {
+    @VisibleForTesting
+    internal suspend fun setWifiOnlyUploads(enabled: Boolean) {
         store.edit { prefs -> prefs[WIFI_ONLY] = enabled }
-    }
-
-    suspend fun setUploadWindow(seconds: Long) {
-        store.edit { prefs ->
-            prefs[UPLOAD_WINDOW] =
-                seconds.coerceIn(MIN_UPLOAD_WINDOW_SECONDS, MAX_UPLOAD_WINDOW_SECONDS)
-        }
-    }
-
-    suspend fun setLocationInterval(seconds: Long) {
-        store.edit { prefs ->
-            prefs[LOCATION_INTERVAL] =
-                seconds.coerceIn(MIN_LOCATION_INTERVAL_SECONDS, MAX_LOCATION_INTERVAL_SECONDS)
-        }
     }
 
     suspend fun consumeBuildChange(version: Long): Boolean {
@@ -256,7 +308,7 @@ class DeviceConfig(
         store.edit { prefs -> prefs[SERVER_NAMES_ITSELF] = true }
     }
 
-    suspend fun learnPayloadLimit(bytes: Long, at: Long = System.currentTimeMillis()) {
+    suspend fun learnPayloadLimit(bytes: Long, at: Long) {
         store.edit { prefs ->
             if (bytes > 0) {
                 prefs[MAX_PAYLOAD] = bytes
@@ -270,14 +322,9 @@ class DeviceConfig(
 
     suspend fun recordUpload(at: Long, delivered: Boolean, error: String?) {
         store.edit { prefs ->
-
             prefs[LAST_ATTEMPT_AT] = at
-            if (error != null) {
-                prefs[LAST_UPLOAD_ERROR] = error
-                return@edit
-            }
-            prefs.remove(LAST_UPLOAD_ERROR)
             if (delivered) prefs[LAST_UPLOAD_AT] = at
+            if (error != null) prefs[LAST_UPLOAD_ERROR] = error else prefs.remove(LAST_UPLOAD_ERROR)
         }
     }
 
@@ -298,14 +345,11 @@ class DeviceConfig(
         store.edit { prefs -> prefs.remove(CALL_LOG_ID_CURSOR) }
     }
 
-    suspend fun setCallLogCursor(value: Long) {
+    // What a build that cursored on a timestamp left behind; only a test
+    // writes it now, to stand in for such a build.
+    @VisibleForTesting
+    internal suspend fun setCallLogCursor(value: Long) {
         store.edit { prefs -> prefs[CALL_LOG_CURSOR] = value }
-    }
-
-    suspend fun recordingCursor(): Long = store.data.first()[RECORDING_CURSOR] ?: 0L
-
-    suspend fun setRecordingCursor(value: Long) {
-        store.edit { prefs -> prefs[RECORDING_CURSOR] = value }
     }
 
     companion object {
@@ -339,6 +383,5 @@ class DeviceConfig(
         private val LAST_BUILD = longPreferencesKey("last_build")
         private val CALL_LOG_CURSOR = longPreferencesKey("call_log_cursor")
         private val CALL_LOG_ID_CURSOR = longPreferencesKey("call_log_id_cursor")
-        private val RECORDING_CURSOR = longPreferencesKey("recording_cursor")
     }
 }

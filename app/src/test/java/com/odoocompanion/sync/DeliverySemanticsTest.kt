@@ -67,13 +67,18 @@ class DeliverySemanticsTest {
         OutboxDrainer(dao, OdooClient(), now) { settings() }
 
     private var learnedCap = 0L
+    private var learnedAt = 0L
+    private var clock = 1_000L
 
     private fun capAwareDrainer() = OutboxDrainer(
         dao,
         OdooClient(),
-        { 1_000L },
-        learnPayloadLimit = { learnedCap = it },
-    ) { settings().copy(maxPayloadBytes = learnedCap, maxPayloadLearnedAt = 4_000L) }
+        { clock },
+        learnPayloadLimit = { bytes, at ->
+            learnedCap = bytes
+            learnedAt = at
+        },
+    ) { settings().copy(maxPayloadBytes = learnedCap, maxPayloadLearnedAt = learnedAt) }
 
     private val refusal = """{"error":"no_calls","message":"No call entries in payload"}"""
 
@@ -118,8 +123,13 @@ class DeliverySemanticsTest {
 
         val report = drainer().drainAll()
 
-        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        assertEquals(
+            "a verdict on the row is not a fault of the link to wait out",
+            OutboxDrainer.Outcome.DONE,
+            report.outcome,
+        )
         assertEquals(1, dao.countOf(OutboxKind.CALL_LOG))
+        assertEquals("it waits on its own retryAfter", 0, dao.countOf(OutboxKind.CALL_LOG, 1_000L))
     }
 
     @Test
@@ -291,6 +301,30 @@ class DeliverySemanticsTest {
         assertTrue("and it alone carries the server's verdict", left.single().serverFault)
     }
 
+    // Narrowing finds the row; it says nothing about how large a batch the
+    // server takes. Left at one, the ninety-nine good calls behind a poisoned
+    // head went one request each, and the batch budget ran out first.
+    @Test
+    fun `once the raising row is isolated the rest go at full batch size`() = runTest {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val body = request.body!!.utf8()
+                if ("+52550000\"" in body) {
+                    return MockResponse(code = 500, body = """{"error":"processing_error"}""")
+                }
+                val calls = body.split("\"number\"").size - 1
+                return MockResponse(body = """{"status":"success","accepted":$calls}""")
+            }
+        }
+        repeat(OutboxDrainer.CALL_LOG_BATCH) { queueCall(it) }
+
+        val report = drainer().drainAll()
+
+        assertEquals(OutboxDrainer.CALL_LOG_BATCH - 1, report.accepted[OutboxKind.CALL_LOG])
+        assertFalse(report.moreWorkPending)
+        assertTrue("${server.requestCount} requests", server.requestCount <= 9)
+    }
+
     @Test
     fun `a 503 is the link, so the batch is charged as one and not narrowed`() = runTest {
         var requests = 0
@@ -328,7 +362,9 @@ class DeliverySemanticsTest {
         var learned = 0L
         queueCall(1)
 
-        OutboxDrainer(dao, OdooClient(), { 5_000L }, { learned = it }, ::settings).drainAll()
+        OutboxDrainer(dao, OdooClient(), {
+            5_000L
+        }, { bytes, _ -> learned = bytes }, ::settings).drainAll()
 
         assertEquals(1_048_576L, learned)
     }
@@ -339,7 +375,9 @@ class DeliverySemanticsTest {
         var learned = 0L
         queueCall(1)
 
-        OutboxDrainer(dao, OdooClient(), { 5_000L }, { learned = it }, ::settings).drainAll()
+        OutboxDrainer(dao, OdooClient(), {
+            5_000L
+        }, { bytes, _ -> learned = bytes }, ::settings).drainAll()
 
         assertEquals(1500L, learned)
     }
@@ -359,11 +397,12 @@ class DeliverySemanticsTest {
 
         val report = drainer().drainAll()
 
-        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
         assertEquals(0, server.requestCount)
         val row = dao.take(OutboxKind.RECORDING, 1).single()
         assertEquals("kept, not refused: the bound on revivals settles it", 1, row.attempts)
         assertTrue(row.serverFault)
+        assertTrue(row.retryAfter > 1_000L)
         assertTrue(audio.exists())
         audio.delete()
     }
@@ -431,7 +470,7 @@ class DeliverySemanticsTest {
 
         val report = drainer().drainAll()
 
-        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
         assertEquals(
             "raising the cap is an operator action, so the call is kept",
             1,
@@ -450,7 +489,9 @@ class DeliverySemanticsTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 if (!request.target.endsWith("recording")) {
-                    return MockResponse(body = """{"status":"success","accepted":1}""")
+                    return MockResponse(
+                        body = """{"status":"success","accepted":1,"max_payload_bytes":1048576}""",
+                    )
                 }
                 recordingPosts++
                 pushedBytes += request.bodySize
@@ -481,6 +522,7 @@ class DeliverySemanticsTest {
                     createdAt = pass.toLong(),
                 ),
             )
+            clock += OutboxDrainer.ROW_BACKOFF_MAX_MILLIS + 1
             capAwareDrainer().drainAll()
             if (++pass > 200) break
         }
@@ -720,5 +762,170 @@ class DeliverySemanticsTest {
             locked.setWritable(true)
             locked.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `a recording this build cannot decode is set aside as undecodable`() = runTest {
+        accept("""{"status":"success","recording_id":1}""")
+        val unreadable = File.createTempFile("rec", ".m4a").apply { writeBytes(ByteArray(32)) }
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.RECORDING,
+                payload = "{written by a newer build",
+                filePath = unreadable.absolutePath,
+                createdAt = 0L,
+            ),
+        )
+        val fine = queueRecording()
+
+        val report = drainer().drainAll()
+
+        assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
+        assertEquals(1, report.undecodable[OutboxKind.RECORDING])
+        assertFalse("the one behind it is not held up", fine.exists())
+        assertTrue("its audio waits for a build that can read the row", unreadable.exists())
+        assertEquals("a newer build puts it back", 1, dao.reviveUndecodable())
+        unreadable.delete()
+    }
+
+    @Test
+    fun `a recording over the declared cap does not hold the ones behind it`() = runTest {
+        accept("""{"status":"success","recording_id":1}""")
+        learnedCap = 1024
+        val big = File.createTempFile("big", ".m4a").apply { writeBytes(ByteArray(4096)) }
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.RECORDING,
+                payload = """{"recorded_at":1,"file_name":"b.m4a","mimetype":"audio/mp4"}""",
+                filePath = big.absolutePath,
+                createdAt = 0L,
+            ),
+        )
+        val fine = queueRecording()
+
+        val report = capAwareDrainer().drainAll()
+
+        assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
+        assertEquals(1, report.accepted[OutboxKind.RECORDING])
+        assertFalse("the one behind it is uploaded", fine.exists())
+        assertEquals("the oversized one is not sent", 1, server.requestCount)
+        val kept = dao.take(OutboxKind.RECORDING, 10).single()
+        assertEquals(1, kept.attempts)
+        assertTrue("it waits on its own clock", kept.retryAfter > 1_000L)
+        assertTrue(report.lastError!!.contains("1 KB"))
+        big.delete()
+    }
+
+    @Test
+    fun `a cap the server states on a success applies to the recordings of the same pass`() =
+        runTest {
+            var recordingPosts = 0
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.target.endsWith("recording")) recordingPosts++
+                    return MockResponse(
+                        body = """{"status":"success","accepted":1,"max_payload_bytes":1024}""",
+                    )
+                }
+            }
+            queueCall(1)
+            val big = queueRecording(bytes = 4096)
+
+            drainer().drainAll()
+
+            assertEquals("the call's reply already said it would not fit", 0, recordingPosts)
+            assertTrue(big.exists())
+            big.delete()
+        }
+
+    @Test
+    fun `a purged recording whose audio will not delete stays remembered`() = runTest {
+        val locked = java.nio.file.Files.createTempDirectory("locked").toFile()
+        val file = File(locked, "rec.m4a").apply { writeBytes(ByteArray(32)) }
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.RECORDING,
+                payload = """{"recorded_at":1,"file_name":"a.m4a","mimetype":"audio/mp4"}""",
+                filePath = file.absolutePath,
+                createdAt = 1L,
+            ),
+        )
+        dao.markDeadIds(
+            dao.take(OutboxKind.RECORDING, 1).map { it.id },
+            1_000L,
+            "uploaded, but the file could not be deleted",
+            com.odoocompanion.data.DeadReason.KEPT_ON_DISK,
+        )
+        locked.setWritable(false)
+        org.junit.Assume.assumeFalse("root deletes regardless; nothing to test", locked.canWrite())
+        try {
+            val later = 1_000L + OutboxLimits.DEAD_RETENTION_MILLIS + 1
+            drainer(now = { later }).drainAll()
+
+            assertTrue(file.exists())
+            assertTrue(
+                "forgetting it would harvest and upload it again",
+                file.absolutePath in dao.filesQueued(OutboxKind.RECORDING),
+            )
+        } finally {
+            locked.setWritable(true)
+            locked.deleteRecursively()
+        }
+    }
+
+    // The chain that item four of the review rests on: a drain can both
+    // deliver and end with an error, and recordUpload is handed both.
+    @Test
+    fun `a drain that defers one row still reports the delivery beside the error`() = runTest {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.target.endsWith("recording")) {
+                    MockResponse(code = 500, body = """{"error":"processing_error"}""")
+                } else {
+                    MockResponse(body = """{"status":"success","accepted":1}""")
+                }
+        }
+        queueCall(1)
+        val audio = queueRecording()
+
+        val report = drainer().drainAll()
+
+        assertTrue(report.delivered)
+        assertEquals("server 500", report.lastError)
+        audio.delete()
+    }
+
+    @Test
+    fun `a cap stated on every success is stored once per drain, not once per batch`() = runTest {
+        accept("""{"status":"success","accepted":200,"max_payload_bytes":52428800}""")
+        dao.insertAll(
+            (0 until 2 * OutboxDrainer.LOCATION_BATCH).map {
+                OutboxEntry(
+                    kind = OutboxKind.LOCATION,
+                    payload = """{"latitude":1.0,"longitude":2.0,"timestamp":$it}""",
+                    createdAt = it.toLong(),
+                )
+            },
+        )
+        var writes = 0
+
+        OutboxDrainer(dao, OdooClient(), { 1_000L }, { _, _ -> writes++ }, ::settings).drainAll()
+
+        assertEquals(2, server.requestCount)
+        assertEquals(1, writes)
+    }
+
+    @Test
+    fun `an index the server repeats sets its row aside once`() = runTest {
+        respond(
+            200,
+            """{"status":"success","accepted":1,"duplicates":0,"skipped":1,"skipped_indexes":[1,1]}""",
+        )
+        repeat(2) { queueCall(it) }
+
+        val report = drainer().drainAll()
+
+        assertEquals(1, report.skipped[OutboxKind.CALL_LOG])
+        assertEquals(1, report.deadLettered)
     }
 }

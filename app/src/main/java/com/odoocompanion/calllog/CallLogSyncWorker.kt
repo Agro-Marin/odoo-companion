@@ -9,6 +9,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.system.debug
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -23,6 +24,10 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         val reader = CallLogReader(applicationContext.contentResolver)
         val since = startingId(app, reader)
         val batch = reader.readSince(since)
+        debug(TAG) {
+            "read after id $since: ${batch.entries.size} call(s), cursor now ${batch.cursor}, " +
+                "more waiting=${batch.moreWaiting}"
+        }
 
         if (batch.entries.isNotEmpty()) {
             app.database.outbox().insertAll(batch.entries)
