@@ -2,7 +2,7 @@
 
 Android app (Kotlin, Gradle) that turns a company-owned phone into an Odoo
 `remote.device`: it pushes **location**, **call logs**, and **call recordings**
-to the `remote_mobile` module (an addon in the `agromarin` repo) over
+to the `device_mobile` module (an addon in the `agromarin` repo) over
 Bearer-authenticated REST. The app is generic — no customer- or
 deployment-specific logic; a device is configured with base URL + identifier +
 token and talks to whatever Odoo those point at.
@@ -57,7 +57,7 @@ onto one line while leaving its trailing comma — which the pinned 1.3.1 reject
 and cannot autocorrect. Set `KTLINT=/path/to/ktlint` rather than reaching for
 whatever is on `PATH`.
 
-For end-to-end testing, run any Odoo 19 instance with `remote_mobile`
+For end-to-end testing, run any Odoo 19 instance with `device_mobile`
 installed; a **debug** build on an emulator reaches a dev server on the host
 machine at `http://10.0.2.2:<port>`.
 
@@ -270,7 +270,7 @@ machine at `http://10.0.2.2:<port>`.
   request answers **409** within that window. Past it the transport sees a new
   request and the *model* dedup catches it instead, which used to leave
   `accepted: 0` and so a **422** — read as a refusal, dead-lettering records the
-  server was holding. `remote_mobile` reports `duplicates` in its own counter
+  server was holding. `device_mobile` reports `duplicates` in its own counter
   now and answers 200 when the batch is fully accounted for; the client also
   reads that counter out of a 422, because a handset in the field talks to
   whatever Odoo it points at. A device created **without** the category gets
@@ -307,7 +307,7 @@ machine at `http://10.0.2.2:<port>`.
   needs `reportsSuccess()`, and any other row-removing code needs `isOdooReply()`.
   `"status": "success"` is in the endpoint's first commit, so no deployed server
   omits it.
-  **And a server that has once named itself must keep doing so.** `remote_mobile`
+  **And a server that has once named itself must keep doing so.** `device_mobile`
   now puts `"service": "remote_mobile"` in every reply; the first time a device
   sees it, `DeviceConfig.learnServerNamesItself` remembers, and from then on a
   row-removing reply without it is retried as not-Odoo — which closes the
@@ -317,7 +317,7 @@ machine at `http://10.0.2.2:<port>`.
   to whatever Odoo it points at.
   **Verified against a live Odoo, not reasoned about.** `ServerContractTest` pins
   the responses `tools/smoke-test.sh` and targeted probes captured from a real
-  `remote_mobile` on a provisioned mobile-phone device (50 MB cap, 900 s dedup
+  `device_mobile` on a provisioned mobile-phone device (50 MB cap, 900 s dedup
   window, both read off the record), last on 2026-09-23, and classifies each twice —
   before and after the client has learned that the server names itself. Refusals
   from the integration layer are RFC 9457 problem documents, so their `"status"` is
@@ -394,7 +394,7 @@ machine at `http://10.0.2.2:<port>`.
   revival and is the cost of not going permanently blind to an operator's fix. The
   size asked for is `RecordingBody.contentLength()` itself, not a second copy of the
   base64 arithmetic. The gap is reachable —
-  `mixin_inbound_gate.max_payload_size` defaults to **1 MB** and `remote_mobile`
+  `mixin_inbound_gate.max_payload_size` defaults to **1 MB** and `device_mobile`
   raises it to 50 MB only inside `create`, only when `device_category_id` is already
   the mobile-phone category in the same `vals`.
 - **The outbox column and the wire are one format, and now say which.** `WireJson`
@@ -465,7 +465,7 @@ machine at `http://10.0.2.2:<port>`.
   **`skipped` on a 200 names its rows now.** The server used to report *how many* it
   could not store and not *which*, so a partial skip deleted rows it refused along
   with rows it took; narrowing the batch to find them was tried and reverted, because
-  the counters are tallied before the narrowing. `remote_mobile` now sends
+  the counters are tallied before the narrowing. `device_mobile` now sends
   `skipped_indexes` beside the counter, indexes into the batch as posted, and the
   drain sets aside exactly those rows (`refused` for a call, discarded for a fix)
   and deletes the rest. An older server sending only the count is believed as

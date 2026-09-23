@@ -2,7 +2,7 @@
 
 An Android companion app that turns a company-owned phone into an Odoo
 `remote.device`, pushing **location**, **call logs** and **call recordings** to the
-`remote_mobile` module over Bearer-authenticated REST.
+`device_mobile` module over Bearer-authenticated REST.
 
 The app is generic: it holds no customer- or deployment-specific logic. A device is
 configured with three values — base URL, device identifier, Bearer token — and talks
@@ -12,7 +12,7 @@ to whatever Odoo instance those point at.
 
 | Piece | Version |
 |-------|---------|
-| Odoo | 19.0 with the `remote_mobile` module installed |
+| Odoo | 19.0 with the `device_mobile` module installed |
 | Android | 10 (API 29) minimum, targets API 36 |
 | Build | JDK 25 (the version CI builds on), Android SDK 37, Gradle 9.7.1 |
 
@@ -142,7 +142,7 @@ because the server deduplicates: whatever a misread network made the phone re-se
 back 409 once the real endpoint is reachable.
 
 A gateway that speaks JSON can still say `{"error": "..."}`, and that passes the test above.
-So every reply from `remote_mobile` now also carries `"service": "remote_mobile"`, and the
+So every reply from `device_mobile` now also carries `"service": "remote_mobile"`, and the
 phone learns it: the first reply that names the service is remembered for that base URL, and
 from then on a reply that would remove rows must name it too or is retried as not-Odoo. An
 older server that never names itself is believed as before, and a re-enrolment onto another
