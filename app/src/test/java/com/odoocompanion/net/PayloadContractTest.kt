@@ -79,6 +79,24 @@ class PayloadContractTest {
         )
     }
 
+    // device.call.recording.duration, whole seconds, read by store_from_mobile
+    // as vals["duration"]. Omitted rather than sent as 0 when the container
+    // would not say: the server stores 0 for absent either way.
+    @Test
+    fun `recording metadata carries the audio length in seconds when known`() {
+        assertEquals(
+            """{"recorded_at":1,"file_name":"a.m4a","mimetype":"audio/mp4","duration":43}""",
+            WireJson.encodeToString(
+                RecordingMetadata(
+                    recordedAt = 1,
+                    fileName = "a.m4a",
+                    mimetype = "audio/mp4",
+                    duration = 43,
+                ),
+            ),
+        )
+    }
+
     @Test
     fun `the batch wrappers use the list keys the endpoints read`() {
         val fix = LocationFix(latitude = 1.0, longitude = 2.0, timestamp = 3)

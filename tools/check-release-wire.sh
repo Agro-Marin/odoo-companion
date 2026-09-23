@@ -57,17 +57,43 @@ for cls in $serializable; do
     fi
 done
 
-# Every wire key must still be a string in the minified dex. A @SerialName that
-# R8 removed is a field the endpoint never sees.
-keys=$(grep -rho '@SerialName("[^"]*")' "$SRC" | sed 's/.*("\(.*\)").*/\1/' | sort -u)
-for key in $keys; do
-    if grep -qa -- "$key" "$work"/classes*.dex; then
+# Every wire key must still be a string in the minified dex -- every property of
+# every @Serializable class, not only the ones a @SerialName renames: `latitude`
+# and `duration` are keys the endpoint reads exactly as much as `battery_level`.
+# Matched as a whole dex string-table entry (MUTF-8: a length byte, the bytes, a
+# NUL), because a substring search is vacuous for a short word -- `number` occurs
+# somewhere in any dex whether or not a serializer still names it.
+wire=$(python3 - "$SRC" "$work" <<'PYEOF'
+import pathlib, re, sys
+src, work = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+dex = b"".join(p.read_bytes() for p in sorted(work.glob("classes*.dex")))
+keys = set()
+for path in src.rglob("*.kt"):
+    text = path.read_text()
+    for cls in re.finditer(r"@Serializable\s+data class \w+\(", text):
+        depth, end = 1, cls.end()
+        while depth:
+            depth += {"(": 1, ")": -1}.get(text[end], 0)
+            end += 1
+        params = text[cls.end():end - 1]
+        for sn, name in re.findall(r'(?:@SerialName\("([^"]+)"\)\s*)?val (\w+)', params):
+            keys.add(sn or name)
+if not keys:
+    print("FAIL no wire keys found -- check the source layout")
+for key in sorted(keys):
+    raw = key.encode()
+    entry = bytes([len(raw)]) + raw + b"\0"
+    print(("ok  " if entry in dex else "FAIL") + " " + key)
+PYEOF
+)
+while read -r verdict key; do
+    if [ "$verdict" = "ok" ]; then
         echo "  ok    \"$key\" present in the dex"
     else
         echo "  FAIL  \"$key\" is not in the minified dex" >&2
         status=1
     fi
-done
+done <<< "$wire"
 
 # Every restriction key the MDM can send must still be in the shipped APK. The
 # resource path is obfuscated in a release build (res/xml/app_restrictions.xml

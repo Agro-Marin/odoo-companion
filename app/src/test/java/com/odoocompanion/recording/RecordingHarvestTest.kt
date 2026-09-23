@@ -171,4 +171,40 @@ class RecordingHarvestTest {
 
         assertTrue("unmapped: $unmapped", unmapped.isEmpty())
     }
+
+    @Test
+    fun `a harvested recording says how long it is`() = runTest {
+        recording("call_5512345678.m4a")
+
+        RecordingHarvest(dao, root, durationOf = { 43L }) { clock }.queueNew()
+
+        val metadata = WireJson.decodeFromString(
+            RecordingMetadata.serializer(),
+            dao.take(OutboxKind.RECORDING, 1).single().payload,
+        )
+        assertEquals(43L, metadata.duration)
+    }
+
+    @Test
+    fun `a recording whose length cannot be read is still queued`() = runTest {
+        recording("call_5512345678.m4a")
+
+        RecordingHarvest(dao, root, durationOf = { null }) { clock }.queueNew()
+
+        val payload = dao.take(OutboxKind.RECORDING, 1).single().payload
+        assertTrue(payload, "duration" !in payload)
+    }
+
+    @Test
+    fun `the length comes from the container, in whole seconds`() {
+        val file = recording("call_5512345678.m4a")
+        org.robolectric.shadows.ShadowMediaMetadataRetriever.addMetadata(
+            org.robolectric.shadows.util.DataSource.toDataSource(file.path),
+            android.media.MediaMetadataRetriever.METADATA_KEY_DURATION,
+            "42600",
+        )
+
+        assertEquals(43L, audioDurationSeconds(file))
+        assertEquals(null, audioDurationSeconds(File(root, "missing.m4a")))
+    }
 }

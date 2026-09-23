@@ -56,8 +56,10 @@ an unmappable call left `accepted: 0`, the endpoint answered 422, and the phone
 dead-lettered a call that had happened, waiting for whatever type Android defines
 next.
 
-A recording carries `number`, `recorded_at`, `file_name`, `mimetype` and base64
-`audio_b64`.
+A recording carries `number`, `recorded_at`, `file_name`, `mimetype`, base64
+`audio_b64` and, when the container states it, `duration` in whole seconds.
+`recorded_at` is the file's write time — when the call **ended**, not when it
+started — which is what the endpoint matches against the call's whole span.
 
 ## Architecture
 
@@ -117,6 +119,7 @@ anything again, one row is released per budget as a probe. A row the server
 | 409 | the transport layer recognised this exact request inside the dedup window | removed, counted as a duplicate |
 | 422 **reporting duplicates** | an older server's spelling of "I already hold this batch" | removed, counted as a duplicate |
 | 400, 422 | unreadable, or read and nothing storable | positions deleted; calls and recordings marked dead |
+| 400 `invalid_json` | the body arrived damaged: this app only sends what it serialised | **kept and retried** |
 | 413 | over the device's `max_payload_size` | a multi-row batch **halves and retries** in the same drain; one row is **kept, charged and deferred** on its own clock while the rest of the queue moves |
 | 401, 403, 404, 429, 5xx, anything else | transient, or fixable from Odoo | **kept and retried** |
 | 2xx without `"status": "success"` | *nothing on this network is Odoo* | **kept and retried** |
@@ -364,12 +367,15 @@ build reaches a handset:
 tools/smoke-test.sh https://odoo.example.com phone-01 <bearer-token>
 ```
 
-It replays the exact payloads the app sends — a two-fix location batch, a call log
-entry, a recording — and prints the status code for each. What it proves is the half
-the unit tests cannot: that the device exists in Odoo, that the token authenticates,
-that the category grants the 50 MB cap, and that the three routes are reachable
-through whatever proxy sits in front. Use a device record created for testing, since
-every row it posts is stored.
+It replays the exact payloads the app sends — a location batch, call logs in each
+shape a queue can hold, a recording stamped at the call's end the way the app stamps
+it, a wrong token and an unknown identifier — and checks every answer against the one
+the app is built against, exiting non-zero on the first that differs. What it proves
+is the half the unit tests cannot: that the device exists in Odoo, that the token
+authenticates, that the category grants the 50 MB cap and duplicate detection, that
+the recording matches its call, and that the three routes are reachable through
+whatever proxy sits in front. Use a device record created for testing, since every
+row it posts is stored.
 
 ## Known constraints
 

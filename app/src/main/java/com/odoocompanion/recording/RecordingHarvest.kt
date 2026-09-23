@@ -13,6 +13,7 @@ import java.io.File
 class RecordingHarvest(
     private val dao: OutboxDao,
     private val root: File,
+    private val durationOf: (File) -> Long? = ::audioDurationSeconds,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun queueNew(): Int {
@@ -44,6 +45,7 @@ class RecordingHarvest(
                     recordedAt = parsed.recordedAtMillis,
                     fileName = file.name,
                     mimetype = mimeTypeOf(file),
+                    duration = durationOf(file),
                 ),
             ),
             filePath = file.absolutePath,

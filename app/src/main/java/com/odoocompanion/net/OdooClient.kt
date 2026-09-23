@@ -127,6 +127,11 @@ class OdooClient(
 
             code == HTTP_UNPROCESSABLE && body.reportsDelivery(counts) -> UploadOutcome.Duplicate
 
+            body.errorIs(DAMAGED_BODY) -> UploadOutcome.Retry(
+                "the server could not parse the request body, which left this phone as JSON" +
+                    " -- it was damaged on the way, so the queue is kept",
+            )
+
             code in PERMANENTLY_REFUSED -> UploadOutcome.Rejected(code)
 
             code == HTTP_TOO_LARGE -> UploadOutcome.TooLarge(declaredLimit(text, body))
@@ -156,6 +161,9 @@ class OdooClient(
 
     private fun JsonObject?.namesTheService(): Boolean =
         this?.get("service")?.jsonPrimitive?.contentOrNull == SERVICE
+
+    private fun JsonObject?.errorIs(code: String): Boolean =
+        this?.get("error")?.jsonPrimitive?.contentOrNull == code
 
     private fun JsonObject?.reportsSuccess(): Boolean =
         this?.get("status")?.jsonPrimitive?.contentOrNull == "success"
@@ -201,6 +209,10 @@ class OdooClient(
         const val MAX_EXCERPT_CHARS = 120
         val WHITESPACE = Regex("""\s+""")
         const val HTTP_UNPROCESSABLE = 422
+
+        // The integration layer's answer to a body it cannot parse. This client
+        // sends only what it serialised, so the answer is about the link.
+        const val DAMAGED_BODY = "invalid_json"
         val JSON = "application/json; charset=utf-8".toMediaType()
 
         val PERMANENTLY_REFUSED = setOf(400, HTTP_UNPROCESSABLE)

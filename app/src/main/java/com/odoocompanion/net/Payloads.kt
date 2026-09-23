@@ -31,6 +31,7 @@ data class RecordingMetadata(
     @SerialName("recorded_at") val recordedAt: Long,
     @SerialName("file_name") val fileName: String,
     val mimetype: String,
+    val duration: Long? = null,
 )
 
 @Serializable

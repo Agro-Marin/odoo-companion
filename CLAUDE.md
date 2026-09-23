@@ -47,7 +47,7 @@ SDK 37; `local.properties` must point at the SDK
 ./gradlew testDebugUnitTest          # JVM unit tests
 tools/lint.sh [--fix] [--static-only] # ktlint + detekt (+ Android Lint)
 tools/check-release-wire.sh          # after assembleRelease: R8 kept the payload
-tools/smoke-test.sh <url> <id> <tok> # replay real payloads against a live Odoo
+tools/smoke-test.sh <url> <id> <tok> # replay real payloads, assert every answer
 ```
 
 **`tools/lint.sh` refuses a tool that is not the pinned version**, which is in
@@ -316,9 +316,18 @@ machine at `http://10.0.2.2:<port>`.
   Odoo is still believed. Never require the key unconditionally; a handset talks
   to whatever Odoo it points at.
   **Verified against a live Odoo, not reasoned about.** `ServerContractTest` pins
-  the eight responses `tools/smoke-test.sh` and three targeted probes captured from
-  a real `remote_mobile` on a provisioned mobile-phone device (50 MB cap, 900 s
-  dedup window, both read off the record). The one that settles the design is the
+  the responses `tools/smoke-test.sh` and targeted probes captured from a real
+  `remote_mobile` on a provisioned mobile-phone device (50 MB cap, 900 s dedup
+  window, both read off the record), last on 2026-09-23, and classifies each twice —
+  before and after the client has learned that the server names itself. Refusals
+  from the integration layer are RFC 9457 problem documents, so their `"status"` is
+  an integer, never `"success"`. `400 invalid_json` is retried, not refused: this
+  client only sends what it serialised, so a server that cannot parse the body
+  received a damaged one, and refusing it dead-lettered a call as `refused`.
+  The smoke test asserts; it used to print, and two of its printed expectations
+  were wrong (a resent batch answers 409 inside the dedup window, and its recording
+  was stamped at the call's start, where no real recording is — which is how it
+  passed against a matcher that linked no real recording of a call over a minute). The one that settles the design is the
   recording route: it answers `{"status": "success", "recording_id": …, "matched":
   …}` with **no `accepted` key at all**, so a count can never be the discriminator
   for a delivery and only `status` can. The 413 body said `"maximum size of 2KB"`
