@@ -1,0 +1,58 @@
+[versions]
+agp = "9.4.0"
+kotlin = "2.4.20"
+ksp = "2.3.11"
+coreKtx = "1.19.0"
+appcompat = "1.8.0"
+material = "1.14.0"
+lifecycle = "2.11.0"
+work = "2.11.2"
+room = "2.8.5"
+datastore = "1.2.1"
+playServicesLocation = "21.4.0"
+okhttp = "5.5.0"
+serialization = "1.11.0"
+coroutines = "1.11.0"
+junit = "4.13.2"
+androidxJunit = "1.3.0"
+# Held at 4.16.1 deliberately. 4.17 fails every Robolectric test before it
+# runs, with "Failed to interact with raw FileDescriptor internals; perhaps JRE
+# has changed?". That was seen on the JDK this project builds with and, at the
+# time, on 21 as well -- so it is the Robolectric version reacting, not the JVM
+# under it. Worth retrying on a later release, because 4.16.1 is also what pins
+# targetSdk to 36: it refuses to emulate above it, and that is the whole of the
+# OldTargetApi warning lint reports.
+robolectric = "4.16.1"
+# The SIP stack of the softphone, GPLv3: the app is installed on company
+# handsets only and never distributed outside the company. The no-video build:
+# the softphone carries voice alone, and the full one tripled the APK every
+# handset downloads over MDM.
+linphone = "5.5.29"
+
+[libraries]
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+material = { module = "com.google.android.material:material", version.ref = "material" }
+androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-service = { module = "androidx.lifecycle:lifecycle-service", version.ref = "lifecycle" }
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
+androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+okhttp-mockwebserver3 = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+junit = { module = "junit:junit", version.ref = "junit" }
+androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidxJunit" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
+linphone = { module = "org.linphone.no-video:linphone-sdk-android", version.ref = "linphone" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

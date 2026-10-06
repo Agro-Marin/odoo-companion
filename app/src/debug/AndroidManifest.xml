@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds may talk to a plain-HTTP Odoo (a dev server, or 10.0.2.2 from an
+     emulator). Release builds keep Android's default: TLS only. Location, call
+     metadata and call audio are not payloads to send in the clear over a network
+     we do not control. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:usesCleartextTraffic="true"
+        tools:ignore="UnusedAttribute" />
+</manifest>

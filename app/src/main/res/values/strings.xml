@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The product name, the same in every locale: no MissingTranslation. -->
+    <string name="app_name" translatable="false">Odoo Companion</string>
+    <string name="config_server">Odoo base URL</string>
+    <string name="config_identifier">Device identifier</string>
+    <string name="config_token">Bearer token</string>
+    <string name="config_location_interval">Seconds between positions (15 to 86400)</string>
+    <string name="config_upload_window">Upload window in seconds (0 sends every position at once)</string>
+    <string name="action_save">Save</string>
+    <string name="action_sync_now">Sync now</string>
+    <string name="action_grant">Grant permissions</string>
+    <string name="notification_channel_location">Location reporting</string>
+    <string name="notification_location_title">Location reporting active</string>
+    <string name="notification_location_text">Sending position to Odoo</string>
+    <string name="status_managed">Configured by your organization</string>
+    <string name="status_bad_base_url">Not saved: the base URL must start with http:// or https://</string>
+    <string name="status_cleartext_refused">Not saved: this build only talks to https:// servers</string>
+    <string name="status_bad_identifier">Not saved: the device identifier may contain only letters, digits, and - _ . ~</string>
+    <string name="status_enrolled">Enrolled</string>
+    <string name="status_not_enrolled">Not enrolled</string>
+    <string name="status_queued_positions">Queued positions: %1$d</string>
+    <string name="status_queued_calls">Queued calls: %1$d</string>
+    <string name="status_queued_recordings">Queued recordings: %1$d</string>
+    <plurals name="status_undeliverable">
+        <item quantity="one">%1$d record could not be delivered and is no longer being retried</item>
+        <item quantity="other">%1$d records could not be delivered and are no longer being retried</item>
+    </plurals>
+    <string name="status_call_log_permission_missing">Call sync is on but the call-log permission is missing — no calls are being read</string>
+    <string name="status_microphone_missing">The company line is set up but the microphone permission is missing — it does not ring here</string>
+    <string name="status_recording_storage_missing">Call recordings are on but this app has no access to the recordings folder — no audio is being harvested</string>
+    <string name="status_small_cap">Server accepts only %1$s per upload: in Odoo, put this device in the Mobile Phone category</string>
+    <string name="status_undeliverable_hint">Fix the device in Odoo and they will be retried automatically</string>
+    <string name="status_last_attempt">Last attempt: %1$s</string>
+    <string name="status_location_missing">Location permission missing — not reporting</string>
+    <string name="status_battery_optimized">Battery optimization is on — reporting will stop when the phone idles</string>
+    <string name="status_last_upload_ok">Last upload: %1$s</string>
+    <string name="status_last_error">Last error: %1$s</string>
+    <string name="status_last_upload_never">No upload yet</string>
+    <string name="status_background_location_missing">Location set to “while using the app” — reporting will not resume after a restart until it is set to “Allow all the time”</string>
+    <string name="restriction_base_url_title">Odoo base URL</string>
+    <string name="restriction_base_url_description">Base URL of the Odoo instance, e.g. https://odoo.example.com</string>
+    <string name="restriction_identifier_title">Device identifier</string>
+    <string name="restriction_identifier_description">The identifier of this phone’s device in Odoo</string>
+    <string name="restriction_token_title">Bearer token</string>
+    <string name="restriction_token_description">The device inbound token issued by Odoo</string>
+    <string name="restriction_call_log_title">Sync call log</string>
+    <string name="restriction_call_log_description">Upload call metadata (requires READ_CALL_LOG)</string>
+    <string name="restriction_recordings_title">Upload call recordings</string>
+    <string name="restriction_recordings_description">Harvest recordings written by the OEM dialer</string>
+    <string name="restriction_wifi_only_title">Upload on Wi-Fi only</string>
+    <string name="restriction_wifi_only_description">Hold uploads until an unmetered network is available</string>
+    <string name="restriction_upload_window_title">Upload window (seconds)</string>
+    <string name="restriction_upload_window_description">How long a position may wait to be sent with others. Higher means fewer uploads and less battery; 0 sends every position immediately.</string>
+    <string name="restriction_min_move_title">Minimum movement (metres)</string>
+    <string name="restriction_min_move_description">Skip a position that is closer than this to the last one sent. 0 sends every position. A stationary phone is still heard from every 10 minutes, so it stays distinguishable from one that stopped reporting.</string>
+    <string name="restriction_interval_title">Location interval (seconds)</string>
+    <string name="restriction_interval_description">Seconds between position reports</string>
+    <string name="notification_channel_softphone">Company line</string>
+    <string name="notification_channel_softphone_ringing">Incoming company calls</string>
+    <string name="notification_softphone_title">Company line</string>
+    <string name="notification_softphone_ready">Ready to take calls</string>
+    <string name="notification_softphone_connecting">Connecting to the phone system…</string>
+    <string name="notification_softphone_failed">Not registered with the phone system; retrying</string>
+    <string name="softphone_account_label">Company line</string>
+    <string name="softphone_ringing">Incoming call</string>
+    <string name="softphone_in_call">In call</string>
+    <string name="softphone_on_hold">On hold</string>
+    <string name="softphone_answer">Answer</string>
+    <string name="softphone_hang_up">Hang up</string>
+    <string name="softphone_mute">Mute</string>
+    <string name="softphone_unmute">Unmute</string>
+    <string name="softphone_speaker">Speaker</string>
+    <string name="softphone_earpiece">Earpiece</string>
+    <string name="softphone_dial">Call</string>
+    <string name="softphone_number_hint">Number</string>
+</resources>
