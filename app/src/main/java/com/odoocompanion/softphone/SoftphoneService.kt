@@ -203,6 +203,7 @@ class SoftphoneService : LifecycleService() {
             // SoftphoneRinging rings, with the handset's ringtone
             isNativeRingingEnabled = false
             ring = null
+            ExtraTrust.rootCaData(applicationContext, rootCa)?.let(::setRootCaData)
             addListener(listener)
         }
         core.addAuthInfo(

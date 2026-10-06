@@ -211,6 +211,24 @@ handset.
 
 `local.properties` must point at an SDK (`sdk.dir=…`); it is git-ignored.
 
+### Testing the softphone against a lab phone system
+
+The softphone checks the phone system's certificate against the roots bundled with
+its SIP stack, not the Android or MDM store, so a lab Asterisk signed by a private
+CA is refused (`tlsv1 alert unknown ca` in Asterisk's log). A **debug** build also
+trusts the CA in `files/extra-ca.pem`; release builds ignore it:
+
+```bash
+adb push lab-ca.pem /data/local/tmp/lab-ca.pem
+adb shell run-as com.odoocompanion cp /data/local/tmp/lab-ca.pem files/extra-ca.pem
+adb shell am force-stop com.odoocompanion   # read when the SIP core starts
+```
+
+From an emulator the host is `10.0.2.2`, but Asterisk offers media on the address the
+handset's connection arrived at, which the emulator's NAT makes the host's loopback:
+give the lab Asterisk a TLS transport on the host's LAN address and point the
+extension's provider (`pbx_ip`) at it, or calls ring with one-way audio.
+
 ### Signing a release
 
 A handset installs a signed APK and nothing else, so a release meant for the fleet
