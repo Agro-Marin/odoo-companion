@@ -87,6 +87,17 @@ RecordingHarvestWorker ────┘      (survives reboot)     (WorkManager)
 Every producer writes to a local outbox rather than uploading inline, so a phone with
 no signal keeps collecting and flushes the backlog when it reconnects.
 
+Calls and recordings are collected when a call ends, not only on the periodic
+schedule (call log every 30 minutes, recordings every hour). `CallEndedWorker` waits
+on a WorkManager content-URI trigger over `CallLog.Calls.CONTENT_URI`, which the
+dialer writes as it hangs up, so it runs even while the app is not. It reads the call
+log at once and asks for a recording harvest 90 seconds later, because the scanner
+takes a file only after it has been unchanged for 60 seconds. A second call inside
+those 90 seconds moves the harvest back. The trigger fires once, so the worker arms
+the next one, and it needs `READ_CALL_LOG`: without it the periodic schedule is all
+that runs. That schedule stays registered as the safety net for a recording the
+dialer finishes late.
+
 Positions travel in groups. A fix waits up to `upload_window_seconds` (180 by default)
 for company, or goes immediately once twenty are queued — so at the default one-minute
 interval four fixes share a request instead of each taking one of its own. That is
