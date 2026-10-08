@@ -157,7 +157,9 @@ class SyncSchedulerTest {
     fun `after a call the log is read and the recording harvest waits for it to settle`() {
         SyncScheduler.afterCall(app, enrolled())
 
-        assertTrue(live(SyncScheduler.CALL_LOG_NOW))
+        // asked for, not necessarily still waiting: the synchronous executor
+        // may already have run the read when this looks
+        assertTrue(states(SyncScheduler.CALL_LOG_NOW).isNotEmpty())
         val harvest = info(SyncScheduler.RECORDING_AFTER_CALL)
         assertEquals(WorkInfo.State.ENQUEUED, harvest.state)
         assertEquals(SyncScheduler.RECORDING_AFTER_CALL_DELAY_MILLIS, harvest.initialDelayMillis)
@@ -179,7 +181,7 @@ class SyncSchedulerTest {
     fun `after a call only the collectors switched on run`() {
         SyncScheduler.afterCall(app, enrolled(recordings = false))
 
-        assertTrue(live(SyncScheduler.CALL_LOG_NOW))
+        assertTrue(states(SyncScheduler.CALL_LOG_NOW).isNotEmpty())
         assertEquals(emptyList<WorkInfo.State>(), states(SyncScheduler.RECORDING_AFTER_CALL))
     }
 
