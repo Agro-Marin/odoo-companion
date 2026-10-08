@@ -73,4 +73,17 @@
     <string name="softphone_earpiece">Auricular</string>
     <string name="softphone_dial">Llamar</string>
     <string name="softphone_number_hint">Número</string>
+    <string name="guide_step">Paso %1$d de %2$d</string>
+    <string name="guide_in_odoo">En Odoo</string>
+    <string name="guide_dismiss">Entendido</string>
+    <string name="guide_base_url_title">¿A qué Odoo se conecta este teléfono?</string>
+    <string name="guide_base_url_body">Escribe la dirección de tu Odoo, empezando con https://, por ejemplo https://tu-empresa.com. Sin /odoo ni diagonal al final.</string>
+    <string name="guide_base_url_odoo">Es la misma dirección con la que entras a Odoo en el navegador: cópiala de la barra de direcciones hasta antes de /odoo.</string>
+    <string name="guide_identifier_title">¿Cómo se llama este teléfono en Odoo?</string>
+    <string name="guide_identifier_body">Escribe el identificador del dispositivo exactamente como está en Odoo, con las mismas mayúsculas. Solo letras, dígitos y - _ . ~, sin espacios.</string>
+    <string name="guide_identifier_odoo">Remoto → Dispositivos → Nuevo. Elige la categoría Mobile Phone, pon el Identifier (por ejemplo PHONE-ANA) y guarda. Ese mismo Identifier va aquí.</string>
+    <string name="guide_token_title">¿Con qué llave entra este teléfono?</string>
+    <string name="guide_token_body">Pega el token que Odoo generó para este dispositivo. Cada teléfono lleva el suyo: no uses el de otro.</string>
+    <string name="guide_token_odoo">En el dispositivo, botón Generate Token. Odoo pide tu contraseña y muestra el token una sola vez con un botón de copiar: cópialo y pégalo aquí.</string>
+    <string name="identifier_no_spaces">Sin espacios: solo letras, dígitos y - _ . ~</string>
 </resources>

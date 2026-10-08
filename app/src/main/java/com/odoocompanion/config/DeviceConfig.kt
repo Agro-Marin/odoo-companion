@@ -132,6 +132,13 @@ fun isUsableBaseUrl(value: String): Boolean = value.trim().toHttpUrlOrNull() != 
 fun isUsableIdentifier(value: String): Boolean =
     value.trim().let { it.isNotEmpty() && IDENTIFIER_PATTERN.matches(it) }
 
+// The characters an identifier may hold, one at a time: the form drops any
+// other as it is typed or pasted instead of refusing the whole value on Save.
+fun isIdentifierChar(c: Char): Boolean =
+    c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c in IDENTIFIER_PUNCTUATION
+
+private const val IDENTIFIER_PUNCTUATION = "._~-"
+
 private val IDENTIFIER_PATTERN = Regex("[A-Za-z0-9._~-]+")
 
 class DeviceConfig(

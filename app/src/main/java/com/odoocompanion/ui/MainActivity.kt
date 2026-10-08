@@ -14,6 +14,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -53,6 +54,14 @@ class MainActivity : AppCompatActivity() {
 
     private val refusal = MutableStateFlow<Int?>(null)
 
+    private lateinit var guide: EnrollmentGuideView
+
+    // The steps the person closed with "Got it": each comes back once its
+    // field has been filled in and emptied again.
+    private val dismissedSteps = mutableSetOf<GuideField>()
+
+    private var governedKeys: Set<String> = emptySet()
+
     // "Last upload: 2 minutes ago" is how long the phone has been silent, and an
     // idle phone writes nothing to the store that would redraw it: without a
     // tick it said "2 minutes ago" for as long as the screen stayed open.
@@ -78,6 +87,7 @@ class MainActivity : AppCompatActivity() {
         keepContentOutFromUnderTheSystemBars()
 
         val app = CompanionApp.from(this)
+        setUpGuide()
 
         // Every field once, then only the ones a policy governs: the store
         // re-emits on every write -- each upload records its attempt -- and
@@ -273,6 +283,43 @@ class MainActivity : AppCompatActivity() {
             binding.uploadWindow.showSeconds(settings.uploadWindowSeconds)
         }
         applyManagedLock(settings)
+        governedKeys = settings.governedKeys
+        refreshGuide()
+    }
+
+    private fun setUpGuide() {
+        guide = EnrollmentGuideView(
+            steps = mapOf(
+                GuideField.BASE_URL to (binding.baseUrlLayout to binding.guideBaseUrl),
+                GuideField.IDENTIFIER to (binding.identifierLayout to binding.guideIdentifier),
+                GuideField.TOKEN to (binding.tokenLayout to binding.guideToken),
+            ),
+            onDismiss = { field ->
+                dismissedSteps += field
+                refreshGuide()
+            },
+        )
+        binding.identifier.filters += IdentifierInputFilter {
+            binding.identifierLayout.helperText = getString(R.string.identifier_no_spaces)
+        }
+        listOf(binding.baseUrl, binding.identifier, binding.token).forEach { field ->
+            field.doAfterTextChanged { refreshGuide() }
+        }
+    }
+
+    private fun refreshGuide() {
+        val values = mapOf(
+            GuideField.BASE_URL to binding.baseUrl.text.toString(),
+            GuideField.IDENTIFIER to binding.identifier.text.toString(),
+            GuideField.TOKEN to binding.token.text.toString(),
+        )
+        dismissedSteps.removeAll { !values[it].isNullOrBlank() }
+        guide.show(EnrollmentGuide.current(values, governedKeys, dismissedSteps))
+    }
+
+    override fun onDestroy() {
+        if (::guide.isInitialized) guide.stop()
+        super.onDestroy()
     }
 
     // A field is locked when the policy is managing THAT field, not merely

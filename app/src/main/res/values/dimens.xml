@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The form's side margin: a phone uses the whole width, and a wider
+         screen keeps the fields at a readable line length. -->
+    <dimen name="form_side_margin">16dp</dimen>
+</resources>
