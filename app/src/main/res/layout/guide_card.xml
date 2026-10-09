@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One step of the enrolment guide, shown under the field it explains. It is
-     part of the form's own flow rather than an overlay, so it wraps and
-     scrolls with the form on any screen and never covers the field. -->
+<!-- One step of the enrolment guide, docked over the bottom of the form so
+     the form keeps its place; the field it explains is lit meanwhile. -->
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="12dp"
+    app:cardElevation="6dp"
     android:visibility="gone"
     app:cardCornerRadius="12dp"
-    app:cardElevation="0dp"
     app:strokeColor="?attr/colorPrimary"
     app:strokeWidth="1dp">
 
@@ -31,7 +30,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:textAppearance="?attr/textAppearanceTitleMedium" />
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/guideBody"

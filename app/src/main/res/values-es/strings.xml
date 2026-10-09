@@ -86,4 +86,15 @@
     <string name="guide_token_body">Pega el token que Odoo generó para este dispositivo. Cada teléfono lleva el suyo: no uses el de otro.</string>
     <string name="guide_token_odoo">En el dispositivo, botón Generate Token. Odoo pide tu contraseña y muestra el token una sola vez con un botón de copiar: cópialo y pégalo aquí.</string>
     <string name="identifier_no_spaces">Sin espacios: solo letras, dígitos y - _ . ~</string>
+    <string name="section_connection">Conexión</string>
+    <string name="section_reporting">Reporte</string>
+    <string name="section_sending">Qué se envía</string>
+    <string name="figure_positions">Posiciones</string>
+    <string name="figure_calls">Llamadas</string>
+    <string name="figure_recordings">Grabaciones</string>
+    <string name="config_location_interval_short">Posición cada (s)</string>
+    <string name="config_upload_window_short">Agrupar envíos (s)</string>
+    <string name="action_grant_short">Conceder</string>
+    <string name="alerts_more">%1$s · +%2$d</string>
+    <string name="actions_menu">Acciones</string>
 </resources>

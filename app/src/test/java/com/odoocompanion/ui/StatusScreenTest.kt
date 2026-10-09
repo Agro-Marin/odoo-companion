@@ -68,17 +68,34 @@ class StatusScreenTest {
         return controller!!.get()
     }
 
+    // Everything the status panel says, in reading order: the state, the
+    // alert bands, the activity card -- each figure read as it is spoken.
     private fun status(): String {
-        val view = open().findViewById<TextView>(R.id.status)
+        val activity = open()
         var last = ""
         repeat(60) {
             Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
-            val now = view.text.toString()
-            if (now.isNotEmpty() && now == last) return now
+            val now = panelOf(activity)
+            if (now.isNotBlank() && now == last) return now
             last = now
             Thread.sleep(20)
         }
         return last
+    }
+
+    private fun panelOf(activity: MainActivity): String =
+        listOf(R.id.statePill, R.id.managedBadge, R.id.alerts, R.id.statusPanel)
+            .joinToString("\n") { said(activity.findViewById(it)) }
+
+    private fun said(view: View): String = when {
+        view.visibility != View.VISIBLE -> ""
+
+        view is android.view.ViewGroup ->
+            (0 until view.childCount).joinToString("\n") { said(view.getChildAt(it)) }
+
+        view is TextView -> listOfNotNull(view.text, view.contentDescription).joinToString("\n")
+
+        else -> ""
     }
 
     private fun text(id: Int) = app.getString(id)
@@ -411,7 +428,7 @@ class StatusScreenTest {
         )
         settle()
 
-        val shown = activity.findViewById<TextView>(R.id.status).text.toString()
+        val shown = panelOf(activity)
         assertTrue(shown, app.getString(R.string.status_queued_positions, 1) in shown)
     }
 
@@ -430,14 +447,13 @@ class StatusScreenTest {
         )
         val activity = open()
         settle()
-        val status = activity.findViewById<TextView>(R.id.status)
-        assertTrue(status.text.toString(), "2 minutes ago" in status.text)
+        panelOf(activity).let { assertTrue(it, "2 minutes ago" in it) }
 
         Shadows.shadowOf(android.os.Looper.getMainLooper())
             .idleFor(java.time.Duration.ofMinutes(3))
         settle()
 
-        assertTrue(status.text.toString(), "5 minutes ago" in status.text)
+        panelOf(activity).let { assertTrue(it, "5 minutes ago" in it) }
     }
 
     @Test
@@ -453,7 +469,7 @@ class StatusScreenTest {
         )
         settle()
 
-        val shown = activity.findViewById<TextView>(R.id.status).text.toString()
+        val shown = panelOf(activity)
         assertTrue(shown, text(R.string.status_bad_base_url) in shown)
     }
 
@@ -472,7 +488,7 @@ class StatusScreenTest {
         controller!!.pause().resume()
         settle()
 
-        val shown = controller!!.get().findViewById<TextView>(R.id.status).text.toString()
+        val shown = panelOf(controller!!.get())
         assertFalse(shown, text(R.string.status_location_missing) in shown)
     }
 

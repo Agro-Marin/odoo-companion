@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand_primary">#2EE6A0</color>
+    <color name="brand_on_primary">#03140D</color>
+    <color name="ink">#E8EDF2</color>
+    <color name="ink_muted">#8A94A3</color>
+    <color name="canvas">#0B0E12</color>
+    <color name="panel">#12161C</color>
+    <color name="hairline">#252B33</color>
+    <color name="alert_bg">#2A2110</color>
+    <color name="alert_ink">#F5C26B</color>
+</resources>

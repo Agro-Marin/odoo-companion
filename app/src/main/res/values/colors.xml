@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_primary">#3C5A78</color>
+    <!-- One accent carries the identity; every other color is a neutral. The
+         light value is darker than the dark one so text on it keeps 4.5:1. -->
+    <color name="brand_primary">#0A7D55</color>
+    <color name="brand_on_primary">#FFFFFF</color>
+    <color name="ink">#11161C</color>
+    <color name="ink_muted">#5B6573</color>
+    <color name="canvas">#F6F7F9</color>
+    <color name="panel">#FFFFFF</color>
+    <color name="hairline">#DDE2E8</color>
+    <color name="alert_bg">#FFF4DB</color>
+    <color name="alert_ink">#6E4A00</color>
 </resources>

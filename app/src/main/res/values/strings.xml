@@ -87,4 +87,15 @@
     <string name="guide_token_body">Paste the token Odoo generated for this device. Every phone has its own: do not use another phone\'s.</string>
     <string name="guide_token_odoo">On the device, the Generate Token button. Odoo asks for your password and shows the token once, with a copy button: copy it and paste it here.</string>
     <string name="identifier_no_spaces">No spaces: letters, digits and - _ . ~ only</string>
+    <string name="section_connection">Connection</string>
+    <string name="section_reporting">Reporting</string>
+    <string name="section_sending">What is sent</string>
+    <string name="figure_positions">Positions</string>
+    <string name="figure_calls">Calls</string>
+    <string name="figure_recordings">Recordings</string>
+    <string name="config_location_interval_short">Fix every (s)</string>
+    <string name="config_upload_window_short">Batch window (s)</string>
+    <string name="action_grant_short">Grant</string>
+    <string name="alerts_more">%1$s · +%2$d</string>
+    <string name="actions_menu">Actions</string>
 </resources>

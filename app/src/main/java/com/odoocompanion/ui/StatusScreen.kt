@@ -25,40 +25,84 @@ sealed interface StatusLine {
     data class Detail(@StringRes override val text: Int, val detail: String) : StatusLine
 }
 
+// What the status panel draws, grouped the way it is drawn: whether the phone
+// is enrolled, what needs a hand (alerts), what it last did, and its queues.
+data class StatusPanel(
+    val enrolled: Boolean,
+    val managed: Boolean,
+    // a permission or exemption is missing: what the grant button is for
+    val blocked: Boolean,
+    val alerts: List<StatusLine>,
+    val lastUpload: StatusLine,
+    val lastError: StatusLine?,
+    val lastAttempt: StatusLine?,
+    val queues: OutboxCounts,
+)
+
 object StatusScreen {
+    fun panel(
+        settings: Settings,
+        health: HealthReport,
+        queues: OutboxCounts,
+        softphoneWanted: Boolean,
+        now: Long = System.currentTimeMillis(),
+    ): StatusPanel {
+        val blockers =
+            health.blockers(settings.callLogEnabled, settings.recordingsEnabled, softphoneWanted)
+        val alerts = buildList {
+            val cap = settings.payloadLimit(now)
+            if (cap in 1..<SMALLEST_MOBILE_CAP_BYTES) {
+                add(StatusLine.Detail(R.string.status_small_cap, "${cap / 1024} KB"))
+            }
+            blockers.forEach { add(StatusLine.Say(textFor(it))) }
+            if (queues.undeliverable > 0) {
+                add(StatusLine.Quantity(R.plurals.status_undeliverable, queues.undeliverable))
+                add(StatusLine.Say(R.string.status_undeliverable_hint))
+            }
+        }
+        return StatusPanel(
+            enrolled = settings.isEnrolled,
+            managed = settings.managed,
+            blocked = blockers.isNotEmpty(),
+            alerts = alerts,
+            lastUpload = lastUpload(settings),
+            lastError = settings.lastUploadError?.let {
+                StatusLine.Detail(R.string.status_last_error, it)
+            },
+            lastAttempt = StatusLine.Since(R.string.status_last_attempt, settings.lastAttemptAt)
+                .takeIf { settings.lastAttemptAt > settings.lastUploadAt },
+            queues = queues,
+        )
+    }
+
+    // The panel as one list, in reading order.
     fun lines(
         settings: Settings,
         health: HealthReport,
         queues: OutboxCounts,
         softphoneWanted: Boolean,
         now: Long = System.currentTimeMillis(),
-    ): List<StatusLine> = buildList {
-        val enrolment =
-            if (settings.isEnrolled) R.string.status_enrolled else R.string.status_not_enrolled
-        add(StatusLine.Say(enrolment))
-        if (settings.managed) add(StatusLine.Say(R.string.status_managed))
-        val cap = settings.payloadLimit(now)
-        if (cap in 1..<SMALLEST_MOBILE_CAP_BYTES) {
-            add(StatusLine.Detail(R.string.status_small_cap, "${cap / 1024} KB"))
-        }
-        health.blockers(settings.callLogEnabled, settings.recordingsEnabled, softphoneWanted)
-            .forEach { add(StatusLine.Say(textFor(it))) }
-
-        add(lastUpload(settings))
-        settings.lastUploadError?.let { add(StatusLine.Detail(R.string.status_last_error, it)) }
-        if (settings.lastAttemptAt > settings.lastUploadAt) {
-            add(StatusLine.Since(R.string.status_last_attempt, settings.lastAttemptAt))
-        }
-
-        add(StatusLine.Count(R.string.status_queued_positions, queues.positions))
-        add(StatusLine.Count(R.string.status_queued_calls, queues.calls))
-        add(StatusLine.Count(R.string.status_queued_recordings, queues.recordings))
-
-        if (queues.undeliverable > 0) {
-            add(StatusLine.Quantity(R.plurals.status_undeliverable, queues.undeliverable))
-            add(StatusLine.Say(R.string.status_undeliverable_hint))
+    ): List<StatusLine> {
+        val panel = panel(settings, health, queues, softphoneWanted, now)
+        val undeliverable = panel.alerts.filter { it.text in UNDELIVERABLE_TEXTS }
+        return buildList {
+            val enrolment =
+                if (panel.enrolled) R.string.status_enrolled else R.string.status_not_enrolled
+            add(StatusLine.Say(enrolment))
+            if (panel.managed) add(StatusLine.Say(R.string.status_managed))
+            addAll(panel.alerts - undeliverable.toSet())
+            add(panel.lastUpload)
+            panel.lastError?.let(::add)
+            panel.lastAttempt?.let(::add)
+            add(StatusLine.Count(R.string.status_queued_positions, queues.positions))
+            add(StatusLine.Count(R.string.status_queued_calls, queues.calls))
+            add(StatusLine.Count(R.string.status_queued_recordings, queues.recordings))
+            addAll(undeliverable)
         }
     }
+
+    private val UNDELIVERABLE_TEXTS =
+        setOf(R.plurals.status_undeliverable, R.string.status_undeliverable_hint)
 
     const val SMALLEST_MOBILE_CAP_BYTES = 8L * 1024 * 1024
 

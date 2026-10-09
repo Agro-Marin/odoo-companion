@@ -4,20 +4,31 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
 import android.text.format.DateUtils
 import android.util.Log
+import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
+import androidx.core.view.updateLayoutParams
+import androidx.core.view.updatePadding
+import androidx.core.widget.ImageViewCompat
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.textfield.TextInputLayout
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.EnrollmentResult
@@ -62,6 +73,10 @@ class MainActivity : AppCompatActivity() {
 
     private var governedKeys: Set<String> = emptySet()
 
+    private var shownAlerts: List<String> = emptyList()
+
+    private var alertsUnfolded = false
+
     // "Last upload: 2 minutes ago" is how long the phone has been silent, and an
     // idle phone writes nothing to the store that would redraw it: without a
     // tick it said "2 minutes ago" for as long as the screen stayed open.
@@ -88,6 +103,7 @@ class MainActivity : AppCompatActivity() {
 
         val app = CompanionApp.from(this)
         setUpGuide()
+        setUpActions()
 
         // Every field once, then only the ones a policy governs: the store
         // re-emits on every write -- each upload records its attempt -- and
@@ -115,14 +131,15 @@ class MainActivity : AppCompatActivity() {
                     merge(healthChecks, minutes),
                     app.softphones.configured,
                 ) { settings, counts, refused, _, softphone ->
-                    statusText(settings, counts, refused, softphone)
+                    panelText(settings, counts, refused, softphone)
                 }
                     .distinctUntilChanged()
-                    .collect { binding.status.text = it }
+                    .collect(::showPanel)
             }
         }
 
         binding.save.setOnClickListener {
+            showActions(false)
             val form = formValues()
             lifecycleScope.launch {
                 refusal.value = when (app.config.saveForm(form)) {
@@ -145,6 +162,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.syncNow.setOnClickListener {
+            showActions(false)
             lifecycleScope.launch {
                 SyncScheduler.collectAndUploadNow(
                     this@MainActivity,
@@ -154,6 +172,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.grantPermissions.setOnClickListener {
+            showActions(false)
             lifecycleScope.launch {
                 val settings = app.config.current()
                 requestPermissions(settings, app.softphones.current() != null)
@@ -169,28 +188,38 @@ class MainActivity : AppCompatActivity() {
     // phone is enrolled -- the first thing anyone reads when a phone stopped
     // reporting.
     private fun keepContentOutFromUnderTheSystemBars() {
-        val root = binding.root
+        val scroll = binding.formScroll
         // Captured once. The listener runs again on rotation and whenever the
         // keyboard opens, and padding added to whatever is currently set would
         // grow a little further each time.
+        val menuOffset =
+            (binding.actionsMenu.layoutParams as ViewGroup.MarginLayoutParams).topMargin
         val base = listOf(
-            root.paddingLeft,
-            root.paddingTop,
-            root.paddingRight,
-            root.paddingBottom,
+            scroll.paddingLeft,
+            scroll.paddingTop,
+            scroll.paddingRight,
+            scroll.paddingBottom,
         )
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
-            view.setPadding(
+            // The keyboard is taller than the navigation bar it covers, so the
+            // larger of the two is what keeps Save and the guide reachable
+            // while a field is being typed into.
+            val bottom = maxOf(bars.bottom, keyboard.bottom)
+            scroll.setPadding(
                 base[0] + bars.left,
                 base[1] + bars.top,
                 base[2] + bars.right,
-                // The keyboard is taller than the navigation bar it covers, so
-                // the larger of the two is what keeps Save reachable while a
-                // field is being typed into.
-                base[3] + maxOf(bars.bottom, keyboard.bottom),
+                base[3] + bottom,
             )
+            binding.guideDock.updatePadding(bottom = bottom)
+            binding.actionsMenu.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                topMargin = bars.top + menuOffset
+            }
+            // Typing, the keyboard and the guide together would cover the very
+            // field being filled in: the guide steps aside until it closes.
+            binding.guideDock.isVisible = !insets.isVisible(WindowInsetsCompat.Type.ime())
             insets
         }
     }
@@ -305,6 +334,41 @@ class MainActivity : AppCompatActivity() {
         listOf(binding.baseUrl, binding.identifier, binding.token).forEach { field ->
             field.doAfterTextChanged { refreshGuide() }
         }
+        binding.alerts.setOnClickListener {
+            alertsUnfolded = !alertsUnfolded
+            showAlerts(shownAlerts, binding.alertGrant.isVisible)
+        }
+        // The labels are short so both fit on one row; the range and what 0
+        // means are said while the field is being edited.
+        explainWhileEditing(binding.locationIntervalLayout, R.string.config_location_interval)
+        explainWhileEditing(binding.uploadWindowLayout, R.string.config_upload_window)
+    }
+
+    // Save, Sync now and Grant live behind the gear, so the form itself fits
+    // the screen; the alert band keeps a shortcut to Grant while one is due.
+    private val closeActionsOnBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = showActions(false)
+    }
+
+    private fun setUpActions() {
+        onBackPressedDispatcher.addCallback(this, closeActionsOnBack)
+        binding.actionsToggle.setOnClickListener {
+            showActions(!binding.actionsMenu.isVisible)
+        }
+        binding.actionsScrim.setOnClickListener { showActions(false) }
+        binding.alertGrant.setOnClickListener { binding.grantPermissions.performClick() }
+    }
+
+    private fun showActions(open: Boolean) {
+        binding.actionsMenu.isVisible = open
+        binding.actionsScrim.isVisible = open
+        closeActionsOnBack.isEnabled = open
+    }
+
+    private fun explainWhileEditing(layout: TextInputLayout, @StringRes help: Int) {
+        layout.editText?.setOnFocusChangeListener { _, focused ->
+            layout.helperText = if (focused) getString(help) else null
+        }
     }
 
     private fun refreshGuide() {
@@ -370,17 +434,86 @@ class MainActivity : AppCompatActivity() {
             getString(line.text, DateUtils.getRelativeTimeSpanString(line.at))
     }
 
-    private fun statusText(
+    // Formatted before it is compared, so the minute tick redraws "2 minutes
+    // ago" while an unchanged panel draws nothing.
+    private data class PanelText(
+        val enrolled: Boolean,
+        val managed: Boolean,
+        val blocked: Boolean,
+        val alerts: List<String>,
+        val lastUpload: String,
+        val lastAttempt: String?,
+        val lastError: String?,
+        val queues: OutboxCounts,
+    )
+
+    private fun panelText(
         settings: Settings,
         counts: OutboxCounts,
         refused: Int?,
         softphoneWanted: Boolean,
-    ): String = (
-        listOfNotNull(refused?.let(::getString)) +
-            StatusScreen.lines(settings, DeviceHealth.report(this), counts, softphoneWanted)
-                .map(::format)
+    ): PanelText {
+        val panel =
+            StatusScreen.panel(settings, DeviceHealth.report(this), counts, softphoneWanted)
+        return PanelText(
+            enrolled = panel.enrolled,
+            managed = panel.managed,
+            blocked = panel.blocked,
+            alerts = listOfNotNull(refused?.let(::getString)) + panel.alerts.map(::format),
+            lastUpload = format(panel.lastUpload),
+            lastAttempt = panel.lastAttempt?.let(::format),
+            lastError = panel.lastError?.let(::format),
+            queues = panel.queues,
         )
-        .joinToString(separator = "\n", postfix = "\n")
+    }
+
+    private fun showPanel(panel: PanelText) {
+        binding.stateText.setText(
+            if (panel.enrolled) R.string.status_enrolled else R.string.status_not_enrolled,
+        )
+        val dot = if (panel.enrolled) R.color.brand_primary else R.color.alert_ink
+        ImageViewCompat.setImageTintList(
+            binding.stateDot,
+            ColorStateList.valueOf(ContextCompat.getColor(this, dot)),
+        )
+        binding.managedBadge.isVisible = panel.managed
+        showAlerts(panel.alerts, panel.blocked)
+        binding.lastUpload.text = panel.lastUpload
+        binding.lastAttempt.showOptional(panel.lastAttempt)
+        binding.lastError.showOptional(panel.lastError)
+        binding.queuePositions.showFigure(panel.queues.positions, R.string.status_queued_positions)
+        binding.queueCalls.showFigure(panel.queues.calls, R.string.status_queued_calls)
+        binding.queueRecordings.showFigure(
+            panel.queues.recordings,
+            R.string.status_queued_recordings,
+        )
+    }
+
+    // One band however many alerts there are, so the form still fits the
+    // screen: the first one and how many follow, unfolded on a tap. Every one
+    // of them is read aloud either way.
+    private fun showAlerts(alerts: List<String>, blocked: Boolean) {
+        shownAlerts = alerts
+        binding.alerts.isVisible = alerts.isNotEmpty()
+        binding.alertGrant.isVisible = blocked
+        binding.alertText.contentDescription = alerts.joinToString("\n")
+        binding.alertText.text = when {
+            alerts.size <= 1 || alertsUnfolded -> alerts.joinToString("\n")
+            else -> getString(R.string.alerts_more, alerts.first(), alerts.size - 1)
+        }
+    }
+
+    private fun TextView.showOptional(value: String?) {
+        text = value.orEmpty()
+        isVisible = value != null
+    }
+
+    // The figure is the number alone; what it counts is read aloud whole.
+    @SuppressLint("SetTextI18n")
+    private fun TextView.showFigure(value: Int, @StringRes spoken: Int) {
+        text = value.toString()
+        contentDescription = getString(spoken, value)
+    }
 
     private companion object {
         const val TAG = "MainActivity"

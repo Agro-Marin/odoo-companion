@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="gap_section">18dp</dimen>
+    <dimen name="gap_field">10dp</dimen>
+    <dimen name="panel_padding">14dp</dimen>
+</resources>

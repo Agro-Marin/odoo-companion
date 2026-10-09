@@ -1,35 +1,262 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Every field is wrapped in a TextInputLayout rather than carrying a hint of
+<!-- The whole form is laid out to fit one screen: the scroll view underneath
+     only moves when the keyboard is up or the phone is unusually short. The
+     enrolment guide floats over the bottom of the form instead of pushing it
+     down, and lights the field it is about.
+
+     Every field is wrapped in a TextInputLayout rather than carrying a hint of
      its own. A hint is only drawn while the field is empty, so the moment a
      phone is enrolled the whole form turns into five unlabelled values, two of
      them bare numbers whose unit lives only in the string the user can no
      longer see. A floating label survives the field being filled in. -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:paddingStart="@dimen/form_side_margin"
-    android:paddingTop="16dp"
-    android:paddingEnd="@dimen/form_side_margin"
-    android:paddingBottom="16dp">
+    android:background="@color/canvas">
 
-    <LinearLayout
+    <ScrollView
+        android:id="@+id/formScroll"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:paddingStart="@dimen/form_side_margin"
+        android:paddingTop="12dp"
+        android:paddingEnd="@dimen/form_side_margin"
+        android:paddingBottom="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <!-- The name and, beside it, whether this phone is enrolled. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/app_name"
+                    android:textColor="@color/ink"
+                    android:textSize="22sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/statePill"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="4dp">
+
+                    <ImageView
+                        android:id="@+id/stateDot"
+                        android:layout_width="8dp"
+                        android:layout_height="8dp"
+                        android:layout_marginEnd="8dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/dot" />
+
+                    <TextView
+                        android:id="@+id/stateText"
+                        style="@style/Text.Companion.Mono"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/ink" />
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/actionsToggle"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="4dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/actions_menu"
+                    android:src="@drawable/ic_settings" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/managedBadge"
+                style="@style/Text.Companion.Mono"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/status_managed"
+                android:visibility="gone" />
+
+            <!-- What needs a hand, folded into one band: the first item and how
+                 many follow; a tap unfolds the rest. A shortcut to the
+                 permission request rides on it while a permission is missing. -->
+            <LinearLayout
+                android:id="@+id/alerts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/gap_section"
+                android:background="@drawable/bg_alert"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="6dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/alertText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:drawablePadding="10dp"
+                    android:gravity="center_vertical"
+                    android:textColor="@color/alert_ink"
+                    android:textSize="13sp"
+                    android:drawableStart="@drawable/ic_alert" />
+
+                <Button
+                    android:id="@+id/alertGrant"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="0dp"
+                    android:text="@string/action_grant_short"
+                    android:textColor="@color/alert_ink"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/statusPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/gap_field">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/panel_padding">
+
+                    <TextView
+                        android:id="@+id/lastUpload"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/ink"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/lastAttempt"
+                        style="@style/Text.Companion.Mono"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/lastError"
+                        style="@style/Text.Companion.Mono"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxLines="2"
+                        android:ellipsize="end"
+                        android:textColor="@color/alert_ink"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="10dp"
+                        android:layout_marginBottom="10dp"
+                        android:background="@color/hairline" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:baselineAligned="false"
+                        android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/queuePositions"
+                            style="@style/Text.Companion.Figure"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <TextView
+                            style="@style/Text.Companion.Label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/figure_positions" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/queueCalls"
+                            style="@style/Text.Companion.Figure"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <TextView
+                            style="@style/Text.Companion.Label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/figure_calls" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/queueRecordings"
+                            style="@style/Text.Companion.Figure"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <TextView
+                            style="@style/Text.Companion.Label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/figure_recordings" />
+                    </LinearLayout>
+
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
         <TextView
-            android:id="@+id/status"
-            android:layout_width="match_parent"
+            style="@style/Text.Companion.Label"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingBottom="16dp"
-            android:textIsSelectable="true" />
+            android:layout_marginTop="@dimen/gap_section"
+            android:layout_marginBottom="6dp"
+            android:text="@string/section_connection" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/baseUrlLayout"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
+            android:layout_marginBottom="@dimen/gap_field"
             android:hint="@string/config_server">
 
             <com.google.android.material.textfield.TextInputEditText
@@ -40,16 +267,11 @@
                 android:inputType="textUri" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <include
-            android:id="@+id/guideBaseUrl"
-            layout="@layout/guide_card" />
-
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/identifierLayout"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
+            android:layout_marginBottom="@dimen/gap_field"
             android:hint="@string/config_identifier">
 
             <com.google.android.material.textfield.TextInputEditText
@@ -60,17 +282,13 @@
                 android:inputType="text" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <include
-            android:id="@+id/guideIdentifier"
-            layout="@layout/guide_card" />
-
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/tokenLayout"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:hint="@string/config_token">
+            android:layout_marginBottom="@dimen/gap_field"
+            android:hint="@string/config_token"
+            app:endIconMode="password_toggle">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/token"
@@ -80,17 +298,28 @@
                 android:inputType="textPassword" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <include
-            android:id="@+id/guideToken"
-            layout="@layout/guide_card" />
+        <TextView
+            style="@style/Text.Companion.Label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp"
+            android:text="@string/section_reporting" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/locationIntervalLayout"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:hint="@string/config_location_interval">
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:layout_marginBottom="@dimen/gap_field"
+            android:hint="@string/config_location_interval_short">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/locationInterval"
@@ -102,11 +331,11 @@
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/uploadWindowLayout"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:hint="@string/config_upload_window">
+            android:layout_weight="1"
+            android:layout_marginBottom="@dimen/gap_field"
+            android:hint="@string/config_upload_window_short">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/uploadWindow"
@@ -116,40 +345,117 @@
                 android:inputType="number" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <CheckBox
+            </LinearLayout>
+
+        <TextView
+            style="@style/Text.Companion.Label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp"
+            android:text="@string/section_sending" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/callLogEnabled"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/restriction_call_log_title" />
+            android:minHeight="40dp"
+            android:text="@string/restriction_call_log_title"
+            android:textSize="14sp" />
 
-        <CheckBox
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/recordingsEnabled"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/restriction_recordings_title" />
+            android:minHeight="40dp"
+            android:text="@string/restriction_recordings_title"
+            android:textSize="14sp" />
 
-        <CheckBox
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/wifiOnly"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/restriction_wifi_only_title" />
-
-        <Button
-            android:id="@+id/save"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/action_save" />
+            android:minHeight="40dp"
+            android:text="@string/restriction_wifi_only_title"
+            android:textSize="14sp" />
 
-        <Button
-            android:id="@+id/syncNow"
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- The actions, behind the gear: a scrim that closes the menu on any tap
+         outside it, and the menu itself under the gear. They are views of
+         this screen rather than a dialog, so a managed form still disables
+         Save in place. -->
+    <View
+        android:id="@+id/actionsScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#66000000"
+        android:clickable="true"
+        android:elevation="12dp"
+        android:focusable="false"
+        android:visibility="gone" />
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/actionsMenu"
+        android:layout_width="260dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="64dp"
+        android:layout_marginEnd="@dimen/form_side_margin"
+        android:visibility="gone"
+        app:cardElevation="16dp">
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/action_sync_now" />
+            android:orientation="vertical"
+            android:padding="12dp">
 
-        <Button
-            android:id="@+id/grantPermissions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/action_grant" />
-    </LinearLayout>
-</ScrollView>
+            <Button
+                android:id="@+id/save"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/action_save" />
+
+            <Button
+                android:id="@+id/syncNow"
+                style="@style/Widget.Companion.Button.Secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/action_sync_now" />
+
+            <Button
+                android:id="@+id/grantPermissions"
+                style="@style/Widget.Companion.Button.Secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/action_grant" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- The enrolment guide, docked over the bottom of the form. -->
+    <FrameLayout
+        android:id="@+id/guideDock"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:paddingStart="@dimen/form_side_margin"
+        android:paddingEnd="@dimen/form_side_margin">
+
+        <include
+            android:id="@+id/guideBaseUrl"
+            layout="@layout/guide_card" />
+
+        <include
+            android:id="@+id/guideIdentifier"
+            layout="@layout/guide_card" />
+
+        <include
+            android:id="@+id/guideToken"
+            layout="@layout/guide_card" />
+
+    </FrameLayout>
+</FrameLayout>

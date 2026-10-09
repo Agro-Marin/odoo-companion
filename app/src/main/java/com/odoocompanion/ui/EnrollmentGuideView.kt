@@ -2,20 +2,21 @@ package com.odoocompanion.ui
 
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
-import android.graphics.Rect
+import android.content.res.ColorStateList
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import androidx.annotation.StringRes
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.textfield.TextInputLayout
 import com.odoocompanion.R
 import com.odoocompanion.databinding.GuideCardBinding
 
-// Draws the step EnrollmentGuide chose: its card slides in under the field,
-// its outline breathes, and the form scrolls them into view. Nothing is
-// animated when the system has animations off, and the card is part of the
-// form's flow, so it wraps on a narrow phone and keeps its width on a tablet.
+// Draws the step EnrollmentGuide chose: its card slides in over the bottom of
+// the form and breathes, and the field it is about is outlined in the accent.
+// Nothing is animated when the system has animations off; the form keeps its
+// place, so it still fits the screen while the guide is up.
 class EnrollmentGuideView(
     private val steps: Map<GuideField, Pair<TextInputLayout, GuideCardBinding>>,
     onDismiss: (GuideField) -> Unit,
@@ -60,7 +61,7 @@ class EnrollmentGuideView(
         root.visibility = View.VISIBLE
         if (animated()) {
             root.alpha = 0f
-            root.translationY = -SLIDE_DP * root.resources.displayMetrics.density
+            root.translationY = SLIDE_DP * root.resources.displayMetrics.density
             root.animate()
                 .alpha(1f)
                 .translationY(0f)
@@ -69,22 +70,31 @@ class EnrollmentGuideView(
                 .start()
             breathe(card)
         }
-        // The least scroll that shows the field and its card whole: the status
-        // above stays in view whenever the screen has room for both.
-        root.post {
-            val margin = (MARGIN_DP * root.resources.displayMetrics.density).toInt()
-            val area = Rect(0, layout.top - root.top - margin, root.width, root.height + margin)
-            root.requestRectangleOnScreen(area, !animated())
-        }
+        light(layout)
     }
 
     private fun hide(field: GuideField) {
         stop()
-        val root = steps.getValue(field).second.root
+        val (layout, card) = steps.getValue(field)
+        ContextCompat.getColorStateList(layout.context, R.color.field_stroke)
+            ?.let(layout::setBoxStrokeColorStateList)
+        val root = card.root
         root.animate().cancel()
         root.alpha = 1f
         root.translationY = 0f
         root.visibility = View.GONE
+    }
+
+    // The field the card is about, outlined in the accent until it is filled.
+    private fun light(layout: TextInputLayout) {
+        val accent = MaterialColors.getColor(layout, androidx.appcompat.R.attr.colorPrimary)
+        // stateful on purpose: a single color only replaces the focused one
+        layout.setBoxStrokeColorStateList(
+            ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()),
+                intArrayOf(accent, accent),
+            ),
+        )
     }
 
     private fun breathe(card: GuideCardBinding) {
@@ -111,8 +121,7 @@ class EnrollmentGuideView(
     private companion object {
         const val REVEAL_MILLIS = 280L
         const val PULSE_MILLIS = 900L
-        const val SLIDE_DP = 12f
-        const val MARGIN_DP = 24f
+        const val SLIDE_DP = 24f
         const val SOFT_ALPHA = 0x40
 
         val TEXTS = mapOf(
