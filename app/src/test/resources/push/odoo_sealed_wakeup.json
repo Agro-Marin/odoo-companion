@@ -1,0 +1,7 @@
+{
+ "private_key": "--GjJ9-5r9VAXTB860zuSwO2HzirfUoHLPc41oP64Ls",
+ "public_key": "BMYxNJxBDZWv5JnUwpgf5WfvsJEV-J1qObRu7mcCvjfqIKuy4IkaQuTn_Vzd6YfYpZQHvYyxTb7cZaYGJZUy8Ns",
+ "auth": "s5UgesKAMDllwBV-1TH_pg",
+ "sealed": "BpKFfKzHnuCEmfO+oCA37gAAEABBBHM5hFQVhKhtg8DScXCTU/1P8lRsEyGK+TmPH8g3OTTKjZ7k5vL7D0g+OwILr9YhMMp52RrRyyFoWt4GJ5gDsezbmWoWf6MrR5E9auEIk1+STtLdE9Zv78Cga38ZG4+pXQmc554=",
+ "plain": "{\"command\": \"sync\"}"
+}

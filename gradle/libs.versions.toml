@@ -31,6 +31,10 @@ linphone = "5.5.29"
 # Wake-ups from Odoo through any UnifiedPush distributor (ntfy, or an FCM
 # bridge), sealed with RFC 8291 Web Push encryption that the connector opens.
 unifiedpush = "3.3.5"
+# The Tink the connector 3.3.5 declares. The connector carries it as a runtime
+# dependency only; OdooSealedWakeupTest compiles against its HybridDecrypt to
+# open a wake-up sealed by Odoo, so the tests name it at the same version.
+tink = "1.23.0"
 
 [libraries]
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -55,6 +59,7 @@ robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectr
 androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 linphone = { module = "org.linphone.no-video:linphone-sdk-android", version.ref = "linphone" }
 unifiedpush-connector = { module = "org.unifiedpush.android:connector", version.ref = "unifiedpush" }
+tink = { module = "com.google.crypto.tink:tink", version.ref = "tink" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

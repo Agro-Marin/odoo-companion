@@ -159,6 +159,7 @@ dependencies {
     implementation(libs.linphone)
     implementation(libs.unifiedpush.connector)
 
+    testImplementation(libs.tink)
     testImplementation(libs.junit)
     testImplementation(libs.androidx.junit)
     testImplementation(libs.robolectric)
