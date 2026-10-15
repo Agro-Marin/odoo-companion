@@ -235,6 +235,16 @@ that answers `push_unavailable` (no `ODOO_API_ENCRYPTION_KEY`), or an Odoo out o
 reach leave the periodic work exactly as it was. A handset with several
 distributors and none chosen takes the first by package name; MDM installs one.
 
+**The distributor must be exempt from battery optimisation.** Observed on an
+Android 15 emulator with ntfy 1.25.2 against ntfy.sh: ntfy held the
+subscription but opened no connection until its own screen was brought
+forward, and it says so itself in a banner. While no connection is open,
+ntfy.sh refuses to publish to the topic -- `507`, code `50701`, "cannot publish
+to UnifiedPush topic without previously active subscriber" -- which Odoo counts
+as an endpoint down for now and retries, giving up after a day. A fleet
+therefore whitelists the distributor from battery optimisation by policy, as it
+already does for this app.
+
 ## Build
 
 ```bash
