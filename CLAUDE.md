@@ -26,15 +26,17 @@ token and talks to whatever Odoo those point at.
 ## Layout
 
 Code lives under `app/src/main/java/com/odoocompanion/`, one package per
-concern (`config`, `location`, `calllog`, `recording`, `softphone`, `data`, `sync`, `net`,
-`system`, `ui`); JVM unit tests mirror the packages under `app/src/test/`.
+concern (`config`, `location`, `calllog`, `recording`, `softphone`, `push`, `data`,
+`sync`, `net`, `system`, `ui`); JVM unit tests mirror the packages under
+`app/src/test/`.
 
 **Policy is extracted from the Android component that triggers it**, in every
 package that has one: `CallLogReader` from `CallLogSyncWorker`, `RecordingHarvest`
 and `RecordingFilename` from `RecordingHarvestWorker`, `OutboxDrainer` from
 `UploadWorker`, `LocationQueue` from `LocationForegroundService`, `StatusScreen`
 from `MainActivity`, `SoftphoneCallBook` from `SoftphoneCalls` (which SIP call owns
-which Telecom connection, why a call ended, when the microphone is needed). Each pair
+which Telecom connection, why a call ended, when the microphone is needed), `PushPlan`
+and `PushCommand` from `CompanionPushService`. Each pair
 exists because what a device uploads, keeps and discards has to be checkable
 without WorkManager, a `LifecycleService` or a fused location provider — a rule
 worth keeping the next time something is added to a callback because that is

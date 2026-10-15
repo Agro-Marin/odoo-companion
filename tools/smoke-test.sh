@@ -88,7 +88,7 @@ check "an Android call type this build does not know is stored, not refused" 200
 # Stamped the way the app stamps it: the file's write time, which is when the
 # call ended. A stamp a few seconds after the start is what this script used to
 # send, and it matched on a server that could not match a real recording.
-AUDIO=$(head -c 2048 /dev/urandom | base64 -w0)
+AUDIO=$( { printf '\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00M4A isom'; head -c 2048 /dev/urandom; } | base64 -w0)
 check "a recording stamped at the call's end matches the call" 200 "$BASE/recording" \
     "{\"number\":\"$NUMBER\",\"recorded_at\":$((NOW + CALL_SECONDS * 1000)),
     \"file_name\":\"call_${NUMBER}.m4a\",\"mimetype\":\"audio/mp4\",\"audio_b64\":\"$AUDIO\"}" \

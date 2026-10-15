@@ -22,7 +22,7 @@ to whatever Odoo instance those point at.
 
 All are authenticated with `Authorization: Bearer <token>`, where `<identifier>` is
 the device's identifier in Odoo; the three uploads are `POST`, the softphone
-settings `GET`:
+settings `GET`, and the push registration both:
 
 | Purpose | Route | Body |
 |---------|-------|------|
@@ -30,6 +30,7 @@ settings `GET`:
 | Call logs | `/remote/mobile/<identifier>/calllog` | `{"calls": [ … ]}` |
 | Recordings | `/remote/mobile/<identifier>/recording` | one object with `audio_b64` |
 | Softphone settings | `/remote/mobile/<identifier>/softphone` | — |
+| Wake-ups | `/remote/mobile/<identifier>/push` | `GET`: none; `POST`: `{"endpoint", "keys": {"p256dh", "auth"}}`, or `{"endpoint": null}` to leave |
 
 The batch routes answer with `accepted`, `duplicates` and `skipped`: rows newly
 stored, rows this device had already sent, and rows the endpoint read and could
@@ -212,6 +213,27 @@ for ever, and was *never* visible, because it was killed at the start of a drain
 back at the end of the same one. It also held the upload worker at `RETRY`, which walks
 WorkManager's backoff out to five hours and delays every position and call log on the
 handset.
+
+## Wake-ups
+
+The app reports on its own schedule; a wake-up from Odoo shortens the wait. It
+arrives through any [UnifiedPush](https://unifiedpush.org) distributor installed
+on the handset — ntfy pointed at a company server, or an FCM bridge — as a Web
+Push message (RFC 8291) sealed to keys only this app and Odoo hold. The
+connector opens it; a message that was not sealed to the handset is ignored, so
+an endpoint URL that leaks lets nobody command the phone.
+
+| Command | What the app does |
+|---------|-------------------|
+| `sync` | the call log and recordings are collected and the outbox drained, as `CallEndedWorker` would after a call |
+| `softphone` | the softphone settings are fetched again — Odoo sends it when the user's extension, secret or phone system changes, which a handset otherwise learnt only at its next restart |
+
+`applyConfiguration` asks Odoo for its push key on every reconcile and registers
+against it (`PushPlan` decides; `CompanionPushService` is the connector's
+callback). Nothing about it can stop a phone reporting: no distributor, an Odoo
+that answers `push_unavailable` (no `ODOO_API_ENCRYPTION_KEY`), or an Odoo out of
+reach leave the periodic work exactly as it was. A handset with several
+distributors and none chosen takes the first by package name; MDM installs one.
 
 ## Build
 

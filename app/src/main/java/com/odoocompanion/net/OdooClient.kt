@@ -2,18 +2,25 @@ package com.odoocompanion.net
 
 import android.util.Log
 import com.odoocompanion.config.Settings
+import com.odoocompanion.push.PushKeyLookup
+import com.odoocompanion.push.PushRegistration
 import com.odoocompanion.softphone.SoftphoneLookup
 import com.odoocompanion.softphone.SoftphoneSettings
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -127,6 +134,53 @@ class OdooClient(
     } catch (e: IllegalArgumentException) {
         Log.w(TAG, "Cannot build the softphone settings request", e)
         SoftphoneLookup.Unavailable(e.message ?: "malformed endpoint URL")
+    }
+
+    /** The key Odoo signs wake-ups with, and whether this handset is registered against it. */
+    suspend fun pushKey(settings: Settings): PushKeyLookup = push(settings, null)
+
+    /** Tells Odoo where to send wake-ups; null takes the handset off them. */
+    suspend fun registerPush(settings: Settings, registration: PushRegistration?): PushKeyLookup {
+        val body = buildJsonObject {
+            if (registration == null) {
+                put("endpoint", JsonNull)
+            } else {
+                put("endpoint", registration.endpoint)
+                putJsonObject("keys") {
+                    put("p256dh", registration.p256dh)
+                    put("auth", registration.auth)
+                }
+            }
+        }
+        return push(settings, body.toString().toRequestBody(JSON))
+    }
+
+    private suspend fun push(settings: Settings, body: RequestBody?): PushKeyLookup = try {
+        val builder = Request.Builder()
+            .url(settings.endpoint(PUSH))
+            .addHeader("Authorization", "Bearer ${settings.token}")
+        val request = (if (body == null) builder.get() else builder.post(body)).build()
+        http.newCall(request).await().use { response ->
+            val text = response.peekBody(MAX_READ_BYTES).string()
+            val reply = text.asJsonObject()
+            val key = reply.stringAt("vapid_public_key")
+            when {
+                !reply.namesTheService() -> PushKeyLookup.Unavailable(notOdoo(response.code, text))
+
+                response.code in 200..299 && key != null ->
+                    PushKeyLookup.Found(key, reply.booleanAt("registered"))
+
+                reply.errorIs(PUSH_UNAVAILABLE) -> PushKeyLookup.Off
+
+                else -> PushKeyLookup.Unavailable(reasonFor(response.code, text))
+            }
+        }
+    } catch (e: IOException) {
+        Log.w(TAG, "Push registration exchange failed", e)
+        PushKeyLookup.Unavailable(e.message ?: "network failure")
+    } catch (e: IllegalArgumentException) {
+        Log.w(TAG, "Cannot build the push registration request", e)
+        PushKeyLookup.Unavailable(e.message ?: "malformed endpoint URL")
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -245,6 +299,12 @@ class OdooClient(
         Json.parseToJsonElement(this).jsonObject
     }.getOrNull()
 
+    private fun JsonObject?.stringAt(key: String): String? =
+        runCatching { this?.get(key)?.jsonPrimitive?.contentOrNull }.getOrNull()
+
+    private fun JsonObject?.booleanAt(key: String): Boolean =
+        runCatching { this?.get(key)?.jsonPrimitive?.booleanOrNull }.getOrNull() == true
+
     private fun JsonObject?.intAt(key: String): Int = this?.get(key)?.jsonPrimitive?.intOrNull ?: 0
 
     private fun JsonObject?.indexesAt(key: String): List<Int> =
@@ -263,6 +323,8 @@ class OdooClient(
         const val HTTP_NOT_FOUND = 404
         const val SOFTPHONE = "softphone"
         const val NO_EXTENSION = "no_extension"
+        const val PUSH = "push"
+        const val PUSH_UNAVAILABLE = "push_unavailable"
         val AUTH_REFUSED = setOf(401, 403)
 
         // The integration layer's answer to a body it cannot parse. This client

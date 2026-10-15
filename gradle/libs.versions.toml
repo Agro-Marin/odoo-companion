@@ -28,6 +28,9 @@ robolectric = "4.16.1"
 # the softphone carries voice alone, and the full one tripled the APK every
 # handset downloads over MDM.
 linphone = "5.5.29"
+# Wake-ups from Odoo through any UnifiedPush distributor (ntfy, or an FCM
+# bridge), sealed with RFC 8291 Web Push encryption that the connector opens.
+unifiedpush = "3.3.5"
 
 [libraries]
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -51,6 +54,7 @@ androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidxJu
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 linphone = { module = "org.linphone.no-video:linphone-sdk-android", version.ref = "linphone" }
+unifiedpush-connector = { module = "org.unifiedpush.android:connector", version.ref = "unifiedpush" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

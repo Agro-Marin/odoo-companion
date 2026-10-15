@@ -18,6 +18,10 @@ import com.odoocompanion.data.COMPANION_MIGRATIONS
 import com.odoocompanion.data.CompanionDatabase
 import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.net.OdooClient
+import com.odoocompanion.push.PushCommand
+import com.odoocompanion.push.PushKeyLookup
+import com.odoocompanion.push.PushPlan
+import com.odoocompanion.push.PushRegistration
 import com.odoocompanion.softphone.SoftphoneLookup
 import com.odoocompanion.softphone.SoftphonePlan
 import com.odoocompanion.softphone.SoftphoneRetry
@@ -34,6 +38,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.unifiedpush.android.connector.UnifiedPush
 
 class CompanionApp : Application() {
     val config: DeviceConfig by lazy { DeviceConfig(this) }
@@ -72,6 +77,7 @@ class CompanionApp : Application() {
         )
         startup = scope.launch { applyConfiguration() }
         scope.launch { for (request in softphoneRefreshes) refreshSoftphoneSafely() }
+        scope.launch { for (request in pushRefreshes) refreshPushSafely() }
     }
 
     internal lateinit var startup: Job
@@ -92,6 +98,33 @@ class CompanionApp : Application() {
         }
         applySoftphone(settings.isEnrolled, SoftphoneLookup.Unavailable("not asked yet"))
         if (settings.isEnrolled) softphoneRefreshes.trySend(Unit)
+        pushRefreshes.trySend(Unit)
+    }
+
+    /** Does what a wake-up from Odoo asks, as the periodic work would have later. */
+    fun obey(command: PushCommand) {
+        Log.i(TAG, "Odoo woke this handset: $command")
+        when (command) {
+            PushCommand.SYNC -> scope.launch {
+                val settings = config.current()
+                if (settings.isEnrolled) {
+                    SyncScheduler.collectAndUploadNow(this@CompanionApp, settings.wifiOnlyUploads)
+                }
+            }
+
+            PushCommand.SOFTPHONE -> softphoneRefreshes.trySend(Unit)
+        }
+    }
+
+    /** Hands Odoo the endpoint a distributor gave, or takes the handset off wake-ups. */
+    fun reportPushEndpoint(registration: PushRegistration?) {
+        scope.launch {
+            val settings = config.currentOrNull()?.takeIf { it.isEnrolled } ?: return@launch
+            when (val reply = client.registerPush(settings, registration)) {
+                is PushKeyLookup.Found -> Log.i(TAG, "Wake-ups registered: ${reply.registered}")
+                else -> Log.w(TAG, "Odoo did not take the push endpoint: $reply")
+            }
+        }
     }
 
     // What Odoo says about the extension is asked outside the reconcile: it is a
@@ -133,6 +166,50 @@ class CompanionApp : Application() {
     }
 
     private fun Settings.endpoint() = Triple(baseUrl, identifier, token)
+
+    // Wake-ups only shorten waits the periodic work already bounds, so this
+    // runs beside the reconcile like the softphone lookup: a round trip that
+    // must not hold a boot or a policy push.
+    private val pushRefreshes = Channel<Unit>(Channel.CONFLATED)
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun refreshPushSafely() {
+        try {
+            refreshPush()
+        } catch (stopped: CancellationException) {
+            throw stopped
+        } catch (failure: Exception) {
+            Log.e(TAG, "Push registration refresh failed", failure)
+        }
+    }
+
+    private suspend fun refreshPush() {
+        val settings = config.current()
+        val lookup = if (settings.isEnrolled) {
+            client.pushKey(settings)
+        } else {
+            PushKeyLookup.Unavailable("not enrolled")
+        }
+        val plan = PushPlan.decide(
+            settings.isEnrolled,
+            lookup,
+            UnifiedPush.getSavedDistributor(this),
+            UnifiedPush.getDistributors(this),
+        )
+        when (plan) {
+            is PushPlan.Register -> {
+                UnifiedPush.saveDistributor(this, plan.distributor)
+                UnifiedPush.register(this, vapid = plan.vapidPublicKey)
+            }
+
+            PushPlan.Unregister -> UnifiedPush.unregister(this)
+
+            PushPlan.NoDistributor ->
+                Log.i(TAG, "No push distributor installed; the handset keeps its schedule")
+
+            PushPlan.Keep -> Log.i(TAG, "Push registration not refreshed: $lookup")
+        }
+    }
 
     // The company line rings here only on an enrolled handset whose user has an
     // extension in Odoo; with Odoo out of reach, the last extension it named

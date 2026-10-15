@@ -114,6 +114,16 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
 
+        <!-- Wake-ups from Odoo through whichever UnifiedPush distributor the
+             handset has; the connector delivers only to this app's own uid. -->
+        <service
+            android:name=".push.CompanionPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".system.BootReceiver"
             android:exported="true">
