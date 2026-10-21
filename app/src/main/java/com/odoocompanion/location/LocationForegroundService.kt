@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.BatteryManager
+import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -170,7 +171,16 @@ class LocationForegroundService : LifecycleService() {
             speed = location.speed.takeIf { location.hasSpeed() },
             heading = location.bearing.takeIf { location.hasBearing() },
             batteryLevel = batteryLevel,
+            isMock = true.takeIf { isMockLocation(location) },
         )
+
+        private fun isMockLocation(location: Location): Boolean =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                location.isMock
+            } else {
+                @Suppress("DEPRECATION")
+                location.isFromMockProvider
+            }
 
         private const val TAG = "LocationService"
         private const val CHANNEL_ID = "location"

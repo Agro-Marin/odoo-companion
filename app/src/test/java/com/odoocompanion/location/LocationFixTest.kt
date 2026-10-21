@@ -108,4 +108,17 @@ class LocationFixTest {
             encoded,
         )
     }
+
+    @Test
+    fun `a mock location says so on the wire`() {
+        val encoded = WireJson.encodeToString(fixOf(location { isMock = true }, null))
+
+        assertEquals(true, fixOf(location { isMock = true }, null).isMock)
+        assertEquals(true, """"isMock":true""" in encoded)
+    }
+
+    @Test
+    fun `a real location sends no mock flag`() {
+        assertNull(fixOf(location(), null).isMock)
+    }
 }

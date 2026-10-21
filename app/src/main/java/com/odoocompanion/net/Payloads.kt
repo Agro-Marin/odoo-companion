@@ -14,6 +14,7 @@ data class LocationFix(
     val speed: Float? = null,
     val heading: Float? = null,
     @SerialName("battery_level") val batteryLevel: Int? = null,
+    val isMock: Boolean? = null,
 )
 
 @Serializable
