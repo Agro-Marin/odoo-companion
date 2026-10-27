@@ -27,7 +27,7 @@ token and talks to whatever Odoo those point at.
 
 Code lives under `app/src/main/java/com/odoocompanion/`, one package per
 concern (`config`, `location`, `calllog`, `recording`, `softphone`, `push`, `data`,
-`sync`, `net`, `system`, `ui`); JVM unit tests mirror the packages under
+`sync`, `net`, `system`, `ui`, `whatsapp`); JVM unit tests mirror the packages under
 `app/src/test/`.
 
 **Policy is extracted from the Android component that triggers it**, in every

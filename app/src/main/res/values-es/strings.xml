@@ -97,4 +97,19 @@
     <string name="action_grant_short">Conceder</string>
     <string name="alerts_more">%1$s · +%2$d</string>
     <string name="actions_menu">Acciones</string>
+    <string name="whatsapp_listener_label">Documentos de WhatsApp para Odoo</string>
+    <string name="section_whatsapp">Documentos de WhatsApp</string>
+    <string name="whatsapp_notifications_off">El acceso a notificaciones está apagado: no se están vigilando los documentos de WhatsApp</string>
+    <string name="whatsapp_storage_off">Falta el acceso a todos los archivos: se ven los documentos, pero no se encuentran sus archivos</string>
+    <string name="whatsapp_watching">Vigilando WhatsApp. Vistos: %1$d · encontrados en el teléfono: %2$d</string>
+    <string name="whatsapp_none_yet">Todavía no se ha visto ningún documento. Pide que te manden un PDF por WhatsApp a este teléfono.</string>
+    <string name="whatsapp_item">📄 %1$s\n%2$s · %3$s\n%4$s · %5$s</string>
+    <string name="whatsapp_item_found">archivo encontrado (%1$s)</string>
+    <string name="whatsapp_item_waiting">esperando a que WhatsApp lo descargue</string>
+    <string name="whatsapp_item_phone">número %1$s</string>
+    <string name="whatsapp_item_no_phone">el aviso no trae número</string>
+    <string name="action_whatsapp_enable">Activar</string>
+    <string name="whatsapp_item_open_chat">chat sin identificar: llegó con el chat abierto, sin aviso</string>
+    <string name="whatsapp_contacts_off">Falta el acceso a contactos: se encuentran los documentos, pero no el número de quien los manda</string>
+    <string name="whatsapp_disconnected">El acceso a notificaciones está activo, pero Android no conectó la vigilancia de WhatsApp. Apaga y vuelve a prender el acceso.</string>
 </resources>

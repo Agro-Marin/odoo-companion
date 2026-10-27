@@ -8,6 +8,7 @@ import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
 import android.text.format.DateUtils
+import android.text.format.Formatter
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.EditText
@@ -40,6 +41,10 @@ import com.odoocompanion.databinding.ActivityMainBinding
 import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.DeviceHealth
+import com.odoocompanion.whatsapp.ContactBook
+import com.odoocompanion.whatsapp.Sighting
+import com.odoocompanion.whatsapp.WhatsAppNotificationListener
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -87,10 +92,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // The grant the WhatsApp card's button opens, as the card last said.
+    private var whatsappMissing: WhatsAppGrant? = null
+
     override fun onResume() {
         super.onResume()
         healthChecks.value++
+        // The screen does the listener's looking too, so what arrived is shown
+        // whether or not the system kept the listener bound: a document
+        // downloaded since its notice, and one that came with no notice at all.
+        val whatsapp = CompanionApp.from(this).whatsapp
+        val contacts = ContactBook(this)
+        WhatsAppNotificationListener.reconnect(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            whatsapp.rematch()
+            if (DeviceHealth.hasRecordingStorageAccess(this@MainActivity)) {
+                whatsapp.adoptLooseFiles()
+            }
+            if (contacts.granted) whatsapp.fillNumbers(contacts::numberOf)
+            // A rebind takes a moment; the card asks again once it may be done.
+            delay(REBIND_GRACE_MILLIS)
+            healthChecks.value++
+        }
     }
+
+    private val contactsLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            healthChecks.value++
+        }
 
     private val backgroundLocationLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { startIfEnrolled() }
@@ -135,6 +164,33 @@ class MainActivity : AppCompatActivity() {
                 }
                     .distinctUntilChanged()
                     .collect(::showPanel)
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch(Dispatchers.IO) { app.whatsapp.open() }
+                combine(app.whatsapp.sightings, merge(healthChecks, minutes)) { sightings, _ ->
+                    WhatsAppPanel.card(
+                        listenerOn = WhatsAppNotificationListener.isEnabled(this@MainActivity),
+                        listenerConnected = WhatsAppNotificationListener.connected,
+                        storageOn = DeviceHealth.hasRecordingStorageAccess(this@MainActivity),
+                        contactsOn = ContactBook(this@MainActivity).granted,
+                        sightings = sightings.orEmpty(),
+                    )
+                }.collect(::showWhatsApp)
+            }
+        }
+        binding.whatsappEnable.setOnClickListener {
+            when (whatsappMissing) {
+                WhatsAppGrant.NOTIFICATIONS, WhatsAppGrant.DISCONNECTED ->
+                    requestNotificationAccess()
+
+                WhatsAppGrant.ALL_FILES -> requestRecordingStorageAccess()
+
+                WhatsAppGrant.CONTACTS ->
+                    contactsLauncher.launch(Manifest.permission.READ_CONTACTS)
+
+                null -> Unit
             }
         }
 
@@ -268,6 +324,72 @@ class MainActivity : AppCompatActivity() {
         } catch (e: ActivityNotFoundException) {
             Log.w(TAG, "No all-files-access settings screen on this device", e)
         }
+    }
+
+    // Straight to this app's own switch where Android has that screen (11+),
+    // otherwise to the list of every app with notification access.
+    private fun requestNotificationAccess() {
+        val list = Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                .putExtra(
+                    android.provider.Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                    WhatsAppNotificationListener.component(this).flattenToString(),
+                )
+        } else {
+            list
+        }
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "No per-listener settings screen; opening the list", e)
+            try {
+                startActivity(list)
+            } catch (missing: ActivityNotFoundException) {
+                Log.w(TAG, "No notification access settings screen on this device", missing)
+            }
+        }
+    }
+
+    private fun showWhatsApp(card: WhatsAppCard) {
+        whatsappMissing = card.missing
+        binding.whatsappEnable.isVisible = card.missing != null
+        binding.whatsappState.text = if (card.state == R.string.whatsapp_watching) {
+            getString(card.state, card.seen, card.found)
+        } else {
+            getString(card.state)
+        }
+        binding.whatsappSightings.showOptional(
+            card.shown.joinToString("\n\n", transform = ::sightingText).ifEmpty { null },
+        )
+    }
+
+    private fun sightingText(sighting: Sighting): String {
+        val who = when {
+            sighting.loose -> getString(R.string.whatsapp_item_open_chat)
+            sighting.isGroup -> "${sighting.sender} @ ${sighting.chat}"
+            else -> sighting.chat
+        }
+        val file = if (sighting.found) {
+            getString(
+                R.string.whatsapp_item_found,
+                Formatter.formatShortFileSize(this, sighting.fileSize),
+            )
+        } else {
+            getString(R.string.whatsapp_item_waiting)
+        }
+        val phone = sighting.phone?.let { getString(R.string.whatsapp_item_phone, it) }
+            ?: getString(R.string.whatsapp_item_no_phone)
+        return getString(
+            R.string.whatsapp_item,
+            sighting.label,
+            who,
+            // A message's own time can run a few seconds ahead of this clock,
+            // which read "in 0 minutes".
+            DateUtils.getRelativeTimeSpanString(minOf(sighting.at, System.currentTimeMillis())),
+            file,
+            phone,
+        )
     }
 
     private fun startIfEnrolled() {
@@ -519,6 +641,8 @@ class MainActivity : AppCompatActivity() {
         const val TAG = "MainActivity"
 
         const val STATUS_TICK_MILLIS = 60_000L
+
+        const val REBIND_GRACE_MILLIS = 3_000L
 
         val FORM_KEYS = ManagedKey.ALL
     }

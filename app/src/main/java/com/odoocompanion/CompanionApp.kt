@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.Environment
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.pm.PackageInfoCompat
@@ -28,6 +29,8 @@ import com.odoocompanion.softphone.SoftphoneRetry
 import com.odoocompanion.softphone.SoftphoneService
 import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.whatsapp.SightingStore
+import com.odoocompanion.whatsapp.WhatsAppDocuments
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.unifiedpush.android.connector.UnifiedPush
+import java.io.File
 
 class CompanionApp : Application() {
     val config: DeviceConfig by lazy { DeviceConfig(this) }
@@ -50,6 +54,12 @@ class CompanionApp : Application() {
     }
 
     val softphones: SoftphoneStore by lazy { SoftphoneStore(this) }
+
+    val whatsapp: SightingStore by lazy {
+        SightingStore(File(filesDir, "whatsapp_sightings.json")) {
+            WhatsAppDocuments(Environment.getExternalStorageDirectory()).scan()
+        }
+    }
 
     val client: OdooClient by lazy {
         OdooClient(onServerNamedItself = { config.learnServerNamesItself() })
