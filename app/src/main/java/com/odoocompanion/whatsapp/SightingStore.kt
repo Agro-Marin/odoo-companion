@@ -32,6 +32,8 @@ data class Sighting(
     val fileName: String? = null,
     val fileSize: Long = 0,
     val loose: Boolean = false,
+    // What the file says it is, once read; null until then.
+    val classification: Classification? = null,
 ) {
     val found: Boolean
         get() = filePath != null
@@ -124,6 +126,32 @@ class SightingStore(
             if (phone == null) sighting else sighting.copy(phone = phone)
         }
         if (filled != known) save(filled)
+    }
+
+    // Reads each found file not yet classified. The reading is done outside the
+    // lock -- OCR takes a second or two a page -- and its verdict applied under
+    // it, to whichever row still holds that file; a read that failed is left
+    // for the next pass.
+    suspend fun classifyPending(read: (File) -> Classification?): Int {
+        val pending = lock.withLock {
+            load().filter { it.found && it.classification == null }.mapNotNull { it.filePath }
+        }.distinct()
+        if (pending.isEmpty()) return 0
+        val verdicts = pending.mapNotNull { path -> read(File(path))?.let { path to it } }.toMap()
+        lock.withLock {
+            val known = load()
+            save(
+                known.map { sighting ->
+                    val verdict = verdicts[sighting.filePath]
+                    if (sighting.classification == null && verdict != null) {
+                        sighting.copy(classification = verdict)
+                    } else {
+                        sighting
+                    }
+                },
+            )
+        }
+        return verdicts.size
     }
 
     suspend fun clear() = lock.withLock { save(emptyList()) }

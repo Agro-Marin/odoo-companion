@@ -229,4 +229,49 @@ class SightingStoreTest {
 
         assertEquals("5215512345678", store.sightings.value!!.single().phone)
     }
+
+    @Test
+    fun `a found file is read once, and a read that failed is asked again`() = runTest {
+        onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16))
+        val store = store()
+        store.record(listOf(notice("CSF.pdf"), notice("Otro.pdf", at = 900_000L)))
+        val reads = mutableListOf<String>()
+        var failing = true
+
+        store.classifyPending { file ->
+            reads += file.name
+            if (failing) null else Classification(DocumentKind.CSF, "PCA221013LF1")
+        }
+        assertEquals(null, store.sightings.value!!.single { it.found }.classification)
+
+        failing = false
+        store.classifyPending { file ->
+            reads += file.name
+            Classification(DocumentKind.CSF, "PCA221013LF1")
+        }
+        store.classifyPending { file ->
+            reads += file.name
+            Classification(DocumentKind.OTHER)
+        }
+
+        val read = store.sightings.value!!.single { it.found }.classification
+        assertEquals(DocumentKind.CSF, read?.kind)
+        assertEquals("PCA221013LF1", read?.rfc)
+        // Only the file on disk was read, and never again once classified.
+        assertEquals(listOf("CSF.pdf", "CSF.pdf"), reads)
+    }
+
+    @Test
+    fun `a classification survives the process`() = runTest {
+        onDisk = listOf(DocumentFile("/w/INE.pdf", "INE.pdf", 1_000L, 16))
+        store().apply {
+            record(listOf(notice("INE.pdf")))
+            classifyPending { Classification(DocumentKind.INE) }
+        }
+
+        val reopened = store()
+        reopened.open()
+
+        assertEquals(DocumentKind.INE, reopened.sightings.value!!.single().classification?.kind)
+    }
 }

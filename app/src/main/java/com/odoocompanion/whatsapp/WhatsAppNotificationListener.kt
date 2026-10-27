@@ -29,6 +29,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     private var watching: Job? = null
 
+    private val reader = PageReader()
+
     @Volatile
     private var observer: FileObserver? = null
 
@@ -72,6 +74,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     private suspend fun adopt(store: SightingStore) {
         val loose = store.adoptLooseFiles()
         if (loose > 0) debug(TAG) { "$loose document(s) arrived without a notice" }
+        store.classifyPending(reader::classify)
     }
 
     private fun folderObserver(): FileObserver? {
@@ -113,9 +116,11 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                     "numbered ${numbered.count { it.phone != null }} of ${numbered.size}"
             }
             store.record(numbered)
+            store.classifyPending(reader::classify)
             // An automatic download may land just after its notice.
             delay(RECHECK_MILLIS)
             store.rematch()
+            store.classifyPending(reader::classify)
         }
     }
 

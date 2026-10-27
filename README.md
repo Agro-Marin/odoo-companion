@@ -246,6 +246,18 @@ and whether the file was found.
   WhatsApp card. It looks first in WhatsApp's own contact row
   (`vnd.com.whatsapp.profile`, whose `DATA1` is the JID), then in the contact's phone
   numbers. Two different lines under one name give no number (`ContactNumbers.choose`).
+- **What a document is.** Only a Constancia de Situación Fiscal, an INE or a passport
+  is to leave the handset, so the handset decides. `PageReader` draws the first two pages
+  of a PDF with `PdfRenderer` and reads them with ML Kit's on-device OCR and QR reader,
+  using the Play-services models, which are fetched at install and not bundled.
+  `DocumentClassifier` decides from what was read:
+  - a CSF by its title or by the SAT's QR, whose `D3=idCIF_RFC` gives the RFC;
+  - a passport by its word or by an MRZ line starting `P<`;
+  - an INE by its issuer, its title or an `IDMEX` MRZ line.
+
+  Drawing the page, rather than extracting its text, is what reads a scanned INE. A read
+  that failed, for example while the model is still downloading, is tried again later
+  and is not ruled "other".
 - **What it keeps.** `SightingStore` keeps the last 50 sightings in
   `files/whatsapp_sightings.json` in the app's private storage, which is excluded from
   backup. It is a window for testing on a real handset, not a queue.

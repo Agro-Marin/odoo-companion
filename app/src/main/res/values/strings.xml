@@ -104,7 +104,7 @@
     <string name="whatsapp_storage_off">All-files access is off: documents are seen, but their files cannot be found</string>
     <string name="whatsapp_watching">Watching WhatsApp. Seen: %1$d · found on the phone: %2$d</string>
     <string name="whatsapp_none_yet">No document seen yet. Have someone send this phone a PDF by WhatsApp.</string>
-    <string name="whatsapp_item">📄 %1$s\n%2$s · %3$s\n%4$s · %5$s</string>
+    <string name="whatsapp_item">%1$s\n📄 %2$s\n%3$s · %4$s\n%5$s · %6$s</string>
     <string name="whatsapp_item_found">file found (%1$s)</string>
     <string name="whatsapp_item_waiting">waiting for WhatsApp to download it</string>
     <string name="whatsapp_item_phone">number %1$s</string>
@@ -113,4 +113,12 @@
     <string name="whatsapp_item_open_chat">chat not identified: it arrived with the chat open, without a notice</string>
     <string name="whatsapp_contacts_off">Contacts access is off: documents are found, but the sender\'s number is not</string>
     <string name="whatsapp_disconnected">Notification access is on, but Android has not connected the WhatsApp watcher. Turn the access off and on again.</string>
+    <string name="whatsapp_kind_csf">✅ Constancia de Situación Fiscal: goes to Odoo</string>
+    <string name="whatsapp_kind_ine">✅ INE: goes to Odoo</string>
+    <string name="whatsapp_kind_passport">✅ Passport: goes to Odoo</string>
+    <string name="whatsapp_kind_other">Other document: stays on the phone</string>
+    <string name="whatsapp_kind_pending">Reading the document…</string>
+    <string name="whatsapp_kind_unread">Not read: the file is missing</string>
+    <string name="whatsapp_item_rfc">RFC %1$s</string>
+    <string name="whatsapp_item_no_notice">no number: there was no notice</string>
 </resources>

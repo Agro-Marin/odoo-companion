@@ -42,6 +42,8 @@ import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.DeviceHealth
 import com.odoocompanion.whatsapp.ContactBook
+import com.odoocompanion.whatsapp.DocumentKind
+import com.odoocompanion.whatsapp.PageReader
 import com.odoocompanion.whatsapp.Sighting
 import com.odoocompanion.whatsapp.WhatsAppNotificationListener
 import kotlinx.coroutines.Dispatchers
@@ -110,6 +112,7 @@ class MainActivity : AppCompatActivity() {
                 whatsapp.adoptLooseFiles()
             }
             if (contacts.granted) whatsapp.fillNumbers(contacts::numberOf)
+            whatsapp.classifyPending(PageReader()::classify)
             // A rebind takes a moment; the card asks again once it may be done.
             delay(REBIND_GRACE_MILLIS)
             healthChecks.value++
@@ -378,10 +381,28 @@ class MainActivity : AppCompatActivity() {
         } else {
             getString(R.string.whatsapp_item_waiting)
         }
-        val phone = sighting.phone?.let { getString(R.string.whatsapp_item_phone, it) }
-            ?: getString(R.string.whatsapp_item_no_phone)
+        val phone = when {
+            sighting.phone != null -> getString(R.string.whatsapp_item_phone, sighting.phone)
+            sighting.loose -> getString(R.string.whatsapp_item_no_notice)
+            else -> getString(R.string.whatsapp_item_no_phone)
+        }
+        val kind = sighting.classification?.let { read ->
+            val name = getString(
+                when (read.kind) {
+                    DocumentKind.CSF -> R.string.whatsapp_kind_csf
+                    DocumentKind.INE -> R.string.whatsapp_kind_ine
+                    DocumentKind.PASSPORT -> R.string.whatsapp_kind_passport
+                    DocumentKind.OTHER -> R.string.whatsapp_kind_other
+                },
+            )
+            listOfNotNull(name, read.rfc?.let { getString(R.string.whatsapp_item_rfc, it) })
+                .joinToString(" · ")
+        } ?: getString(
+            if (sighting.found) R.string.whatsapp_kind_pending else R.string.whatsapp_kind_unread,
+        )
         return getString(
             R.string.whatsapp_item,
+            kind,
             sighting.label,
             who,
             // A message's own time can run a few seconds ahead of this clock,

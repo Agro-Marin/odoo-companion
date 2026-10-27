@@ -73,6 +73,12 @@
             android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions" />
 
+        <!-- Play services fetches ML Kit's OCR and QR models when the app is
+             installed, so the first document is not read before they exist. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr,barcode" />
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true">
