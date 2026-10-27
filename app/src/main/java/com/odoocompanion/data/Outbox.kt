@@ -17,7 +17,10 @@ object OutboxKind {
     const val CALL_LOG = "calllog"
     const val RECORDING = "recording"
 
-    val IRREPLACEABLE = setOf(CALL_LOG, RECORDING)
+    // A document the handset received, in a file it does not own: WhatsApp's.
+    const val DOCUMENT = "document"
+
+    val IRREPLACEABLE = setOf(CALL_LOG, RECORDING, DOCUMENT)
 }
 
 @Entity(
@@ -212,6 +215,7 @@ interface OutboxDao {
         """
         SELECT id, filePath FROM outbox
         WHERE deadAt IS NOT NULL AND deadAt < :before AND filePath IS NOT NULL
+          AND kind = '${OutboxKind.RECORDING}'
         """,
     )
     suspend fun deadFilesBefore(before: Long): List<QueuedFile>
@@ -233,9 +237,18 @@ interface OutboxDao {
 
     @Query("SELECT filePath FROM outbox WHERE kind = :kind AND filePath IS NOT NULL")
     suspend fun filesQueued(kind: String): List<String>
+
+    // Each file of a kind still in the queue, and whether it was set aside.
+    @Query(
+        "SELECT filePath, deadAt IS NOT NULL AS dead FROM outbox " +
+            "WHERE kind = :kind AND filePath IS NOT NULL",
+    )
+    fun fileStates(kind: String): Flow<List<QueuedFileState>>
 }
 
 data class QueueDepth(val queued: Int, val oldestCreatedAt: Long?)
+
+data class QueuedFileState(val filePath: String, val dead: Boolean)
 
 data class OutboxCounts(
     val positions: Int,

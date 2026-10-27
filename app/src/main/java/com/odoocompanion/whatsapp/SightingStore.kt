@@ -34,6 +34,8 @@ data class Sighting(
     val loose: Boolean = false,
     // What the file says it is, once read; null until then.
     val classification: Classification? = null,
+    // Handed to the outbox; whether it was delivered is the outbox's to say.
+    val queued: Boolean = false,
 ) {
     val found: Boolean
         get() = filePath != null
@@ -132,26 +134,46 @@ class SightingStore(
     // lock -- OCR takes a second or two a page -- and its verdict applied under
     // it, to whichever row still holds that file; a read that failed is left
     // for the next pass.
+    // A file another row already read -- a resend WhatsApp kept one copy of --
+    // takes that verdict instead of a second OCR.
     suspend fun classifyPending(read: (File) -> Classification?): Int {
-        val pending = lock.withLock {
-            load().filter { it.found && it.classification == null }.mapNotNull { it.filePath }
-        }.distinct()
-        if (pending.isEmpty()) return 0
-        val verdicts = pending.mapNotNull { path -> read(File(path))?.let { path to it } }.toMap()
+        val (earlier, pending) = lock.withLock {
+            val all = load()
+            val earlier = all.mapNotNull { row ->
+                val path = row.filePath ?: return@mapNotNull null
+                row.classification?.let { path to it }
+            }.toMap()
+            earlier to all.filter { it.found && it.classification == null }
+                .mapNotNull { it.filePath }
+                .filterNot { it in earlier }
+                .distinct()
+        }
+        val fresh = pending.mapNotNull { path -> read(File(path))?.let { path to it } }.toMap()
+        val verdicts = earlier + fresh
         lock.withLock {
             val known = load()
-            save(
-                known.map { sighting ->
-                    val verdict = verdicts[sighting.filePath]
-                    if (sighting.classification == null && verdict != null) {
-                        sighting.copy(classification = verdict)
-                    } else {
-                        sighting
-                    }
-                },
-            )
+            val classified = known.map { sighting ->
+                val verdict = verdicts[sighting.filePath]
+                if (sighting.classification == null && verdict != null) {
+                    sighting.copy(classification = verdict)
+                } else {
+                    sighting
+                }
+            }
+            if (classified != known) save(classified)
         }
-        return verdicts.size
+        return fresh.size
+    }
+
+    // Found, read as a document that goes to Odoo, and not yet queued.
+    suspend fun toUpload(): List<Sighting> = lock.withLock {
+        load().filter { it.found && !it.queued && it.classification?.kind?.uploads == true }
+    }
+
+    suspend fun markQueued(paths: Set<String>) = lock.withLock {
+        val known = load()
+        if (known.none { !it.queued && it.filePath in paths }) return@withLock
+        save(known.map { if (it.filePath in paths) it.copy(queued = true) else it })
     }
 
     suspend fun clear() = lock.withLock { save(emptyList()) }

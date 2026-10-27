@@ -37,14 +37,16 @@ import com.odoocompanion.config.FormValues
 import com.odoocompanion.config.ManagedKey
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.OutboxCounts
+import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.databinding.ActivityMainBinding
 import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.DeviceHealth
 import com.odoocompanion.whatsapp.ContactBook
 import com.odoocompanion.whatsapp.DocumentKind
-import com.odoocompanion.whatsapp.PageReader
 import com.odoocompanion.whatsapp.Sighting
+import com.odoocompanion.whatsapp.UploadState
+import com.odoocompanion.whatsapp.WhatsAppIntake
 import com.odoocompanion.whatsapp.WhatsAppNotificationListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -97,6 +99,9 @@ class MainActivity : AppCompatActivity() {
     // The grant the WhatsApp card's button opens, as the card last said.
     private var whatsappMissing: WhatsAppGrant? = null
 
+    // Each document file in the outbox, and whether it was set aside.
+    private var documentQueue: Map<String, Boolean> = emptyMap()
+
     override fun onResume() {
         super.onResume()
         healthChecks.value++
@@ -112,7 +117,7 @@ class MainActivity : AppCompatActivity() {
                 whatsapp.adoptLooseFiles()
             }
             if (contacts.granted) whatsapp.fillNumbers(contacts::numberOf)
-            whatsapp.classifyPending(PageReader()::classify)
+            WhatsAppIntake.process(this@MainActivity)
             // A rebind takes a moment; the card asks again once it may be done.
             delay(REBIND_GRACE_MILLIS)
             healthChecks.value++
@@ -172,7 +177,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch(Dispatchers.IO) { app.whatsapp.open() }
-                combine(app.whatsapp.sightings, merge(healthChecks, minutes)) { sightings, _ ->
+                combine(
+                    app.whatsapp.sightings,
+                    app.database.outbox().fileStates(OutboxKind.DOCUMENT),
+                    merge(healthChecks, minutes),
+                ) { sightings, queue, _ ->
+                    documentQueue = queue.associate { it.filePath to it.dead }
                     WhatsAppPanel.card(
                         listenerOn = WhatsAppNotificationListener.isEnabled(this@MainActivity),
                         listenerConnected = WhatsAppNotificationListener.connected,
@@ -395,8 +405,18 @@ class MainActivity : AppCompatActivity() {
                     DocumentKind.OTHER -> R.string.whatsapp_kind_other
                 },
             )
-            listOfNotNull(name, read.rfc?.let { getString(R.string.whatsapp_item_rfc, it) })
-                .joinToString(" · ")
+            val upload = when (WhatsAppIntake.uploadStateOf(sighting, documentQueue)) {
+                UploadState.WAITING -> R.string.whatsapp_upload_waiting
+                UploadState.QUEUED -> R.string.whatsapp_upload_queued
+                UploadState.DELIVERED -> R.string.whatsapp_upload_done
+                UploadState.SET_ASIDE -> R.string.whatsapp_upload_failed
+                null -> null
+            }
+            listOfNotNull(
+                name,
+                read.rfc?.let { getString(R.string.whatsapp_item_rfc, it) },
+                upload?.let(::getString),
+            ).joinToString(" · ")
         } ?: getString(
             if (sighting.found) R.string.whatsapp_kind_pending else R.string.whatsapp_kind_unread,
         )

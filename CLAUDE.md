@@ -163,6 +163,11 @@ machine at `http://10.0.2.2:<port>`.
   counts every dead row. On Android 10 without `WRITE_EXTERNAL_STORAGE` that is
   every uploaded recording, each of which used to read as a failure with a hint
   to go and fix the device in Odoo.
+- **A document's file is never the outbox's.** A `document` row points at a file in
+  WhatsApp's own folder, where a customer's constancia or INE lives. So delivery
+  deletes only the row (`FileKind.ownsFile = false`), and the 90-day purge of dead rows
+  (`deadFilesBefore`) reads recording rows only. Before that query was scoped, purging
+  a set-aside document would have deleted the customer's PDF from WhatsApp.
 - **The configured interval is the interval.** `app_restrictions.xml` calls
   `location_interval_seconds` "seconds between position reports" and the README
   repeats it, but `requestUpdates` set `setMinUpdateIntervalMillis` to *half* the

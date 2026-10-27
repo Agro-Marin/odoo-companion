@@ -214,12 +214,12 @@ back at the end of the same one. It also held the upload worker at `RETRY`, whic
 WorkManager's backoff out to five hours and delays every position and call log on the
 handset.
 
-## WhatsApp documents (proposal)
+## WhatsApp documents
 
-The goal is that a document a customer sends to a company handset by WhatsApp, such as a
-Constancia de Situación Fiscal, reaches Odoo by itself. This first part runs on the handset
-only and uploads nothing. It shows, on the main screen, what WhatsApp's notices announce
-and whether the file was found.
+The goal is that a Constancia de Situación Fiscal, an INE or a passport that a customer
+sends to a company handset by WhatsApp reaches Odoo by itself. The handset finds the
+document, reads what it is, and uploads only those three. A card on the main screen shows
+each document and where it stands.
 
 - **Where the document comes from.** `WhatsAppNotificationListener` is a
   `NotificationListenerService`. It reads only `com.whatsapp` and `com.whatsapp.w4b`. A
@@ -266,18 +266,15 @@ and whether the file was found.
   installed outside a store must first be allowed restricted settings: App info → ⋮ →
   *Allow restricted settings*.
 
-What a real handset still has to settle:
-
-- whether the notice carries the sender's number (`Person.key` or `Person.uri`), or only
-  the contact's name;
-- whether the 📄 shape holds on the WhatsApp builds in the fleet;
-- whether automatic download of documents is on.
-
-The next parts, not built yet:
-
-- filtering by partner, with hashes of partner phone numbers that Odoo hands the handset;
-- an outbox kind for the document;
-- the Odoo endpoint that files it in Documents.
+- **Where it goes.** `DocumentQueue` puts each CSF, INE or passport in the outbox as a
+  `document` row, once per file. The drain sends it to `/remote/mobile/<id>/document`
+  under `file_b64`, along the recording's streamed path, with one difference: **the file
+  is WhatsApp's, so it is never deleted**, neither on delivery nor when a set-aside row
+  is purged. The 90-day purge deletes only recording audio. On the server,
+  `device_mobile_document` (odoo) files it in Documents as uploaded by the phone's
+  holder. From there the company's upload sort, and `l10n_mx_partner_import`'s offer to
+  create the contact, take over. A file another row already read takes that verdict and
+  is not read by OCR again.
 
 ## Wake-ups
 

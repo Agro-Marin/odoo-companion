@@ -112,12 +112,16 @@
     <string name="whatsapp_item_open_chat">chat sin identificar: llegó con el chat abierto, sin aviso</string>
     <string name="whatsapp_contacts_off">Falta el acceso a contactos: se encuentran los documentos, pero no el número de quien los manda</string>
     <string name="whatsapp_disconnected">El acceso a notificaciones está activo, pero Android no conectó la vigilancia de WhatsApp. Apaga y vuelve a prender el acceso.</string>
-    <string name="whatsapp_kind_csf">✅ Constancia de Situación Fiscal: se sube a Odoo</string>
-    <string name="whatsapp_kind_ine">✅ INE: se sube a Odoo</string>
-    <string name="whatsapp_kind_passport">✅ Pasaporte: se sube a Odoo</string>
+    <string name="whatsapp_kind_csf">Constancia de Situación Fiscal</string>
+    <string name="whatsapp_kind_ine">INE</string>
+    <string name="whatsapp_kind_passport">Pasaporte</string>
     <string name="whatsapp_kind_other">Otro documento: no sale del teléfono</string>
     <string name="whatsapp_kind_pending">Leyendo el documento…</string>
     <string name="whatsapp_kind_unread">Sin leer: falta el archivo</string>
     <string name="whatsapp_item_rfc">RFC %1$s</string>
     <string name="whatsapp_item_no_notice">sin número: no hubo aviso</string>
+    <string name="whatsapp_upload_waiting">se subirá a Odoo</string>
+    <string name="whatsapp_upload_queued">⏳ en cola para Odoo</string>
+    <string name="whatsapp_upload_done">✅ subido a Odoo</string>
+    <string name="whatsapp_upload_failed">⚠️ Odoo no lo aceptó</string>
 </resources>
