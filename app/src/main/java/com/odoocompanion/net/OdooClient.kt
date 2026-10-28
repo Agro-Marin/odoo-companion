@@ -73,10 +73,14 @@ class OdooClient(
         suffix: String,
         file: File,
         metadata: JsonObject,
-    ): UploadOutcome = post(settings, suffix, RecordingBody(metadata, file, JSON))
+        fileKey: String = RecordingBody.AUDIO_KEY,
+    ): UploadOutcome = post(settings, suffix, RecordingBody(metadata, file, JSON, fileKey))
 
-    fun recordingWireSize(file: File, metadata: JsonObject): Long =
-        RecordingBody(metadata, file, JSON).contentLength()
+    fun recordingWireSize(
+        file: File,
+        metadata: JsonObject,
+        fileKey: String = RecordingBody.AUDIO_KEY,
+    ): Long = RecordingBody(metadata, file, JSON, fileKey).contentLength()
 
     private suspend fun post(
         settings: Settings,

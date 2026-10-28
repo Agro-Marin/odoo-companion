@@ -26,6 +26,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- The number behind the contact name a WhatsApp notice gives for its
+         sender; asked from the WhatsApp card only. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!-- The softphone: the company line's calls, carried over the data
          connection as a self-managed calling app. -->
@@ -69,6 +72,12 @@
         <meta-data
             android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions" />
+
+        <!-- Play services fetches ML Kit's OCR and QR models when the app is
+             installed, so the first document is not read before they exist. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr,barcode" />
 
         <activity
             android:name=".ui.MainActivity"
@@ -121,6 +130,20 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Reads WhatsApp's notices for the documents customers send. Bound only
+             by the system, and only once the person turns on notification access
+             for this app; WhatsAppNotificationListener drops every other app's
+             notification at its first line. -->
+        <service
+            android:name=".whatsapp.WhatsAppNotificationListener"
+            android:exported="true"
+            android:label="@string/whatsapp_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
 

@@ -35,6 +35,20 @@ data class RecordingMetadata(
     val duration: Long? = null,
 )
 
+// A document the handset received, as /document takes it; the file itself
+// follows under file_b64.
+@Serializable
+data class DocumentMetadata(
+    @SerialName("file_name") val fileName: String,
+    val mimetype: String,
+    val kind: String? = null,
+    val rfc: String? = null,
+    val source: String? = null,
+    val chat: String? = null,
+    @SerialName("sender_phone") val senderPhone: String? = null,
+    @SerialName("received_at") val receivedAt: Long? = null,
+)
+
 @Serializable
 data class LocationUpload(val points: List<LocationFix>)
 

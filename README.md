@@ -214,6 +214,68 @@ back at the end of the same one. It also held the upload worker at `RETRY`, whic
 WorkManager's backoff out to five hours and delays every position and call log on the
 handset.
 
+## WhatsApp documents
+
+The goal is that a Constancia de Situación Fiscal, an INE or a passport that a customer
+sends to a company handset by WhatsApp reaches Odoo by itself. The handset finds the
+document, reads what it is, and uploads only those three. A card on the main screen shows
+each document and where it stands.
+
+- **Where the document comes from.** `WhatsAppNotificationListener` is a
+  `NotificationListenerService`. It reads only `com.whatsapp` and `com.whatsapp.w4b`. A
+  document message starts with 📄 (U+1F4C4) followed by the file name, or by a caption when
+  the sender wrote one. `WhatsAppNotices` decides what counts, from plain values, so it is
+  tested without the service.
+- **Where the file comes from.** WhatsApp's database is closed to other apps. What
+  WhatsApp downloads lands in `…/Media/WhatsApp Documents/` (`WhatsAppDocuments` lists the
+  folders), and reading that folder takes all-files access, the same grant the recording
+  harvest uses. `DocumentMatcher` pairs a notice with the file of its name, or with
+  WhatsApp's `name (1).ext` twin. The file must be written between 10 minutes before the
+  notice and 7 days after it. A caption names no file, so it is paired only with a file
+  written within 2 minutes of the notice.
+- **A chat on screen posts no notice.** The listener also watches the folder, with a
+  `FileObserver` on `CLOSE_WRITE` and `MOVED_TO`, plus a poll every 5 minutes for what
+  inotify misses behind FUSE. A file that no notice claims within 10 s becomes a *loose*
+  sighting, with no chat and no number. A notice that arrives later takes the loose file
+  over. WhatsApp keeps a single copy of a file it already has. So when the same chat
+  resends the same name and no new file appears within 60 s, the resend takes the file
+  the first notice took.
+- **The sender's number.** On a handset, no `Person.key`, `Person.uri`, shortcut id or
+  tag carried the number of a saved contact; the notice names the sender only by contact
+  name. `ContactBook` looks that name up, with `READ_CONTACTS`, which is asked from the
+  WhatsApp card. It looks first in WhatsApp's own contact row
+  (`vnd.com.whatsapp.profile`, whose `DATA1` is the JID), then in the contact's phone
+  numbers. Two different lines under one name give no number (`ContactNumbers.choose`).
+- **What a document is.** Only a Constancia de Situación Fiscal, an INE or a passport
+  is to leave the handset, so the handset decides. `PageReader` draws the first two pages
+  of a PDF with `PdfRenderer` and reads them with ML Kit's on-device OCR and QR reader,
+  using the Play-services models, which are fetched at install and not bundled.
+  `DocumentClassifier` decides from what was read:
+  - a CSF by its title or by the SAT's QR, whose `D3=idCIF_RFC` gives the RFC;
+  - a passport by its word or by an MRZ line starting `P<`;
+  - an INE by its issuer, its title or an `IDMEX` MRZ line.
+
+  Drawing the page, rather than extracting its text, is what reads a scanned INE. A read
+  that failed, for example while the model is still downloading, is tried again later
+  and is not ruled "other".
+- **What it keeps.** `SightingStore` keeps the last 50 sightings in
+  `files/whatsapp_sightings.json` in the app's private storage, which is excluded from
+  backup. It is a window for testing on a real handset, not a queue.
+- **Turning it on.** On the main screen, the WhatsApp card's *Turn on* button opens the
+  notification access switch, then all-files access. On Android 13 and later, an APK
+  installed outside a store must first be allowed restricted settings: App info → ⋮ →
+  *Allow restricted settings*.
+
+- **Where it goes.** `DocumentQueue` puts each CSF, INE or passport in the outbox as a
+  `document` row, once per file. The drain sends it to `/remote/mobile/<id>/document`
+  under `file_b64`, along the recording's streamed path, with one difference: **the file
+  is WhatsApp's, so it is never deleted**, neither on delivery nor when a set-aside row
+  is purged. The 90-day purge deletes only recording audio. On the server,
+  `device_mobile_document` (odoo) files it in Documents as uploaded by the phone's
+  holder. From there the company's upload sort, and `l10n_mx_partner_import`'s offer to
+  create the contact, take over. A file another row already read takes that verdict and
+  is not read by OCR again.
+
 ## Wake-ups
 
 The app reports on its own schedule; a wake-up from Odoo shortens the wait. It

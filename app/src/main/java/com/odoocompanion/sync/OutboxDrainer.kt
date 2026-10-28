@@ -10,9 +10,11 @@ import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.OutboxLimits
 import com.odoocompanion.net.CallLogUpload
 import com.odoocompanion.net.CallRecord
+import com.odoocompanion.net.DocumentMetadata
 import com.odoocompanion.net.LocationFix
 import com.odoocompanion.net.LocationUpload
 import com.odoocompanion.net.OdooClient
+import com.odoocompanion.net.RecordingBody
 import com.odoocompanion.net.RecordingMetadata
 import com.odoocompanion.net.UploadOutcome
 import com.odoocompanion.net.WireJson
@@ -22,6 +24,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import java.io.File
@@ -138,7 +141,8 @@ class OutboxDrainer(
         val kinds: List<suspend () -> Outcome> = listOf(
             { drainBatch(LOCATIONS, settings, tally) },
             { drainBatch(CALLS, settings, tally) },
-            { drainRecordings(settings, tally) },
+            { drainFiles(DOCUMENTS, settings, tally) },
+            { drainFiles(RECORDINGS, settings, tally) },
         )
         var outcome = Outcome.DONE
         for (drainKind in kinds) {
@@ -237,6 +241,18 @@ class OutboxDrainer(
         val batchSize: Int,
         val item: KSerializer<T>,
         val encodeBatch: (List<T>) -> String,
+    )
+
+    // A kind sent one file per request: a recording, which the harvest made the
+    // outbox's to delete once delivered, or a document, whose file is WhatsApp's
+    // and is never deleted here.
+    private class FileKind(
+        val kind: String,
+        val suffix: String,
+        val noun: String,
+        val fileKey: String,
+        val ownsFile: Boolean,
+        val metadataOf: (String) -> JsonObject,
     )
 
     private suspend fun <T> drainBatch(
@@ -374,25 +390,29 @@ class OutboxDrainer(
         limitBytes?.let { "over the server's ${it / 1024} KB payload cap" }
             ?: "over the server's payload cap"
 
-    private suspend fun drainRecordings(settings: Settings, tally: DrainTally): Outcome {
+    private suspend fun drainFiles(
+        files: FileKind,
+        settings: Settings,
+        tally: DrainTally,
+    ): Outcome {
         var budget = RECORDING_BYTES_PER_DRAIN
         // The same exclusion as drainBatch's, for the same reason.
         val poisoned = mutableSetOf<Long>()
         while (true) {
-            val entries = dao.take(OutboxKind.RECORDING, RECORDING_BATCH + poisoned.size, now())
+            val entries = dao.take(files.kind, RECORDING_BATCH + poisoned.size, now())
                 .filter { it.id !in poisoned }
             if (entries.isEmpty()) return Outcome.DONE
             for (entry in entries) {
                 val file = entry.filePath?.let(::File)
                 if (file == null || !file.exists()) {
-                    forgetLostAudio(tally, entry)
+                    forgetLostFile(tally, entry, files.noun)
                     continue
                 }
                 if (file.length() > MAX_RECORDING_BYTES) {
                     poisoned += deferRuledOn(
                         tally,
                         entry,
-                        "recording of ${file.length()} bytes is over the " +
+                        "${files.noun} of ${file.length()} bytes is over the " +
                             "${MAX_RECORDING_BYTES / 1024 / 1024} MB any mobile device accepts",
                     )
                     continue
@@ -403,13 +423,11 @@ class OutboxDrainer(
                 }
 
                 val metadata = attempt {
-                    WireJson.encodeToJsonElement(
-                        WireJson.decodeFromString<RecordingMetadata>(entry.payload),
-                    ).jsonObject
+                    files.metadataOf(entry.payload)
                 }.getOrElse {
                     abandon(
                         tally,
-                        OutboxKind.RECORDING,
+                        files.kind,
                         listOf(entry.id),
                         undecodableReason(listOf(entry)),
                         counter = tally.undecodable,
@@ -417,17 +435,18 @@ class OutboxDrainer(
                     )
                     continue
                 }
-                val wireSize = client.recordingWireSize(file, metadata)
+                val wireSize = client.recordingWireSize(file, metadata, files.fileKey)
                 val declared = tally.payloadLimit
                 debug(TAG) {
-                    "recording row ${entry.id}: ${file.length()} bytes, $wireSize on the wire, " +
-                        "cap $declared, attempt ${entry.attempts + 1}, $budget budget left"
+                    "${files.noun} row ${entry.id}: ${file.length()} bytes, " +
+                        "$wireSize on the wire, cap $declared, " +
+                        "attempt ${entry.attempts + 1}, $budget budget left"
                 }
                 if (declared in 1..<wireSize) {
                     poisoned += deferRuledOn(
                         tally,
                         entry,
-                        "recording would send $wireSize bytes and the server declared a " +
+                        "${files.noun} would send $wireSize bytes and the server declared a " +
                             "${declared / 1024} KB cap, so it is not sent",
                     )
                     continue
@@ -436,9 +455,9 @@ class OutboxDrainer(
                 tally.attempted = true
 
                 val outcome = attempt {
-                    client.post(settings, "recording", file, metadata)
+                    client.post(settings, files.suffix, file, metadata, files.fileKey)
                 }.getOrElse { return failBatch(tally, listOf(entry.id), it) }
-                debug(TAG) { "recording row ${entry.id} answered $outcome" }
+                debug(TAG) { "${files.noun} row ${entry.id} answered $outcome" }
                 when (outcome) {
                     is UploadOutcome.Success, is UploadOutcome.Duplicate -> {
                         tally.delivered = true
@@ -447,11 +466,13 @@ class OutboxDrainer(
                         // A retry the server recognised by its file answers 200
                         // with duplicates=1, the transport's 409 past its window.
                         if (success == null || success.duplicates > 0) {
-                            tally.note(tally.duplicates, OutboxKind.RECORDING, 1)
+                            tally.note(tally.duplicates, files.kind, 1)
                         } else {
-                            tally.note(tally.accepted, OutboxKind.RECORDING, 1)
+                            tally.note(tally.accepted, files.kind, 1)
                         }
-                        if (deleteAudio(file)) {
+                        // A document's file is WhatsApp's: delivered, only the
+                        // row goes, and the file stays where WhatsApp keeps it.
+                        if (!files.ownsFile || deleteAudio(file)) {
                             dao.delete(listOf(entry.id))
                         } else {
                             // With no cursor, the harvest's only memory is
@@ -468,9 +489,9 @@ class OutboxDrainer(
 
                     is UploadOutcome.Rejected -> abandon(
                         tally,
-                        OutboxKind.RECORDING,
+                        files.kind,
                         listOf(entry.id),
-                        "server refused the recording (${outcome.code})",
+                        "server refused the ${files.noun} (${outcome.code})",
                     )
 
                     is UploadOutcome.TooLarge -> {
@@ -478,7 +499,7 @@ class OutboxDrainer(
                         poisoned += deferRuledOn(
                             tally,
                             entry,
-                            "recording of ${file.length()} bytes is ${outcome.describe()}",
+                            "${files.noun} of ${file.length()} bytes is ${outcome.describe()}",
                         )
                     }
 
@@ -498,13 +519,13 @@ class OutboxDrainer(
         }
     }
 
-    private suspend fun forgetLostAudio(tally: DrainTally, entry: OutboxEntry) {
+    private suspend fun forgetLostFile(tally: DrainTally, entry: OutboxEntry, noun: String) {
         val folder = entry.filePath.orEmpty().loggableDirectory()
         dao.delete(listOf(entry.id))
         tally.lost++
         Log.w(
             TAG,
-            "Dropping recording row ${entry.id}: its audio is no longer under " +
+            "Dropping $noun row ${entry.id}: its file is no longer under " +
                 "$folder, so nothing can be uploaded",
         )
     }
@@ -640,6 +661,28 @@ class OutboxDrainer(
             CALL_LOG_BATCH,
             CallRecord.serializer(),
         ) { WireJson.encodeToString(CallLogUpload(it)) }
+
+        private val RECORDINGS = FileKind(
+            OutboxKind.RECORDING,
+            "recording",
+            "recording",
+            RecordingBody.AUDIO_KEY,
+            ownsFile = true,
+        ) {
+            WireJson.encodeToJsonElement(WireJson.decodeFromString<RecordingMetadata>(it))
+                .jsonObject
+        }
+
+        private val DOCUMENTS = FileKind(
+            OutboxKind.DOCUMENT,
+            "document",
+            "document",
+            RecordingBody.FILE_KEY,
+            ownsFile = false,
+        ) {
+            WireJson.encodeToJsonElement(WireJson.decodeFromString<DocumentMetadata>(it))
+                .jsonObject
+        }
 
         private val drainLock = Mutex()
     }
