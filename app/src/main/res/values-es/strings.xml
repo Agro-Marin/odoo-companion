@@ -61,10 +61,10 @@
     <string name="notification_softphone_ready">Listo para recibir llamadas</string>
     <string name="notification_softphone_connecting">Conectando con el conmutador…</string>
     <string name="notification_softphone_failed">Sin registro en el conmutador; reintentando</string>
-    <string name="softphone_account_label">Línea de la empresa</string>
     <string name="softphone_ringing">Llamada entrante</string>
     <string name="softphone_in_call">En llamada</string>
     <string name="softphone_on_hold">En espera</string>
+    <string name="softphone_resume">Reanudar</string>
     <string name="softphone_answer">Contestar</string>
     <string name="softphone_hang_up">Colgar</string>
     <string name="softphone_mute">Silenciar</string>

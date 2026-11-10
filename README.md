@@ -548,11 +548,17 @@ row it posts is stored.
   It runs only when `RECORD_AUDIO` is held; without it the reconciler logs why, the
   status screen names it, and a retry (`SoftphoneRetry`, every 15 minutes and then
   less often) brings the line up once the grant arrives, rather than registering a
-  line that would answer in silence. It is a self-managed calling app
-  (`MANAGE_OWN_CALLS`): Telecom routes its audio (earpiece, speaker, Bluetooth, car,
-  and a headset's mute button) and holds it against a cellular call
-  (`CAPABILITY_HOLD`: the company call is put on hold, not dropped, when a cellular
-  one is answered). It never records — the phone system records every call it
+  line that would answer in silence. It is a calling app the system knows of,
+  through the Core-Telecom library (`MANAGE_OWN_CALLS`; the platform's VoIP call API
+  from Android 14, a self-managed connection service of the library's below it):
+  Telecom routes its audio (earpiece, speaker, Bluetooth, car, and a headset's mute
+  button) and holds it against a cellular call (`SUPPORTS_SET_INACTIVE`: the company
+  call is put on hold, not dropped, when a cellular one is answered, and the call
+  screen's Resume takes it back: the system resumes none of an app's calls on its
+  own). Its calls stay
+  out of the handset's call log, which the call-log sync would otherwise upload a
+  second time: the app opts into no call-log integration, and from API 36.1 marks
+  each call `isLogExcluded` as well. It never records — the phone system records every call it
   carries. Media is DTLS-SRTP with ICE and RTCP multiplexed, as the phone system's
   WebRTC extension requires; a handset and the browser register on the same
   extension and ring together, and a call answered in the browser stops the handset
@@ -561,8 +567,8 @@ row it posts is stored.
   device token in the app's private DataStore, for the reason the next item gives;
   Odoo refusing the device token (401/403, revoked or rotated) stops the softphone
   and forgets the secret.
-- **The app rings, not the SIP stack.** A self-managed call gets no system ringing
-  screen, and Linphone's native ringing needs `androidx.media`, which this app does
+- **The app rings, not the SIP stack.** The system shows no ringing screen for an app's
+  own call, and Linphone's native ringing needs `androidx.media`, which this app does
   not ship (its fallback is a ringtone file the APK leaves out). `SoftphoneRinging`
   posts a `CallStyle` notification on the `softphone_incoming` channel — the
   handset's default ringtone, vibration, insistent until answered, declined or
@@ -570,7 +576,9 @@ row it posts is stored.
   grants that full-screen intent only to apps the user or MDM allows
   (`USE_FULL_SCREEN_INTENT`); without it the call rings as a heads-up notification,
   and the log says so. The channel's sound can be changed only in the system's
-  notification settings, which is where an MDM or the user turns it down.
+  notification settings, which is where an MDM or the user turns it down. A volume key
+  silences it while the call screen is in front; Core-Telecom carries no system-wide
+  silence, so over another app the ringing goes on until the call is answered or declined.
 - **Waiting for a call, the softphone is a `specialUse` foreground service; during
   one it is also `phoneCall` and `microphone`.** Android 15 refuses a `phoneCall` or
   `microphone` foreground service to a start from `BOOT_COMPLETED`, and the first
@@ -637,10 +645,23 @@ re-derives them.
   `backup_rules.xml` for pre-Android-12 and `data_extraction_rules.xml` after it,
   each excluding `root`, `database`, `sharedpref` and `file`. Verified, not
   assumed: the token and the unsent queue stay on the handset they belong to.
-- **Only `MainActivity` and `BootReceiver` are exported**, the first because it is
-  the launcher and the second because `BOOT_COMPLETED` requires it; both of
-  `BootReceiver`'s actions are system-only broadcasts and it returns immediately on
-  anything else. The location service is `exported="false"`.
+- **Exported components, read off the merged manifest.** The app's own: `MainActivity`
+  (the launcher); `BootReceiver`, whose two actions are system-only broadcasts and
+  which returns at once on anything else; and a service only the system can bind,
+  behind its binding permission -- `WhatsAppNotificationListener`
+  (`BIND_NOTIFICATION_LISTENER_SERVICE`, which drops every other app's notice at its
+  first line). The location and softphone services, the push service and the call
+  screen are `exported="false"`. Libraries add Core-Telecom's `JetpackConnectionService`
+  (`BIND_TELECOM_CONNECTION_SERVICE`, the system's alone to bind; Core-Telecom's
+  `BLUETOOTH_CONNECT` is removed from the manifest, so the system picks a Bluetooth
+  route itself; Linphone's install-time `BLUETOOTH`, inert from Android 12, stays), WorkManager's job service and
+  `DUMP`-guarded diagnostics, and the UnifiedPush connector's
+  `MessagingReceiverImpl` and `RaiseToForegroundService`, exported with **no
+  permission** because a distributor is an ordinary app. What crosses them is
+  bounded by the connector's per-registration token and by `CompanionPushService`
+  obeying only a message sealed to this handset's keys (`message.decrypted`), which
+  only Odoo holds; a wake-up can at most ask for a sync or a softphone refresh
+  sooner.
 - **Accepted, not fixed**: the outbox and the preferences store are unencrypted
   app-private storage, so numbers, contact names, coordinates and the Bearer token
   rest behind the OS sandbox rather than behind a key. On a non-rooted managed

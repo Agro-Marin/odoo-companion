@@ -62,10 +62,10 @@
     <string name="notification_softphone_ready">Ready to take calls</string>
     <string name="notification_softphone_connecting">Connecting to the phone system…</string>
     <string name="notification_softphone_failed">Not registered with the phone system; retrying</string>
-    <string name="softphone_account_label">Company line</string>
     <string name="softphone_ringing">Incoming call</string>
     <string name="softphone_in_call">In call</string>
     <string name="softphone_on_hold">On hold</string>
+    <string name="softphone_resume">Resume</string>
     <string name="softphone_answer">Answer</string>
     <string name="softphone_hang_up">Hang up</string>
     <string name="softphone_mute">Mute</string>

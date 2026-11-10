@@ -31,9 +31,16 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!-- The softphone: the company line's calls, carried over the data
-         connection as a self-managed calling app. -->
+         connection as a calling app the system knows of, through Core-Telecom. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <!-- Core-Telecom asks for it to name Bluetooth devices, and routes to them
+         without it, leaving the choice to the system. This app has never held
+         it, and an MDM that grants every runtime permission would grant it.
+         Linphone's install-time BLUETOOTH, inert from Android 12, stays. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        tools:node="remove" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -105,15 +112,6 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps a company handset registered as its user's extension on the company phone system, so incoming company calls ring on it; there is no push channel to wake it." />
-        </service>
-
-        <service
-            android:name=".softphone.SoftphoneConnectionService"
-            android:exported="true"
-            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
-            <intent-filter>
-                <action android:name="android.telecom.ConnectionService" />
-            </intent-filter>
         </service>
 
         <activity

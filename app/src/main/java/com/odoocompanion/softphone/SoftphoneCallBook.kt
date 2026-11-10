@@ -106,15 +106,29 @@ class SoftphoneCallBook<C : Any> {
          * status, which is where a CANCEL's Reason header lands: a 200 in it is a call
          * answered on another of the user's devices (the browser), a 6xx one declined
          * there, and anything else on a call that never stopped ringing a missed call.
+         *
+         * Only [VOIP_CAUSES]: from Android 14 an app's own call takes no other, and
+         * `CallControl.disconnect` throws on `ANSWERED_ELSEWHERE` or `BUSY`, out of a
+         * coroutine nothing catches -- answering in the browser crashed the process.
+         * A call answered or refused elsewhere, or busy, ended remotely for this handset;
+         * one that failed is LOCAL, as Core-Telecom itself sends ERROR below the API that
+         * takes it.
          */
         fun disconnectCause(state: Call.State?, status: Call.Status?, reason: Reason?): Int = when {
-            status == Call.Status.AcceptedElsewhere -> DisconnectCause.ANSWERED_ELSEWHERE
+            status == Call.Status.AcceptedElsewhere -> DisconnectCause.REMOTE
             status == Call.Status.DeclinedElsewhere -> DisconnectCause.REJECTED
             status == Call.Status.Missed -> DisconnectCause.MISSED
-            reason == Reason.Busy -> DisconnectCause.BUSY
-            reason == Reason.Declined -> DisconnectCause.REMOTE
-            state == Call.State.Error -> DisconnectCause.ERROR
+            reason == Reason.Busy || reason == Reason.Declined -> DisconnectCause.REMOTE
+            state == Call.State.Error -> DisconnectCause.LOCAL
             else -> DisconnectCause.REMOTE
         }
+
+        /** The causes Telecom takes when an app ends its own call. */
+        val VOIP_CAUSES = setOf(
+            DisconnectCause.LOCAL,
+            DisconnectCause.REMOTE,
+            DisconnectCause.MISSED,
+            DisconnectCause.REJECTED,
+        )
     }
 }

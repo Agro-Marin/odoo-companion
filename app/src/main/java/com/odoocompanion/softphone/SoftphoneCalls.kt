@@ -12,7 +12,7 @@ import org.linphone.core.RegistrationState
 
 /**
  * The softphone's calls, between the SIP stack that carries them and the
- * system's Telecom framework that rings, routes audio and shows them. Which
+ * system's Telecom framework that routes their audio and holds them. Which
  * call owns which connection is [SoftphoneCallBook]'s, checkable on its own;
  * this is the glue that applies it. Everything here runs on the main thread:
  * the SIP stack iterates there and Telecom calls back there.
@@ -66,7 +66,7 @@ object SoftphoneCalls {
         when (state) {
             Call.State.IncomingReceived -> offer(context, call, id)
 
-            Call.State.Connected, Call.State.StreamsRunning -> book.connectionOf(id)?.setActive()
+            Call.State.Connected, Call.State.StreamsRunning -> book.connectionOf(id)?.activate()
 
             Call.State.End, Call.State.Error, Call.State.Released -> {
                 // only the call a connection belongs to may end it: a second
@@ -92,14 +92,16 @@ object SoftphoneCalls {
         when (book.offer(id)) {
             Offer.DECLINE_BUSY -> call.decline(Reason.Busy)
 
-            Offer.REPORT -> {
-                val address = call.remoteAddress.asStringUriOnly()
-                if (!SoftphoneTelecom.reportIncoming(context, id, address)) refuse(id)
-            }
+            Offer.REPORT -> SoftphoneTelecom.reportIncoming(
+                context,
+                id,
+                call.remoteAddress.asStringUriOnly(),
+                nameOf(call),
+            )
         }
     }
 
-    /** Telecom will not take the reported call: decline it so the caller hears busy. */
+    /** The system will not take the reported call: decline it so the caller hears busy. */
     fun refuse(callId: String?) {
         val refused = book.refuseIncoming(callId) ?: return
         core?.getCallByCallid(refused)?.decline(Reason.Busy)
@@ -112,14 +114,27 @@ object SoftphoneCalls {
 
     fun hangUp(connection: SoftphoneConnection) {
         val call = callOf(connection) ?: return
-        if (call.state == Call.State.IncomingReceived ||
-            call.state == Call.State.IncomingEarlyMedia
-        ) {
-            call.decline(Reason.Declined)
-        } else {
-            call.terminate()
-        }
+        if (call.state in INCOMING) call.decline(Reason.Declined) else call.terminate()
     }
+
+    /** Whether the current call is still ringing, on the screen and on the red button alike. */
+    val ringing: Boolean
+        get() = call?.state in INCOMING
+
+    // The red button, on the call screen or the ringing notice: declines a call
+    // still ringing and ends one on the line. With no connection there is no
+    // call, only the insistent ringing a call that is gone may have left --
+    // after a process death nothing else cancels it, and Decline did nothing.
+    fun hangUpCurrent(context: Context) {
+        val connection = book.current ?: return SoftphoneRinging.stop(context)
+        if (ringing) connection.reject() else connection.disconnect()
+    }
+
+    /** Whether the current call is one the system held, for a cellular call over it. */
+    val held: Boolean
+        get() = call?.state == Call.State.Paused
+
+    private val INCOMING = setOf(Call.State.IncomingReceived, Call.State.IncomingEarlyMedia)
 
     fun hold(connection: SoftphoneConnection): Boolean = callOf(connection)?.pause() == 0
 
@@ -148,7 +163,7 @@ object SoftphoneCalls {
     val muted: Boolean
         get() = core?.isMicEnabled == false
 
-    /** Telecom's report of where the audio goes. */
+    /** The system's report of where the audio goes. */
     fun onRoute(speaker: Boolean, earpiece: Boolean) {
         this.speaker = speaker
         this.earpiece = earpiece
@@ -157,7 +172,7 @@ object SoftphoneCalls {
 
     /** Every connection still open, for a SIP stack going away under them. */
     fun abandon() {
-        book.clear().forEach { it.end(DisconnectCause.ERROR) }
+        book.clear().forEach { it.end(DisconnectCause.LOCAL) }
         changed()
     }
 

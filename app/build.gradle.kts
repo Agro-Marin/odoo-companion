@@ -21,11 +21,14 @@ val signingProperties = Properties().apply {
 android {
     namespace = "com.odoocompanion"
     compileSdk = 37
+    compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "com.odoocompanion"
         minSdk = 29
-        // compileSdk is 37 because androidx.core 1.19.0 refuses to link below it.
+        // compileSdk is at least 37 because androidx.core 1.19.0 refuses to link
+        // below it; 37.2 is the newest stable platform, and a minor level adds
+        // APIs without changing behaviour, which only targetSdk does.
         // targetSdk stays at 36 because Robolectric 4.16.1 refuses to emulate
         // above it -- "Package targetSdkVersion=37 > maxSdkVersion=36" fails
         // every test class before it runs -- and targetSdk is the SDK the whole
@@ -144,6 +147,7 @@ ksp {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.telecom)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.lifecycle.runtime)

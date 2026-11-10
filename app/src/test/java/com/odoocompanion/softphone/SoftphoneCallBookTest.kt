@@ -120,13 +120,13 @@ class SoftphoneCallBookTest {
 
         assertEquals(
             "answered in the browser: a CANCEL with Reason 200",
-            DisconnectCause.ANSWERED_ELSEWHERE,
+            DisconnectCause.REMOTE,
             cause(Call.State.End, Call.Status.AcceptedElsewhere),
         )
         assertEquals(DisconnectCause.REJECTED, cause(Call.State.End, Call.Status.DeclinedElsewhere))
         assertEquals(DisconnectCause.MISSED, cause(Call.State.End, Call.Status.Missed))
         assertEquals(
-            DisconnectCause.BUSY,
+            DisconnectCause.REMOTE,
             cause(Call.State.Error, Call.Status.Aborted, Reason.Busy),
         )
         assertEquals(
@@ -134,10 +134,28 @@ class SoftphoneCallBookTest {
             cause(Call.State.Error, Call.Status.Declined, Reason.Declined),
         )
         assertEquals(
-            DisconnectCause.ERROR,
+            DisconnectCause.LOCAL,
             cause(Call.State.Error, Call.Status.Aborted, Reason.IOError),
         )
         assertEquals(DisconnectCause.REMOTE, cause(Call.State.End, Call.Status.Success))
         assertEquals(DisconnectCause.REMOTE, cause(Call.State.Released, null, null))
+    }
+
+    @Test
+    fun `every way a call ends is a cause telecom takes for an app's own call`() {
+        // CallControl.disconnect throws on any other, and nothing catches it
+        val states = listOf(Call.State.End, Call.State.Error, Call.State.Released, null)
+        val statuses = Call.Status.entries + null
+        val reasons = Reason.entries + null
+        val outcomes = states.flatMap { state ->
+            statuses.flatMap { status -> reasons.map { reason -> Triple(state, status, reason) } }
+        }
+        for ((state, status, reason) in outcomes) {
+            val cause = SoftphoneCallBook.disconnectCause(state, status, reason)
+            assertTrue(
+                "$state/$status/$reason gave $cause",
+                cause in SoftphoneCallBook.VOIP_CAUSES,
+            )
+        }
     }
 }

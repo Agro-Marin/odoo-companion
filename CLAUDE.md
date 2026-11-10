@@ -44,8 +44,8 @@ where the data arrives.
 
 ## Build / test / lint
 
-Requires JDK 25, the version pinned in `tools/versions.env`, and Android
-SDK 37; `local.properties` must point at the SDK
+Requires JDK 25, the version pinned in `tools/versions.env`, and the Android
+SDK with `platforms;android-37.2` installed; `local.properties` must point at the SDK
 (`sdk.dir=…`, git-ignored).
 
 ```bash
@@ -578,6 +578,32 @@ machine at `http://10.0.2.2:<port>`.
   softphone build matched none: a second INVITE declined busy reached the end-of-call
   branch holding the *first* call's connection and hung it up. The second-call test
   goes red if `ended` falls back to any open connection.
+- **A company call stays out of the handset's call log.** The phone system records
+  every call and Odoo already holds it as a `phone.call`; in the system call log,
+  `CallLogSyncWorker` — which does not filter by account — would upload it a second
+  time. The platform logs an app's call only when the app opts in — the account extra
+  `EXTRA_LOG_SELF_MANAGED_CALLS`, or from API 36.1 an activity for
+  `TelecomManager.ACTION_CALL_BACK` (integrated call logs). Declare neither.
+  `SoftphoneTelecom.attributes` also sets `isLogExcluded`, which from 36.1 excludes
+  the call whatever the manifest says; `SoftphoneTelecomTest` holds it there.
+- **The SIP call never outlives the system's call.** A Core-Telecom callback that
+  cannot be carried out (a hold the SIP stack refuses) is refused by throwing, and
+  Core-Telecom then tears the call down *without* calling `onDisconnect` — so
+  `SoftphoneConnection.onSessionEnded`, run however `addCall` returns, hangs up the
+  SIP leg — or, for a call that never got that far, declines the INVITE. A callback
+  that returns has told Telecom it was carried out, so one arriving before the
+  connection exists throws rather than doing nothing.
+- **A call ends with a cause Telecom takes for an app's own call:** `LOCAL`, `REMOTE`,
+  `MISSED`, `REJECTED` (`SoftphoneCallBook.VOIP_CAUSES`). From Android 14
+  `CallControl.disconnect` throws on any other, out of a coroutine nothing catches, so
+  `ANSWERED_ELSEWHERE` — a call answered in the browser, the everyday case — crashed
+  the process. `disconnectCause` maps every SIP outcome into the set and a test sweeps
+  them all; the test double refuses what the platform refuses. A hang-up on the
+  handset ends the system's call *before* the SIP call: Linphone reports the SIP end
+  inside `decline()`/`terminate()`, and that report, which cannot tell who hung up,
+  went first and recorded every decline and hang-up as `REMOTE`. The connection's flows and actions run on a scope it owns, not on the
+  `CallControlScope`: `addCall` waits for that scope's children, and the endpoint and
+  mute flows never finish, so the session's end would never be seen.
 - **The softphone's foreground types keep `specialUse` in every set.** Android 15
   refuses `phoneCall` and `microphone` to a start from `BOOT_COMPLETED` with
   `ForegroundServiceStartNotAllowedException` (an `IllegalStateException`, thrown from

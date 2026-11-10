@@ -3,6 +3,7 @@ agp = "9.4.0"
 kotlin = "2.4.20"
 ksp = "2.3.11"
 coreKtx = "1.19.0"
+coreTelecom = "1.1.0"
 appcompat = "1.8.0"
 material = "1.14.0"
 lifecycle = "2.11.0"
@@ -44,6 +45,7 @@ tink = "1.23.0"
 [libraries]
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-core-telecom = { module = "androidx.core:core-telecom", version.ref = "coreTelecom" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 material = { module = "com.google.android.material:material", version.ref = "material" }
 androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }

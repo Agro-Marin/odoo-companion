@@ -74,6 +74,8 @@ class SoftphoneService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         SoftphoneCalls.appContext = applicationContext
+        // A new service holds no call: any ringing is a dead process's.
+        SoftphoneRinging.stop(this)
         SoftphoneRinging.ensureChannel(this)
         if (!enterForeground(onTheLine = false)) {
             SoftphoneRetry.schedule(this)
@@ -89,7 +91,7 @@ class SoftphoneService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         if (foregroundTypes == null) return START_NOT_STICKY
         when (intent?.action) {
-            ACTION_DECLINE -> SoftphoneCalls.book.current?.onReject()
+            ACTION_DECLINE -> SoftphoneCalls.hangUpCurrent(this)
 
             ACTION_STOP -> stopWhenFree()
 
@@ -157,9 +159,7 @@ class SoftphoneService : LifecycleService() {
 
     /** Foreground as the moment needs, false when the system refuses even that. */
     private fun enterForeground(onTheLine: Boolean): Boolean {
-        val choices = foregroundChoices(onTheLine)
-        if (foregroundTypes == choices.first()) return true
-        for (types in choices) {
+        for (types in foregroundChoices(onTheLine)) {
             if (types == foregroundTypes) return true
             try {
                 ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), types)
@@ -258,7 +258,7 @@ class SoftphoneService : LifecycleService() {
         val open = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, InCallActivity::class.java),
+            InCallActivity.intent(this),
             PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
