@@ -264,7 +264,7 @@ class DeliverySemanticsTest {
                     )
                 }
                 narrowedTo = minOf(narrowedTo, calls)
-                return MockResponse(body = """{"status":"success","accepted":${'$'}calls}""")
+                return MockResponse(body = """{"status":"success","accepted":$calls}""")
             }
         }
         repeat(8) { queueCall(it) }
@@ -385,7 +385,7 @@ class DeliverySemanticsTest {
     @Test
     fun `a recording over what any mobile device accepts is kept, charged and bounded`() = runTest {
         val audio = File.createTempFile("huge", ".m4a").apply { deleteOnExit() }
-        RandomAccessFile(audio, "rw").use { it.setLength(OutboxDrainer.MAX_RECORDING_BYTES + 1) }
+        RandomAccessFile(audio, "rw").use { it.setLength(OutboxDrainer.MAX_FILE_BYTES + 1) }
         dao.insert(
             OutboxEntry(
                 kind = OutboxKind.RECORDING,
@@ -518,7 +518,7 @@ class DeliverySemanticsTest {
             dao.insert(
                 OutboxEntry(
                     kind = OutboxKind.LOCATION,
-                    payload = """{"latitude":1.0,"longitude":2.0,"timestamp":${'$'}pass}""",
+                    payload = """{"latitude":1.0,"longitude":2.0,"timestamp":$pass}""",
                     createdAt = pass.toLong(),
                 ),
             )
@@ -530,12 +530,12 @@ class DeliverySemanticsTest {
         assertEquals("it must end up refused, not cycling", 1, dao.countDead())
         assertTrue(
             "the cap is re-probed once per revival, not spent on all 25 attempts: " +
-                "${'$'}recordingPosts posts",
+                "$recordingPosts posts",
             recordingPosts <= OutboxDrainer.MAX_REVIVALS + 1,
         )
         assertTrue(
             "and the handset must not push a fleet's data allowance at a wall: " +
-                "${'$'}{pushedBytes / 1024 / 1024} MB",
+                "${pushedBytes / 1024 / 1024} MB",
             pushedBytes < 16L * 1024 * 1024,
         )
         audio.delete()
@@ -688,7 +688,7 @@ class DeliverySemanticsTest {
     fun `a pass stopped by the size budget asks for another without reporting an error`() =
         runTest {
             accept()
-            val big = (OutboxDrainer.RECORDING_BYTES_PER_DRAIN / 2 + 1).toInt()
+            val big = (OutboxDrainer.FILE_BYTES_PER_DRAIN / 2 + 1).toInt()
             val files = listOf(queueRecording(big), queueRecording(big), queueRecording(big))
 
             val report = drainer().drainAll()
@@ -699,6 +699,31 @@ class DeliverySemanticsTest {
             assertTrue(dao.countOf(OutboxKind.RECORDING) > 0)
             files.forEach { it.delete() }
         }
+
+    // Documents and recordings are drained one after the other, and each began
+    // with a budget of its own: one pass could push twice the bound.
+    @Test
+    fun `documents and recordings share one size budget per pass`() = runTest {
+        accept()
+        val big = (OutboxDrainer.FILE_BYTES_PER_DRAIN / 2 + 1).toInt()
+        val document = File.createTempFile("doc", ".pdf").apply { writeBytes(ByteArray(big)) }
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.DOCUMENT,
+                payload = """{"file_name":"d.pdf","mimetype":"application/pdf"}""",
+                filePath = document.absolutePath,
+                createdAt = 1L,
+            ),
+        )
+        val files = listOf(queueRecording(big), queueRecording(big))
+
+        val report = drainer().drainAll()
+
+        assertTrue(report.moreWorkPending)
+        assertEquals(2, server.requestCount)
+        assertEquals(1, dao.countOf(OutboxKind.RECORDING))
+        (files + document).forEach { it.delete() }
+    }
 
     @Test
     fun `an unreadable configuration does not spend the delivery retry budget`() = runTest {

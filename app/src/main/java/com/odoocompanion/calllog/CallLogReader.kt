@@ -85,6 +85,7 @@ class CallLogReader(
         val dateIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DATE)
         val durationIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION)
         val nameIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)
+        val presentationIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER_PRESENTATION)
 
         val entries = mutableListOf<OutboxEntry>()
         var reached = sinceId
@@ -99,13 +100,19 @@ class CallLogReader(
             }
             scanned++
             reached = cursor.getLong(idIndex)
-            val number = cursor.getString(numberIndex).orEmpty()
-            if (number.isBlank()) continue
+            val stored = cursor.getString(numberIndex).orEmpty()
+            // A withheld caller's row may still carry a placeholder (-2 on
+            // older dialers), with or without the presentation that says so:
+            // either is the truth, and the placeholder is no number.
+            val withheld = withheldAs(cursor.getInt(presentationIndex)) ?: PLACEHOLDERS[stored]
+            val number = if (withheld == null) stored else ""
+            if (number.isBlank() && withheld == null) continue
             entries += OutboxEntry(
                 kind = OutboxKind.CALL_LOG,
                 payload = WireJson.encodeToString(
                     CallRecord(
                         number = number,
+                        presentation = withheld,
                         direction = CallDirection.of(cursor.getInt(typeIndex)),
                         timestamp = cursor.getLong(dateIndex),
                         duration = cursor.getLong(durationIndex),
@@ -121,6 +128,26 @@ class CallLogReader(
     companion object {
         const val DEFAULT_LIMIT = 1_000
 
+        // A call from a withheld number is still a call someone missed or took:
+        // it used to be dropped here, and Odoo never heard of it. The wire word
+        // for each presentation that leaves the number out; null for one that
+        // gives it.
+        fun withheldAs(presentation: Int): String? = when (presentation) {
+            CallLog.Calls.PRESENTATION_RESTRICTED -> "restricted"
+            CallLog.Calls.PRESENTATION_PAYPHONE -> "payphone"
+            CallLog.Calls.PRESENTATION_UNKNOWN, PRESENTATION_UNAVAILABLE -> "unknown"
+            else -> null
+        }
+
+        // CallLog.Calls.PRESENTATION_UNAVAILABLE, API 33; minSdk is 29.
+        private const val PRESENTATION_UNAVAILABLE = 5
+
+        // The numbers telephony's CallerInfo writes in place of one it was not
+        // given: UNKNOWN_NUMBER, PRIVATE_NUMBER, PAYPHONE_NUMBER. Uploaded as a
+        // number, "-2" matched no contact and read as a call from "-2".
+        private val PLACEHOLDERS =
+            mapOf("-1" to "unknown", "-2" to "restricted", "-3" to "payphone")
+
         private val PROJECTION = arrayOf(
             CallLog.Calls._ID,
             CallLog.Calls.NUMBER,
@@ -128,6 +155,7 @@ class CallLogReader(
             CallLog.Calls.DATE,
             CallLog.Calls.DURATION,
             CallLog.Calls.CACHED_NAME,
+            CallLog.Calls.NUMBER_PRESENTATION,
         )
     }
 }

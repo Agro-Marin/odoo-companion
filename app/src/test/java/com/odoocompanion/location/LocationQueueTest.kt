@@ -223,14 +223,14 @@ class LocationQueueTest {
         val counted = object : OutboxDao by dao {
             var depths = 0
             var counts = 0
-            override suspend fun depthOf(kind: String, now: Long): QueueDepth {
+            override suspend fun depthOf(kind: String, now: Long, enrollment: String?): QueueDepth {
                 depths++
-                return dao.depthOf(kind)
+                return dao.depthOf(kind, now, enrollment)
             }
 
-            override suspend fun countOf(kind: String, now: Long): Int {
+            override suspend fun countOf(kind: String, now: Long, enrollment: String?): Int {
                 counts++
-                return dao.countOf(kind)
+                return dao.countOf(kind, now, enrollment)
             }
         }
 

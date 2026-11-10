@@ -24,6 +24,9 @@ data class CallRecord(
     val timestamp: Long,
     val duration: Long,
     @SerialName("contact_name") val contactName: String? = null,
+    // Why there is no number, on a call that has none: restricted (withheld by
+    // the caller), unknown, or payphone. Absent when the number was given.
+    val presentation: String? = null,
 )
 
 @Serializable

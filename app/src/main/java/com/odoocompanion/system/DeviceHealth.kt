@@ -20,6 +20,8 @@ enum class Blocker {
     RECORDING_STORAGE_MISSING,
 
     MICROPHONE_MISSING,
+
+    LOCAL_NETWORK_MISSING,
 }
 
 data class HealthReport(
@@ -29,11 +31,16 @@ data class HealthReport(
     val recordingStorageGranted: Boolean,
     val exemptFromBatteryOptimization: Boolean,
     val microphoneGranted: Boolean,
+    // Always true below Android 17, where no such permission exists.
+    val localNetworkGranted: Boolean,
 ) {
+    // localNetworkWanted: Odoo or the phone system is on a local address
+    // (LocalNetwork.anyLocal), which an app targeting 17 cannot reach without it.
     fun blockers(
         callLogWanted: Boolean,
         recordingsWanted: Boolean,
         softphoneWanted: Boolean,
+        localNetworkWanted: Boolean,
     ): List<Blocker> = buildList {
         if (!locationGranted) {
             add(Blocker.LOCATION_MISSING)
@@ -46,6 +53,7 @@ data class HealthReport(
             add(Blocker.RECORDING_STORAGE_MISSING)
         }
         if (softphoneWanted && !microphoneGranted) add(Blocker.MICROPHONE_MISSING)
+        if (localNetworkWanted && !localNetworkGranted) add(Blocker.LOCAL_NETWORK_MISSING)
     }
 }
 
@@ -61,6 +69,8 @@ object DeviceHealth {
         recordingStorageGranted = hasRecordingStorageAccess(context),
         exemptFromBatteryOptimization = isExemptFromBatteryOptimization(context),
         microphoneGranted = granted(context, Manifest.permission.RECORD_AUDIO),
+        localNetworkGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.CINNAMON_BUN ||
+            granted(context, Manifest.permission.ACCESS_LOCAL_NETWORK),
     )
 
     // What to ask for, from the same switches blockers() reads, so a
@@ -71,12 +81,16 @@ object DeviceHealth {
         callLogWanted: Boolean,
         recordingsWanted: Boolean,
         softphoneWanted: Boolean,
+        localNetworkWanted: Boolean,
         sdk: Int = Build.VERSION.SDK_INT,
     ): List<String> = buildList {
         add(Manifest.permission.ACCESS_FINE_LOCATION)
         add(Manifest.permission.ACCESS_COARSE_LOCATION)
         if (callLogWanted) add(Manifest.permission.READ_CALL_LOG)
         if (softphoneWanted) add(Manifest.permission.RECORD_AUDIO)
+        if (localNetworkWanted && sdk >= Build.VERSION_CODES.CINNAMON_BUN) {
+            add(Manifest.permission.ACCESS_LOCAL_NETWORK)
+        }
         if (sdk >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
         if (recordingsWanted && sdk < Build.VERSION_CODES.R) {
             add(Manifest.permission.READ_EXTERNAL_STORAGE)

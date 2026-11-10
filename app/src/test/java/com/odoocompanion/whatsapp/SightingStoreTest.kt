@@ -1,6 +1,9 @@
 package com.odoocompanion.whatsapp
 
 import android.app.Application
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,6 +15,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 // Robolectric for android.util.Log, which the store writes to when a file will
 // not read; nothing else here needs a runtime.
@@ -164,6 +170,50 @@ class SightingStoreTest {
         )
     }
 
+    // Downloads by hand: the first constancia was written an hour after its
+    // notice, when someone tapped it. A second "CSF.pdf" with no new file is
+    // then a document nobody has tapped yet, not the first one again.
+    @Test
+    fun `where downloads wait for a tap, a same-named document is not given the first file`() =
+        runTest {
+            onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 3_601_000L, 16))
+            val store = store()
+            store.record(listOf(notice("CSF.pdf", at = 1_000L)))
+            clock = 7_200_000L
+            store.record(listOf(notice("CSF.pdf", at = clock)))
+
+            clock += SightingStore.RESEND_SETTLE_MILLIS
+            store.rematch()
+            val sightings = store.sightings.value!!.sortedBy { it.at }
+            assertEquals("/w/CSF.pdf", sightings.first().filePath)
+            assertEquals("it waits for its own file", null, sightings.last().filePath)
+
+            onDisk = onDisk + DocumentFile("/w/CSF (1).pdf", "CSF (1).pdf", clock + 5_000L, 20)
+            store.rematch()
+            assertEquals("/w/CSF (1).pdf", store.sightings.value!!.maxBy { it.at }.filePath)
+        }
+
+    // Not measured either way on a handset: should WhatsApp write its one copy
+    // again when the same file comes back, the file is stamped with the resend's
+    // notice. That too is a download that came by itself.
+    @Test
+    fun `a resend whose arrival rewrote the kept file is still given it`() = runTest {
+        onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16))
+        val store = store()
+        store.record(listOf(notice("CSF.pdf", at = 1_000L)))
+        clock = 7_200_000L
+        store.record(listOf(notice("CSF.pdf", at = clock)))
+        onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", clock + 1_000L, 16))
+
+        clock += SightingStore.RESEND_SETTLE_MILLIS
+        store.rematch()
+
+        assertEquals(
+            listOf("/w/CSF.pdf", "/w/CSF.pdf"),
+            store.sightings.value!!.sortedBy { it.at }.map { it.filePath },
+        )
+    }
+
     @Test
     fun `a file no notice claims is taken as loose once its notice had time to come`() = runTest {
         val store = store()
@@ -231,6 +281,72 @@ class SightingStoreTest {
     }
 
     @Test
+    fun `a file that never reads is given up on, and says so`() = runTest {
+        onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16))
+        val store = store()
+        store.record(listOf(notice("CSF.pdf")))
+        var reads = 0
+
+        repeat(Sighting.MAX_READ_ATTEMPTS + 3) {
+            store.classifyPending {
+                reads++
+                null
+            }
+        }
+
+        assertEquals(
+            "read until the attempts ran out, then left alone",
+            Sighting.MAX_READ_ATTEMPTS,
+            reads
+        )
+        val sighting = store.sightings.value!!.single()
+        assertTrue(sighting.unreadable)
+        val reloaded = store().also { it.open() }.sightings.value!!.single()
+        assertEquals(
+            "the count survives a restart",
+            Sighting.MAX_READ_ATTEMPTS,
+            reloaded.readFailures
+        )
+    }
+
+    // Deleted from WhatsApp's folder, or out of reach while all-files access was
+    // revoked: each pass counted a failed read, and five passes later the card
+    // said the file could not be read -- and never read it again once it was back.
+    @Test
+    fun `a file gone from disk is missing, not unreadable, and is read once it is back`() =
+        runTest {
+            val file = DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16)
+            onDisk = listOf(file)
+            val store = store()
+            store.record(listOf(notice("CSF.pdf")))
+            onDisk = emptyList()
+            var reads = 0
+
+            repeat(Sighting.MAX_READ_ATTEMPTS + 1) {
+                store.classifyPending {
+                    reads++
+                    null
+                }
+            }
+
+            assertEquals("nothing on disk to read", 0, reads)
+            val gone = store.sightings.value!!.single()
+            assertTrue(gone.missing)
+            assertFalse("a missing file is not a damaged one", gone.unreadable)
+
+            onDisk = listOf(file)
+            store.classifyPending {
+                reads++
+                Classification(DocumentKind.INE)
+            }
+
+            assertEquals(1, reads)
+            val back = store.sightings.value!!.single()
+            assertEquals(DocumentKind.INE, back.classification?.kind)
+            assertFalse(back.missing)
+        }
+
+    @Test
     fun `a found file is read once, and a read that failed is asked again`() = runTest {
         onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16))
         val store = store()
@@ -273,5 +389,59 @@ class SightingStoreTest {
         reopened.open()
 
         assertEquals(DocumentKind.INE, reopened.sightings.value!!.single().classification?.kind)
+    }
+
+    // The window keeps its rows by the notice's time, while WhatsApp may write a
+    // file days after the notice: a row trimmed out left its file unclaimed, and
+    // the file came back as a loose document -- read by OCR, queued and
+    // uploaded a second time, and shown again without its chat or number.
+    @Test
+    fun `a file whose row left the window is not taken again as loose`() = runTest {
+        val store = store()
+        onDisk = listOf(DocumentFile("/w/Late.pdf", "Late.pdf", 900_000L, 16))
+        store.record(listOf(notice("Late.pdf", at = 1_000L)))
+        assertTrue(store.sightings.value!!.single().found)
+
+        store.record(
+            (1..SightingStore.MAX_SIGHTINGS).map {
+                notice("Doc$it.pdf", at = 2_000L + it)
+            }
+        )
+        clock = 10_000_000L
+        store.adoptLooseFiles()
+
+        assertTrue(store.sightings.value!!.none { it.filePath == "/w/Late.pdf" })
+        assertEquals(
+            "and a store opened afresh remembers it",
+            0,
+            store().let {
+                it.adoptLooseFiles()
+                it.sightings.value!!.count { row -> row.filePath == "/w/Late.pdf" }
+            },
+        )
+    }
+
+    // OCR takes seconds a page, and every trigger of the intake runs it.
+    @Test
+    fun `two passes at once read a file once`() = runTest {
+        onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16))
+        val store = store()
+        store.record(listOf(notice("CSF.pdf", at = 1_000L)))
+        val reads = AtomicInteger()
+        val bothReading = CountDownLatch(2)
+        val read = { _: File ->
+            reads.incrementAndGet()
+            bothReading.countDown()
+            bothReading.await(OVERLAP_MILLIS, TimeUnit.MILLISECONDS)
+            Classification(DocumentKind.CSF)
+        }
+
+        coroutineScope { repeat(2) { launch(Dispatchers.IO) { store.classifyPending(read) } } }
+
+        assertEquals(1, reads.get())
+    }
+
+    private companion object {
+        const val OVERLAP_MILLIS = 500L
     }
 }

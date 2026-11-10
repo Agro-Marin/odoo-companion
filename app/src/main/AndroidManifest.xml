@@ -30,6 +30,11 @@
          sender; asked from the WhatsApp card only. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
+    <!-- From Android 17, an Odoo or a phone system on a local address is
+         reachable only with this runtime permission; without it a connection
+         times out. Asked for only when one of them is local (LocalNetwork). -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
     <!-- The softphone: the company line's calls, carried over the data
          connection as a calling app the system knows of, through Core-Telecom. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -79,12 +84,6 @@
         <meta-data
             android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions" />
-
-        <!-- Play services fetches ML Kit's OCR and QR models when the app is
-             installed, so the first document is not read before they exist. -->
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="ocr,barcode" />
 
         <activity
             android:name=".ui.MainActivity"

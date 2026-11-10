@@ -26,15 +26,15 @@ android {
     defaultConfig {
         applicationId = "com.odoocompanion"
         minSdk = 29
-        // compileSdk is at least 37 because androidx.core 1.19.0 refuses to link
+        // compileSdk is at least 37 because androidx.core 1.19 refuses to link
         // below it; 37.2 is the newest stable platform, and a minor level adds
         // APIs without changing behaviour, which only targetSdk does.
-        // targetSdk stays at 36 because Robolectric 4.16.1 refuses to emulate
-        // above it -- "Package targetSdkVersion=37 > maxSdkVersion=36" fails
-        // every test class before it runs -- and targetSdk is the SDK the whole
-        // suite runs at. Raising this to 37 means the tests stop running, not
-        // that they run against 37.
-        targetSdk = 36
+        // targetSdk is that behaviour: 37 puts every handset under Android 17's
+        // rules for apps that target it. The one this app meets is local network
+        // access -- an Odoo or a phone system on a LAN address needs the
+        // ACCESS_LOCAL_NETWORK runtime permission (LocalNetwork, DeviceHealth).
+        // The suite runs at targetSdk, under Robolectric 4.17.
+        targetSdk = 37
         // An MDM cannot push an APK over one carrying the same versionCode, so
         // this has to move with every build a fleet is meant to receive.
         versionCode = 6
@@ -130,7 +130,14 @@ android {
             // rather than streamed, it raised OutOfMemoryError at both 192 MB
             // and 256 MB, below the app's own 36 MB cap. Kept at 256 MB to
             // leave Robolectric its own headroom.
-            all { it.maxHeapSize = "256m" }
+            all {
+                it.maxHeapSize = "256m"
+                // Robolectric 4.17 sets a FileDescriptor's descriptor through
+                // jdk.internal.access.SharedSecrets, which java.base does not
+                // export: without this every Robolectric test failed before it
+                // ran, "Failed to interact with raw FileDescriptor internals".
+                it.jvmArgs("--add-exports", "java.base/jdk.internal.access=ALL-UNNAMED")
+            }
         }
     }
 }

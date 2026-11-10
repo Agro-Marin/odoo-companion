@@ -2,6 +2,8 @@ package com.odoocompanion.net
 
 import android.app.Application
 import com.odoocompanion.config.Settings
+import com.odoocompanion.push.PushKeyLookup
+import com.odoocompanion.softphone.SoftphoneLookup
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -231,5 +233,51 @@ class OdooClientTest {
         val timedOut = OdooClient(impatient).post(settings(), "calllog", "{}")
             as UploadOutcome.Retry
         assertFalse(timedOut.reason, timedOut.linkDown)
+    }
+
+    // `status` proves the delivery; the counters only tally it. Reading them
+    // threw on any other shape, and the drain recorded the parser's own message
+    // under "Cannot build a request". Refusing the reply over them instead
+    // retried a delivered batch for ever and stopped every pass behind it.
+    @Test
+    fun `a success whose counters are mistyped is still a delivery`() = runTest {
+        listOf("""{"n":2}""", "\"2\"", "2.0").forEach { accepted ->
+            server.enqueue(
+                MockResponse(
+                    body = """{"status":"success","service":"remote_mobile",""" +
+                        """"accepted":$accepted}""",
+                ),
+            )
+
+            val outcome = OdooClient().post(settings(), "calllog", "{}")
+
+            assertTrue("$accepted: $outcome", outcome is UploadOutcome.Success)
+        }
+    }
+
+    @Test
+    fun `a hint the server mistyped is ignored, not fatal`() = runTest {
+        server.enqueue(
+            MockResponse(
+                body = """{"status":"success","accepted":1,"max_payload_bytes":[1],""" +
+                    """"skipped_indexes":[{"i":0}]}""",
+            ),
+        )
+
+        val outcome = OdooClient().post(settings(), "calllog", "{}")
+
+        assertEquals(UploadOutcome.Success(1, 0, 0), outcome)
+    }
+
+    @Test
+    fun `a lookup whose reply is mistyped is unavailable, not a parser failure`() = runTest {
+        server.enqueue(MockResponse(body = """{"service":{"name":"remote_mobile"}}"""))
+        server.enqueue(MockResponse(body = """{"service":"remote_mobile","vapid_public_key":{}}"""))
+
+        val softphone = OdooClient().softphone(settings()) as SoftphoneLookup.Unavailable
+        val push = OdooClient().pushKey(settings()) as PushKeyLookup.Unavailable
+
+        assertTrue(softphone.reason, softphone.reason.contains("not the Odoo endpoint"))
+        assertFalse(push.reason, push.reason.contains("JsonPrimitive"))
     }
 }

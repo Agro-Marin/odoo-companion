@@ -44,12 +44,16 @@ status=0
 # Every @Serializable class must still have its generated serializer. R8 may
 # rename it -- the compiler plugin references it statically, so a new name is
 # harmless -- but it must not have been removed.
-serializable=$(grep -rl '^@Serializable' "$SRC" | xargs -r grep -h '^data class' \
-    | sed 's/^data class \([A-Za-z0-9_]*\).*/\1/' | sort -u)
+# Any package, any visibility: the WhatsApp store's classes live in whatsapp/,
+# and StoredSightings is private -- matched under net/ and as a bare `data
+# class` only, both were reported dropped, or never looked at, while R8 kept them.
+serializable=$(grep -rl '^@Serializable' "$SRC" \
+    | xargs -r grep -hE '^(private |internal )?data class' \
+    | sed -E 's/^(private |internal )?data class ([A-Za-z0-9_]*).*/\2/' | sort -u)
 [ -n "$serializable" ] || { echo "found no @Serializable classes -- check the source layout" >&2; exit 1; }
 
 for cls in $serializable; do
-    if grep -q "com\.odoocompanion\.net\.$cls\$\$serializer ->" "$MAPPING"; then
+    if grep -qE "^com\.odoocompanion\.[a-z.]+\.$cls\\\$\\\$serializer ->" "$MAPPING"; then
         echo "  ok    $cls\$\$serializer kept"
     else
         echo "  FAIL  $cls\$\$serializer was dropped by R8" >&2
@@ -70,7 +74,7 @@ dex = b"".join(p.read_bytes() for p in sorted(work.glob("classes*.dex")))
 keys = set()
 for path in src.rglob("*.kt"):
     text = path.read_text()
-    for cls in re.finditer(r"@Serializable\s+data class \w+\(", text):
+    for cls in re.finditer(r"@Serializable\s+(?:private |internal )?data class \w+\(", text):
         depth, end = 1, cls.end()
         while depth:
             depth += {"(": 1, ")": -1}.get(text[end], 0)

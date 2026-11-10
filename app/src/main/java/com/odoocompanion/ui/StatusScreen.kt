@@ -37,7 +37,12 @@ data class StatusPanel(
     val lastError: StatusLine?,
     val lastAttempt: StatusLine?,
     val queues: OutboxCounts,
+    val held: HeldQueue?,
 )
+
+// Rows collected for an enrolment the handset no longer has, and which one the
+// newest of them is for: never sent to this server unless someone says so.
+data class HeldQueue(val rows: Int, val enrollment: String, val collectedFor: String)
 
 object StatusScreen {
     fun panel(
@@ -45,10 +50,15 @@ object StatusScreen {
         health: HealthReport,
         queues: OutboxCounts,
         softphoneWanted: Boolean,
+        localNetworkWanted: Boolean,
         now: Long = System.currentTimeMillis(),
     ): StatusPanel {
-        val blockers =
-            health.blockers(settings.callLogEnabled, settings.recordingsEnabled, softphoneWanted)
+        val blockers = health.blockers(
+            settings.callLogEnabled,
+            settings.recordingsEnabled,
+            softphoneWanted,
+            localNetworkWanted,
+        )
         val alerts = buildList {
             val cap = settings.payloadLimit(now)
             if (cap in 1..<SMALLEST_MOBILE_CAP_BYTES) {
@@ -72,37 +82,20 @@ object StatusScreen {
             lastAttempt = StatusLine.Since(R.string.status_last_attempt, settings.lastAttemptAt)
                 .takeIf { settings.lastAttemptAt > settings.lastUploadAt },
             queues = queues,
+            held = queues.heldFor
+                ?.takeIf { queues.held > 0 && settings.enrollment != null }
+                ?.let { HeldQueue(queues.held, it, describe(it)) },
         )
     }
 
-    // The panel as one list, in reading order.
-    fun lines(
-        settings: Settings,
-        health: HealthReport,
-        queues: OutboxCounts,
-        softphoneWanted: Boolean,
-        now: Long = System.currentTimeMillis(),
-    ): List<StatusLine> {
-        val panel = panel(settings, health, queues, softphoneWanted, now)
-        val undeliverable = panel.alerts.filter { it.text in UNDELIVERABLE_TEXTS }
-        return buildList {
-            val enrolment =
-                if (panel.enrolled) R.string.status_enrolled else R.string.status_not_enrolled
-            add(StatusLine.Say(enrolment))
-            if (panel.managed) add(StatusLine.Say(R.string.status_managed))
-            addAll(panel.alerts - undeliverable.toSet())
-            add(panel.lastUpload)
-            panel.lastError?.let(::add)
-            panel.lastAttempt?.let(::add)
-            add(StatusLine.Count(R.string.status_queued_positions, queues.positions))
-            add(StatusLine.Count(R.string.status_queued_calls, queues.calls))
-            add(StatusLine.Count(R.string.status_queued_recordings, queues.recordings))
-            addAll(undeliverable)
-        }
+    // "odoo.example.com, phone-17": an enrolment as a person knows it. The base
+    // URL in it is already canonical, so what is left after the scheme -- a
+    // port that is not the default, a path -- is part of which server it was:
+    // the host alone named two Odoos on one machine alike.
+    fun describe(enrollment: String): String {
+        val server = enrollment.substringAfter('@').substringAfter("://")
+        return "$server, ${enrollment.substringBefore('@')}"
     }
-
-    private val UNDELIVERABLE_TEXTS =
-        setOf(R.plurals.status_undeliverable, R.string.status_undeliverable_hint)
 
     const val SMALLEST_MOBILE_CAP_BYTES = 8L * 1024 * 1024
 
@@ -114,6 +107,7 @@ object StatusScreen {
         Blocker.CALL_LOG_PERMISSION_MISSING -> R.string.status_call_log_permission_missing
         Blocker.RECORDING_STORAGE_MISSING -> R.string.status_recording_storage_missing
         Blocker.MICROPHONE_MISSING -> R.string.status_microphone_missing
+        Blocker.LOCAL_NETWORK_MISSING -> R.string.status_local_network_missing
     }
 
     // The last delivery and the last error are two lines, not one: a drain can

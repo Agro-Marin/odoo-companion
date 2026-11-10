@@ -32,6 +32,7 @@ class LocationQueue(
         fixes: List<LocationFix>,
         windowSeconds: Long,
         minMoveMetres: Long = DEFAULT_MIN_MOVE_METRES,
+        enrollment: String? = null,
     ): Boolean {
         if (fixes.isEmpty()) return false
         val moving = fixes.filter { worthKeeping(it, minMoveMetres) }
@@ -46,10 +47,11 @@ class LocationQueue(
                     kind = OutboxKind.LOCATION,
                     payload = WireJson.encodeToString(fix),
                     createdAt = queuedAt,
+                    enrollment = enrollment,
                 )
             },
         )
-        val depth = trimToBound()
+        val depth = trimToBound(enrollment)
         val at = now()
         val due = UploadCadence.dueNow(
             queued = depth.queued,
@@ -84,11 +86,13 @@ class LocationQueue(
         return true
     }
 
-    private suspend fun trimToBound(): QueueDepth {
-        val depth = dao.depthOf(OutboxKind.LOCATION)
+    // The depth is this enrolment's, which is what the cadence asks about; the
+    // trim keeps the newest fixes of any, so a previous enrolment's go first.
+    private suspend fun trimToBound(enrollment: String?): QueueDepth {
+        val depth = dao.depthOf(OutboxKind.LOCATION, enrollment = enrollment)
         if (depth.queued <= OutboxLimits.MAX_QUEUED_FIXES) return depth
         dao.trimOldest(OutboxKind.LOCATION, OutboxLimits.TRIMMED_FIXES)
-        return dao.depthOf(OutboxKind.LOCATION)
+        return dao.depthOf(OutboxKind.LOCATION, enrollment = enrollment)
     }
 
     companion object {

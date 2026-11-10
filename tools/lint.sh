@@ -85,10 +85,18 @@ fi
 # counterparty's phone number into logcat, into every bug report, and into
 # whatever the OEM ships logs to. The directory is the useful diagnostic --
 # it names the per-OEM folder -- and holds nothing personal.
-echo "== no recording paths in log statements =="
+# The same holds for what WhatsApp and the call log say about a person: a
+# chat's or sender's name, a phone number, an RFC, a document's label, the
+# number a call came from. Testing one against null logs only that it is there,
+# which is allowed; anything else that names it inside a log call fails.
+echo "== no recording paths or personal fields in log statements =="
 leaked=$(python3 - <<'PYEOF'
 import pathlib, re, sys
 bad = []
+PERSONAL = re.compile(
+    r"\.(chat|sender|senderPhone|phone|rfc|label|number|contactName|remote)\b"
+    r"(?!\s*[!=]=\s*null)"
+)
 for path in pathlib.Path("app/src/main").rglob("*.kt"):
     text = path.read_text()
     def closing(index, opener, closer):
@@ -111,7 +119,7 @@ for path in pathlib.Path("app/src/main").rglob("*.kt"):
         if rest.lstrip(" ").startswith("{"):
             index = closing(index + 1 + len(rest) - len(rest.lstrip(" ")), "{", "}")
         call = text[match.start():index + 1]
-        if "absolutePath" in call or "filePath" in call:
+        if "absolutePath" in call or "filePath" in call or PERSONAL.search(call):
             line = text[:match.start()].count("\n") + 1
             bad.append(f"{path}:{line}: {call.splitlines()[0].strip()}")
 print("\n".join(bad))
@@ -119,7 +127,8 @@ PYEOF
 )
 if [ -n "$leaked" ]; then
     echo "$leaked" >&2
-    echo "a recording filename holds the other party's phone number; log the directory" >&2
+    echo "a recording filename holds the other party's phone number, and these fields" \
+        "name a person; log the directory, a count or a presence" >&2
     status=1
 fi
 

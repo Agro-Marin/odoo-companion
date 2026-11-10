@@ -19,7 +19,8 @@ class StatusScreenPolicyTest {
         storage: Boolean = true,
         battery: Boolean = true,
         microphone: Boolean = true,
-    ) = HealthReport(location, background, callLog, storage, battery, microphone)
+        localNetwork: Boolean = true,
+    ) = HealthReport(location, background, callLog, storage, battery, microphone, localNetwork)
 
     private val enrolled = Settings(
         baseUrl = "https://odoo.example.com",
@@ -27,30 +28,41 @@ class StatusScreenPolicyTest {
         token = "t",
     )
 
-    private val empty = OutboxCounts(0, 0, 0, 0)
+    private val empty = OutboxCounts(0, 0, 0, 0, 0)
 
     private fun lines(
         settings: Settings = enrolled,
         report: HealthReport = health(),
         queues: OutboxCounts = empty,
         softphoneWanted: Boolean = false,
-    ) = StatusScreen.lines(settings, report, queues, softphoneWanted)
+        localNetworkWanted: Boolean = false,
+        now: Long = System.currentTimeMillis(),
+    ): List<StatusLine> {
+        val panel =
+            StatusScreen.panel(settings, report, queues, softphoneWanted, localNetworkWanted, now)
+        return panel.alerts + listOfNotNull(panel.lastUpload, panel.lastError, panel.lastAttempt)
+    }
 
     @Test
     fun `a healthy enrolled phone names no blocker`() {
         val shown = lines()
 
-        assertEquals(StatusLine.Say(R.string.status_enrolled), shown.first())
+        assertTrue(
+            StatusScreen.panel(
+                enrolled,
+                health(),
+                empty,
+                softphoneWanted = false,
+                localNetworkWanted = false
+            ).enrolled
+        )
         assertFalse(shown.any { it.text == StatusScreen.textFor(Blocker.LOCATION_MISSING) })
     }
 
     @Test
     fun `a cap too small for any recording names the provisioning mistake`() {
-        val shown = StatusScreen.lines(
+        val shown = lines(
             enrolled.copy(maxPayloadBytes = 1024 * 1024, maxPayloadLearnedAt = 1),
-            health(),
-            empty,
-            softphoneWanted = false,
             now = 2,
         )
 
@@ -60,20 +72,14 @@ class StatusScreenPolicyTest {
         )
         assertFalse(
             "what was learned a day ago may have been raised since",
-            StatusScreen.lines(
+            lines(
                 enrolled.copy(maxPayloadBytes = 1024 * 1024, maxPayloadLearnedAt = 0),
-                health(),
-                empty,
-                softphoneWanted = false,
                 now = PAYLOAD_LIMIT_TTL_MILLIS,
             ).any { it.text == R.string.status_small_cap },
         )
         assertFalse(
-            StatusScreen.lines(
+            lines(
                 enrolled.copy(maxPayloadBytes = 50L * 1024 * 1024, maxPayloadLearnedAt = 1),
-                health(),
-                empty,
-                softphoneWanted = false,
                 now = 2,
             ).any { it.text == R.string.status_small_cap },
         )
@@ -111,19 +117,34 @@ class StatusScreenPolicyTest {
     fun `the hint only appears with something to act on`() {
         assertFalse(lines().any { it.text == R.string.status_undeliverable_hint })
 
-        val stuck = lines(queues = OutboxCounts(1, 2, 3, 4))
+        val stuck = lines(queues = OutboxCounts(1, 2, 3, 0, 4))
 
         assertTrue(StatusLine.Quantity(R.plurals.status_undeliverable, 4) in stuck)
         assertTrue(stuck.any { it.text == R.string.status_undeliverable_hint })
     }
 
     @Test
-    fun `every queue is counted, including the empty ones`() {
-        val shown = lines(queues = OutboxCounts(7, 8, 9, 0))
+    fun `rows held for a previous enrolment are named by its server and device`() {
+        val queues = empty.copy(held = 3, heldFor = "phone-01@https://old.example.com/odoo")
 
-        assertTrue(StatusLine.Count(R.string.status_queued_positions, 7) in shown)
-        assertTrue(StatusLine.Count(R.string.status_queued_calls, 8) in shown)
-        assertTrue(StatusLine.Count(R.string.status_queued_recordings, 9) in shown)
+        val held = StatusScreen.panel(enrolled, health(), queues, false, false).held
+
+        assertEquals(
+            HeldQueue(3, "phone-01@https://old.example.com/odoo", "old.example.com/odoo, phone-01"),
+            held,
+        )
+        assertEquals(
+            "nothing to send them to before there is an enrolment",
+            null,
+            StatusScreen.panel(Settings(), health(), queues, false, false).held,
+        )
+    }
+
+    @Test
+    fun `every queue is counted, including the empty ones`() {
+        val queues = OutboxCounts(7, 0, 9, 2, 0)
+
+        assertEquals(queues, StatusScreen.panel(enrolled, health(), queues, false, false).queues)
     }
 
     @Test
@@ -167,6 +188,45 @@ class StatusScreenPolicyTest {
         assertFalse(
             "no extension, no prompt",
             lines(report = health(microphone = false)).any { it.text == blocker },
+        )
+    }
+
+    // Measured on an emulator: moved from one Odoo on a host to another on the
+    // same host, the band named both "10.0.2.2", and could not say which
+    // server the held rows were for.
+    @Test
+    fun `a held enrolment is named by the server it was for, port and path included`() {
+        assertEquals(
+            "10.0.2.2:18650, phone-01",
+            StatusScreen.describe("phone-01@http://10.0.2.2:18650")
+        )
+        assertEquals(
+            "odoo.example.com, phone-01",
+            StatusScreen.describe(
+                Settings("https://Odoo.Example.com:443/", "phone-01", "t").enrollment!!
+            ),
+        )
+        assertEquals(
+            "example.com/erp, phone-01",
+            StatusScreen.describe("phone-01@https://example.com/erp")
+        )
+    }
+
+    // From Android 17 a LAN Odoo without the grant times out: the queue grew
+    // with only "timeout" as the last error.
+    @Test
+    fun `a local server without local network access says so`() {
+        val blocker = StatusLine.Say(R.string.status_local_network_missing)
+
+        assertTrue(
+            blocker in lines(report = health(localNetwork = false), localNetworkWanted = true)
+        )
+        assertFalse(
+            "a cloud server needs no such access",
+            blocker in lines(report = health(localNetwork = false), localNetworkWanted = false),
+        )
+        assertFalse(
+            blocker in lines(report = health(localNetwork = true), localNetworkWanted = true)
         )
     }
 }

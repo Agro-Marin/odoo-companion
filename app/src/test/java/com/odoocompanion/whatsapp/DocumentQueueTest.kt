@@ -4,10 +4,15 @@ import android.app.Application
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.data.CompanionDatabase
+import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxKind
+import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.net.DocumentMetadata
 import com.odoocompanion.net.WireJson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -21,6 +26,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -70,6 +77,9 @@ class DocumentQueueTest {
 
     private fun queue() = DocumentQueue(store, dao) { 5L }
 
+    private fun queue(deadReason: String?) =
+        mapOf("/w/CSF.pdf" to QueuedFileState("/w/CSF.pdf", deadReason))
+
     @Test
     fun `only a CSF, an INE or a passport is queued, once, with what the phone knows`() = runTest {
         seen(
@@ -112,7 +122,6 @@ class DocumentQueueTest {
     @Test
     fun `what the queue holds says where each document stands`() {
         val csf = Sighting(
-            key = "k",
             app = WhatsAppNotices.WHATSAPP,
             chat = "Yop",
             sender = "Yop",
@@ -126,14 +135,43 @@ class DocumentQueueTest {
         val queued = csf.copy(queued = true)
         assertEquals(
             UploadState.QUEUED,
-            WhatsAppIntake.uploadStateOf(queued, mapOf("/w/CSF.pdf" to false)),
+            WhatsAppIntake.uploadStateOf(queued, queue(null)),
         )
         assertEquals(
             UploadState.SET_ASIDE,
-            WhatsAppIntake.uploadStateOf(queued, mapOf("/w/CSF.pdf" to true)),
+            WhatsAppIntake.uploadStateOf(queued, queue(DeadReason.REFUSED)),
         )
         assertEquals(UploadState.DELIVERED, WhatsAppIntake.uploadStateOf(queued, emptyMap()))
         val other = csf.copy(classification = Classification(DocumentKind.OTHER))
         assertNull(WhatsAppIntake.uploadStateOf(other, emptyMap()))
+    }
+
+    // A notice, the folder watch, the poll and the screen each run the intake.
+    @Test
+    fun `two intakes at once queue a document once`() = runTest {
+        seen("CSF.pdf" to DocumentKind.CSF)
+        val bothLooking = CountDownLatch(2)
+        val overlapping = object : OutboxDao by dao {
+            override suspend fun filesQueued(kind: String): List<String> {
+                val queued = dao.filesQueued(kind)
+                bothLooking.countDown()
+                bothLooking.await(OVERLAP_MILLIS, TimeUnit.MILLISECONDS)
+                return queued
+            }
+        }
+
+        coroutineScope {
+            repeat(2) {
+                launch(Dispatchers.IO) {
+                    DocumentQueue(store, overlapping) { 5L }.queueClassified()
+                }
+            }
+        }
+
+        assertEquals(listOf("/w/CSF.pdf"), dao.filesQueued(OutboxKind.DOCUMENT))
+    }
+
+    private companion object {
+        const val OVERLAP_MILLIS = 500L
     }
 }

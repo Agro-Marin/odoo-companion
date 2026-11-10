@@ -22,12 +22,24 @@
     <string name="status_queued_positions">Queued positions: %1$d</string>
     <string name="status_queued_calls">Queued calls: %1$d</string>
     <string name="status_queued_recordings">Queued recordings: %1$d</string>
+    <string name="status_queued_documents">Queued documents: %1$d</string>
+    <plurals name="status_held">
+        <item quantity="one">%1$d record collected for %2$s is held, not sent to this server</item>
+        <item quantity="other">%1$d records collected for %2$s are held, not sent to this server</item>
+    </plurals>
+    <string name="action_held_send">Send here</string>
+    <string name="action_held_discard">Discard</string>
+    <string name="held_send_title">Send to this server?</string>
+    <string name="held_send_message">They were collected for %1$s. Send them here only if this server is the same Odoo under a new address or a renamed device.</string>
+    <string name="held_discard_title">Discard them?</string>
+    <string name="held_discard_message">Positions are deleted; calls, recordings and documents are set aside and removed in 90 days. None of them will be sent.</string>
     <plurals name="status_undeliverable">
         <item quantity="one">%1$d record could not be delivered and is no longer being retried</item>
         <item quantity="other">%1$d records could not be delivered and are no longer being retried</item>
     </plurals>
     <string name="status_call_log_permission_missing">Call sync is on but the call-log permission is missing — no calls are being read</string>
     <string name="status_microphone_missing">The company line is set up but the microphone permission is missing — it does not ring here</string>
+    <string name="status_local_network_missing">Odoo or the phone system is on the local network but local network access is not allowed — nothing reaches it</string>
     <string name="status_recording_storage_missing">Call recordings are on but this app has no access to the recordings folder — no audio is being harvested</string>
     <string name="status_small_cap">Server accepts only %1$s per upload: in Odoo, put this device in the Mobile Phone category</string>
     <string name="status_undeliverable_hint">Fix the device in Odoo and they will be retried automatically</string>
@@ -93,6 +105,7 @@
     <string name="figure_positions">Positions</string>
     <string name="figure_calls">Calls</string>
     <string name="figure_recordings">Recordings</string>
+    <string name="figure_documents">Documents</string>
     <string name="config_location_interval_short">Fix every (s)</string>
     <string name="config_upload_window_short">Batch window (s)</string>
     <string name="action_grant_short">Grant</string>
@@ -119,10 +132,13 @@
     <string name="whatsapp_kind_other">Other document: stays on the phone</string>
     <string name="whatsapp_kind_pending">Reading the document…</string>
     <string name="whatsapp_kind_unread">Not read: the file is missing</string>
+    <string name="whatsapp_kind_unreadable">Not read: the file could not be read</string>
     <string name="whatsapp_item_rfc">RFC %1$s</string>
     <string name="whatsapp_item_no_notice">no number: there was no notice</string>
     <string name="whatsapp_upload_waiting">goes to Odoo</string>
     <string name="whatsapp_upload_queued">⏳ queued for Odoo</string>
     <string name="whatsapp_upload_done">✅ in Odoo</string>
     <string name="whatsapp_upload_failed">⚠️ Odoo did not take it</string>
+    <string name="whatsapp_upload_gone">⚠️ the file left WhatsApp before it was sent</string>
+    <string name="whatsapp_upload_withdrawn">discarded: collected for a previous enrolment</string>
 </resources>

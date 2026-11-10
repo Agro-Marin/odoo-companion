@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -145,6 +146,26 @@ class DeviceConfigTest {
 
         config.enrol("https://two.example.com", "phone-01", "token")
         assertFalse(config.current().serverNamesItself)
+    }
+
+    @Test
+    fun `a base url spelled another way is the same server and the same enrolment`() = runTest {
+        val config = config()
+        config.enrol("https://odoo.example.com", "phone-01", "token")
+        config.learnServerNamesItself()
+        val before = config.current().enrollment
+
+        config.enrol("HTTPS://Odoo.Example.com:443/", "phone-01", "token")
+
+        assertTrue("nothing about the server changed", config.current().serverNamesItself)
+        assertEquals("so its queue is not held", before, config.current().enrollment)
+        assertNotEquals(
+            before,
+            Settings(
+                baseUrl = "https://odoo.example.com/other",
+                identifier = "phone-01"
+            ).enrollment,
+        )
     }
 
     @Test

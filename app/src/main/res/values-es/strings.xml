@@ -21,6 +21,18 @@
     <string name="status_queued_positions">Posiciones en cola: %1$d</string>
     <string name="status_queued_calls">Llamadas en cola: %1$d</string>
     <string name="status_queued_recordings">Grabaciones en cola: %1$d</string>
+    <string name="status_queued_documents">Documentos en cola: %1$d</string>
+    <plurals name="status_held">
+        <item quantity="one">%1$d registro reunido para %2$s está retenido y no se envía a este servidor</item>
+        <item quantity="many">%1$d registros reunidos para %2$s están retenidos y no se envían a este servidor</item>
+        <item quantity="other">%1$d registros reunidos para %2$s están retenidos y no se envían a este servidor</item>
+    </plurals>
+    <string name="action_held_send">Enviar aquí</string>
+    <string name="action_held_discard">Descartar</string>
+    <string name="held_send_title">¿Enviar a este servidor?</string>
+    <string name="held_send_message">Se reunieron para %1$s. Envíalos aquí solo si este servidor es el mismo Odoo con otra dirección o el mismo dispositivo con otro nombre.</string>
+    <string name="held_discard_title">¿Descartarlos?</string>
+    <string name="held_discard_message">Las posiciones se borran; las llamadas, grabaciones y documentos se apartan y se eliminan en 90 días. Ninguno se enviará.</string>
     <plurals name="status_undeliverable">
         <item quantity="one">%1$d registro no se pudo entregar y ya no se reintenta</item>
         <item quantity="many">%1$d registros no se pudieron entregar y ya no se reintentan</item>
@@ -28,6 +40,7 @@
     </plurals>
     <string name="status_call_log_permission_missing">La sincronización de llamadas está activa pero falta el permiso de registro de llamadas: no se está leyendo ninguna</string>
     <string name="status_microphone_missing">La línea de la empresa está configurada pero falta el permiso de micrófono — no suena aquí</string>
+    <string name="status_local_network_missing">Odoo o la central telefónica están en la red local pero el acceso a la red local no está permitido — no les llega nada</string>
     <string name="status_recording_storage_missing">Las grabaciones de llamada están activas pero la app no tiene acceso a la carpeta de grabaciones: no se está recolectando audio</string>
     <string name="status_undeliverable_hint">Corrige el dispositivo en Odoo y se reintentarán automáticamente</string>
     <string name="status_last_attempt">Último intento: %1$s</string>
@@ -92,6 +105,7 @@
     <string name="figure_positions">Posiciones</string>
     <string name="figure_calls">Llamadas</string>
     <string name="figure_recordings">Grabaciones</string>
+    <string name="figure_documents">Documentos</string>
     <string name="config_location_interval_short">Posición cada (s)</string>
     <string name="config_upload_window_short">Agrupar envíos (s)</string>
     <string name="action_grant_short">Conceder</string>
@@ -118,10 +132,13 @@
     <string name="whatsapp_kind_other">Otro documento: no sale del teléfono</string>
     <string name="whatsapp_kind_pending">Leyendo el documento…</string>
     <string name="whatsapp_kind_unread">Sin leer: falta el archivo</string>
+    <string name="whatsapp_kind_unreadable">Sin leer: el archivo no se pudo leer</string>
     <string name="whatsapp_item_rfc">RFC %1$s</string>
     <string name="whatsapp_item_no_notice">sin número: no hubo aviso</string>
     <string name="whatsapp_upload_waiting">se subirá a Odoo</string>
     <string name="whatsapp_upload_queued">⏳ en cola para Odoo</string>
     <string name="whatsapp_upload_done">✅ subido a Odoo</string>
     <string name="whatsapp_upload_failed">⚠️ Odoo no lo aceptó</string>
+    <string name="whatsapp_upload_gone">⚠️ el archivo salió de WhatsApp antes de enviarse</string>
+    <string name="whatsapp_upload_withdrawn">descartado: reunido para un alta anterior</string>
 </resources>

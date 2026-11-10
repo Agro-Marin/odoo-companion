@@ -51,6 +51,15 @@ data class Settings(
     val governedKeys: Set<String>
         get() = if (managed) managedKeys else emptySet()
 
+    // Which server and device record a queued row was collected for, written on
+    // every row: the payload cap and the server's self-naming are forgotten when
+    // either changes (pointAt), and the queue follows the same two values. A
+    // rotated token keeps it. The identifier cannot hold '@', so the server
+    // reads off after the first one.
+    val enrollment: String?
+        get() = "$identifier@${canonicalBaseUrl(baseUrl)}"
+            .takeIf { baseUrl.isNotBlank() && identifier.isNotBlank() }
+
     override fun toString(): String =
         "Settings(baseUrl=$baseUrl, identifier=$identifier, token=${token.redacted()}, " +
             "locationIntervalSeconds=$locationIntervalSeconds, " +
@@ -129,6 +138,13 @@ fun refusesCleartext(value: String, cleartextPermitted: (host: String) -> Boolea
 
 fun isUsableBaseUrl(value: String): Boolean = value.trim().toHttpUrlOrNull() != null
 
+// The server a base URL names, spelled one way: scheme and host in lower case,
+// no default port, no trailing slash. "https://Odoo.example.com/" reaches the
+// endpoint "https://odoo.example.com" does, and a policy that respelled it held
+// the whole queue as another server's and forgot what the server had said.
+fun canonicalBaseUrl(value: String): String =
+    value.trim().toHttpUrlOrNull()?.toString()?.trimEnd('/') ?: value.trim()
+
 fun isUsableIdentifier(value: String): Boolean =
     value.trim().let { it.isNotEmpty() && IDENTIFIER_PATTERN.matches(it) }
 
@@ -144,8 +160,12 @@ private val IDENTIFIER_PATTERN = Regex("[A-Za-z0-9._~-]+")
 class DeviceConfig(
     private val store: DataStore<Preferences>,
     private val cleartextPermitted: (host: String) -> Boolean = { true },
+    // Told the enrolment a save or a policy is moving the handset off, before
+    // the move is stored: what the queue holds without a stamp is that one's.
+    private val leaving: suspend (enrollment: String) -> Unit = {},
 ) {
-    constructor(context: Context) : this(storeFor(context), ::cleartextPermittedFor)
+    constructor(context: Context, leaving: suspend (enrollment: String) -> Unit = {}) :
+        this(storeFor(context), ::cleartextPermittedFor, leaving)
 
     val settings: Flow<Settings> = store.data.map { it.toSettings() }
 
@@ -201,7 +221,7 @@ class DeviceConfig(
             fun <T> put(key: Preferences.Key<T>, value: T?) {
                 if (value != null && key.name !in governed) prefs[key] = value
             }
-            prefs.pointAt(baseUrl, identifier)
+            prefs.moveTo(baseUrl, identifier)
             put(TOKEN, form.token.trim())
             put(CALL_LOG_ENABLED, form.callLogEnabled)
             put(RECORDINGS_ENABLED, form.recordingsEnabled)
@@ -233,11 +253,21 @@ class DeviceConfig(
         else -> null
     }
 
+    // Called inside the edit, so the queue's unstamped rows are claimed before
+    // the new enrolment is stored: should the process die between the two, the
+    // rows carry the enrolment still in force, which is where they belong.
+    private suspend fun MutablePreferences.moveTo(baseUrl: String?, identifier: String?) {
+        val before = toSettings().enrollment
+        pointAt(baseUrl, identifier)
+        if (before != null && before != toSettings().enrollment) leaving(before)
+    }
+
     // What was learned from a server belongs to what it was learned from:
     // whether it names itself is a fact about the server, and its payload cap
     // is a setting on the device record. A rotated token keeps both.
     private fun MutablePreferences.pointAt(baseUrl: String?, identifier: String?) {
-        val newServer = baseUrl != null && this[BASE_URL] != baseUrl
+        val newServer = baseUrl != null &&
+            canonicalBaseUrl(this[BASE_URL].orEmpty()) != canonicalBaseUrl(baseUrl)
         val newDevice = newServer || (identifier != null && this[IDENTIFIER] != identifier)
         if (newServer) remove(SERVER_NAMES_ITSELF)
         if (newDevice) {
@@ -259,7 +289,7 @@ class DeviceConfig(
 
             prefs[MANAGED] = values.policyPresent
             prefs[MANAGED_KEYS] = values.presentKeys
-            prefs.pointAt(baseUrl, values.identifier)
+            prefs.moveTo(baseUrl, values.identifier)
             values.token?.let { prefs[TOKEN] = it }
             values.callLogEnabled?.let { prefs[CALL_LOG_ENABLED] = it }
             values.recordingsEnabled?.let { prefs[RECORDINGS_ENABLED] = it }
@@ -301,6 +331,7 @@ class DeviceConfig(
         minMoveMetres = minMoveMetres,
     )
 
+    @VisibleForTesting
     internal suspend fun clearEnrollment() {
         store.edit { prefs ->
             prefs.remove(BASE_URL)
@@ -370,6 +401,7 @@ class DeviceConfig(
 
     // Absent is not the same as zero here: absent is what a handset upgrading
     // from a build that cursored on a timestamp looks like.
+    @VisibleForTesting
     internal suspend fun clearCallLogIdCursor() {
         store.edit { prefs -> prefs.remove(CALL_LOG_ID_CURSOR) }
     }

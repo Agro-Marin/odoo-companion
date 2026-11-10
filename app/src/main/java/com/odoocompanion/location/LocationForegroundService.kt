@@ -54,6 +54,7 @@ class LocationForegroundService : LifecycleService() {
                     fixes,
                     settings?.uploadWindowSeconds ?: DEFAULT_UPLOAD_WINDOW_SECONDS,
                     settings?.minMoveMetres ?: DEFAULT_MIN_MOVE_METRES,
+                    settings?.enrollment,
                 )
                 if (due && settings != null) {
                     SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)

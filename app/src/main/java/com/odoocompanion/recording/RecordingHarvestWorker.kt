@@ -21,6 +21,7 @@ class RecordingHarvestWorker(context: Context, params: WorkerParameters) :
         val queued = RecordingHarvest(
             dao = app.database.outbox(),
             root = Environment.getExternalStorageDirectory(),
+            enrollment = settings.enrollment,
         ).queueNew()
 
         if (queued > 0 && SyncScheduler.UPLOAD_FOLLOWS !in tags) {

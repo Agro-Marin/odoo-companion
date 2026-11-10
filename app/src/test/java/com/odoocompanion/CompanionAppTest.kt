@@ -47,6 +47,38 @@ class CompanionAppTest {
         .constraints
         .requiredNetworkType
 
+    private fun liveIds(name: String) = WorkManager.getInstance(app)
+        .getWorkInfosForUniqueWork(name)
+        .get()
+        .filterNot { it.state.isFinished }
+        .map { it.id }
+
+    // Measured on an emulator, moved off a server that did not answer: "Send
+    // here" waited 34 s for an upload already backing off against the old one,
+    // which KEEP kept -- and WorkManager's backoff reaches five hours, the
+    // periodic upload's too. The backoff was earned by a link that is gone.
+    @Test
+    fun `a new enrolment does not wait out the backoff the old server earned`() = runTest {
+        app.startup.join()
+        app.config.enrol("https://old.example.com", "phone-01", "t")
+        app.applyConfiguration()
+        SyncScheduler.uploadNow(app, wifiOnlyUploads = false)
+        val waiting = liveIds(SyncScheduler.UPLOAD_NOW)
+        val periodic = liveIds(SyncScheduler.UPLOAD_PERIODIC)
+
+        app.config.enrol("https://old.example.com", "phone-01", "rotated")
+        app.applyConfiguration()
+        assertEquals("a reconcile that moved nothing", waiting, liveIds(SyncScheduler.UPLOAD_NOW))
+        assertEquals(periodic, liveIds(SyncScheduler.UPLOAD_PERIODIC))
+
+        app.config.enrol("https://new.example.com", "phone-01", "t")
+        app.applyConfiguration()
+        val fresh = liveIds(SyncScheduler.UPLOAD_NOW)
+        assertEquals(1, fresh.size)
+        assertFalse("the old request was replaced", fresh.single() in waiting)
+        assertFalse(liveIds(SyncScheduler.UPLOAD_PERIODIC).single() in periodic)
+    }
+
     @Test
     fun `startup keeps the stored wifi-only constraint`() = runTest {
         app.startup.join()

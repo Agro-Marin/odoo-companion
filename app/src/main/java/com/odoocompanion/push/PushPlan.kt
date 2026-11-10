@@ -1,9 +1,8 @@
 package com.odoocompanion.push
 
-import kotlinx.serialization.json.Json
+import com.odoocompanion.net.asJsonObject
+import com.odoocompanion.net.primitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /** What a wake-up from Odoo asks the handset to do. */
 enum class PushCommand(val wire: String) {
@@ -13,10 +12,8 @@ enum class PushCommand(val wire: String) {
 
     companion object {
         fun parse(content: ByteArray): PushCommand? {
-            val command = runCatching {
-                Json.parseToJsonElement(content.decodeToString())
-                    .jsonObject["command"]?.jsonPrimitive?.contentOrNull
-            }.getOrNull()
+            val command = content.decodeToString().asJsonObject()
+                .primitive("command")?.contentOrNull
             return entries.firstOrNull { it.wire == command }
         }
     }

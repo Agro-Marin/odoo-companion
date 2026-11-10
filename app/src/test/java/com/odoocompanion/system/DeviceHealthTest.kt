@@ -43,6 +43,7 @@ class DeviceHealthTest {
                 callLogWanted = false,
                 recordingsWanted = false,
                 softphoneWanted = false,
+                localNetworkWanted = false,
             ),
         )
     }
@@ -66,6 +67,7 @@ class DeviceHealthTest {
                 callLogWanted = true,
                 recordingsWanted = false,
                 softphoneWanted = false,
+                localNetworkWanted = false,
             ).isEmpty(),
         )
     }
@@ -85,6 +87,7 @@ class DeviceHealthTest {
                 callLogWanted = false,
                 recordingsWanted = false,
                 softphoneWanted = false,
+                localNetworkWanted = false,
             ),
         )
     }
@@ -103,6 +106,7 @@ class DeviceHealthTest {
                 callLogWanted = false,
                 recordingsWanted = false,
                 softphoneWanted = false,
+                localNetworkWanted = false,
             ),
         )
     }
@@ -118,6 +122,7 @@ class DeviceHealthTest {
                     callLogWanted = false,
                     recordingsWanted = true,
                     softphoneWanted = false,
+                    localNetworkWanted = false,
                 ),
         )
         assertFalse(
@@ -126,6 +131,7 @@ class DeviceHealthTest {
                     callLogWanted = false,
                     recordingsWanted = false,
                     softphoneWanted = false,
+                    localNetworkWanted = false,
                 ),
         )
     }
@@ -170,6 +176,7 @@ class DeviceHealthTest {
                 callLogWanted = true,
                 recordingsWanted = false,
                 softphoneWanted = false,
+                localNetworkWanted = false,
             ),
         )
         assertTrue(
@@ -177,6 +184,7 @@ class DeviceHealthTest {
                 callLogWanted = false,
                 recordingsWanted = false,
                 softphoneWanted = false,
+                localNetworkWanted = false,
             ).isEmpty(),
         )
     }
@@ -187,6 +195,7 @@ class DeviceHealthTest {
             callLogWanted = false,
             recordingsWanted = false,
             softphoneWanted = false,
+            localNetworkWanted = false,
             sdk = 29,
         )
 
@@ -197,8 +206,20 @@ class DeviceHealthTest {
 
     @Test
     fun `recordings ask for the legacy storage pair only where it is the access`() {
-        val android10 = DeviceHealth.wantedPermissions(false, true, false, sdk = 29)
-        val android12 = DeviceHealth.wantedPermissions(false, true, false, sdk = 31)
+        val android10 = DeviceHealth.wantedPermissions(
+            false,
+            true,
+            false,
+            localNetworkWanted = false,
+            sdk = 29
+        )
+        val android12 = DeviceHealth.wantedPermissions(
+            false,
+            true,
+            false,
+            localNetworkWanted = false,
+            sdk = 31
+        )
 
         assertTrue(Manifest.permission.READ_EXTERNAL_STORAGE in android10)
         assertTrue(Manifest.permission.WRITE_EXTERNAL_STORAGE in android10)
@@ -212,11 +233,23 @@ class DeviceHealthTest {
     fun `notifications are asked for where they are a runtime permission`() {
         assertFalse(
             Manifest.permission.POST_NOTIFICATIONS in
-                DeviceHealth.wantedPermissions(true, false, false, sdk = 32),
+                DeviceHealth.wantedPermissions(
+                    true,
+                    false,
+                    false,
+                    localNetworkWanted = false,
+                    sdk = 32
+                ),
         )
         assertTrue(
             Manifest.permission.POST_NOTIFICATIONS in
-                DeviceHealth.wantedPermissions(true, false, false, sdk = 33),
+                DeviceHealth.wantedPermissions(
+                    true,
+                    false,
+                    false,
+                    localNetworkWanted = false,
+                    sdk = 33
+                ),
         )
     }
 
@@ -227,18 +260,30 @@ class DeviceHealthTest {
         assertFalse(report.microphoneGranted)
         assertTrue(
             Blocker.MICROPHONE_MISSING in
-                report.blockers(callLogWanted = false, recordingsWanted = false, true),
+                report.blockers(
+                    callLogWanted = false,
+                    recordingsWanted = false,
+                    true,
+                    localNetworkWanted = false
+                ),
         )
         assertFalse(
             Blocker.MICROPHONE_MISSING in
-                report.blockers(callLogWanted = false, recordingsWanted = false, false),
+                report.blockers(
+                    callLogWanted = false,
+                    recordingsWanted = false,
+                    false,
+                    localNetworkWanted = false
+                ),
         )
 
         Shadows.shadowOf(application).grantPermissions(Manifest.permission.RECORD_AUDIO)
 
         assertFalse(
             Blocker.MICROPHONE_MISSING in
-                DeviceHealth.report(application).blockers(false, false, softphoneWanted = true),
+                DeviceHealth.report(
+                    application
+                ).blockers(false, false, softphoneWanted = true, localNetworkWanted = false),
         )
     }
 
@@ -246,11 +291,64 @@ class DeviceHealthTest {
     fun `the microphone is asked for only when the company line is set up`() {
         assertTrue(
             Manifest.permission.RECORD_AUDIO in
-                DeviceHealth.wantedPermissions(false, false, softphoneWanted = true, sdk = 33),
+                DeviceHealth.wantedPermissions(
+                    false,
+                    false,
+                    softphoneWanted = true,
+                    localNetworkWanted = false,
+                    sdk = 33
+                ),
         )
         assertFalse(
             Manifest.permission.RECORD_AUDIO in
-                DeviceHealth.wantedPermissions(false, false, softphoneWanted = false, sdk = 33),
+                DeviceHealth.wantedPermissions(
+                    false,
+                    false,
+                    softphoneWanted = false,
+                    localNetworkWanted = false,
+                    sdk = 33
+                ),
         )
+    }
+
+    @Test
+    fun `local network access is asked for from Android 17, and only for a local server`() {
+        val local = Manifest.permission.ACCESS_LOCAL_NETWORK
+
+        assertTrue(local in DeviceHealth.wantedPermissions(false, false, false, true, sdk = 37))
+        assertFalse(
+            "a cloud server costs no nearby-devices prompt",
+            local in DeviceHealth.wantedPermissions(false, false, false, false, sdk = 37),
+        )
+        assertFalse(
+            "below 17 there is no such permission",
+            local in DeviceHealth.wantedPermissions(false, false, false, true, sdk = 36),
+        )
+    }
+
+    @Test
+    @Config(sdk = [37])
+    fun `on Android 17 a local server without the grant is a blocker until it is granted`() {
+        assertTrue(
+            Blocker.LOCAL_NETWORK_MISSING in
+                DeviceHealth.report(application).blockers(false, false, false, true),
+        )
+        assertFalse(
+            Blocker.LOCAL_NETWORK_MISSING in
+                DeviceHealth.report(application).blockers(false, false, false, false),
+        )
+
+        Shadows.shadowOf(application).grantPermissions(Manifest.permission.ACCESS_LOCAL_NETWORK)
+
+        assertFalse(
+            Blocker.LOCAL_NETWORK_MISSING in
+                DeviceHealth.report(application).blockers(false, false, false, true),
+        )
+    }
+
+    @Test
+    @Config(sdk = [36])
+    fun `below Android 17 the access is never missing`() {
+        assertTrue(DeviceHealth.report(application).localNetworkGranted)
     }
 }

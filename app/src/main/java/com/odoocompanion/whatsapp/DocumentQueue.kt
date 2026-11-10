@@ -2,13 +2,17 @@ package com.odoocompanion.whatsapp
 
 import android.content.Context
 import com.odoocompanion.CompanionApp
+import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
+import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.net.DocumentMetadata
 import com.odoocompanion.net.WireJson
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.debug
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 
 // Puts in the outbox each document the handset read as one that goes to Odoo.
@@ -17,28 +21,34 @@ import kotlinx.serialization.encodeToString
 class DocumentQueue(
     private val store: SightingStore,
     private val dao: OutboxDao,
+    private val enrollment: String? = null,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun queueClassified(): Int {
+    // A notice, the folder watch, the poll and the screen each run the intake,
+    // and two at once each found the file unqueued and queued it twice.
+    suspend fun queueClassified(): Int = queueing.withLock {
         val ready = store.toUpload()
-        if (ready.isEmpty()) return 0
+        if (ready.isEmpty()) return@withLock 0
         val queued = dao.filesQueued(OutboxKind.DOCUMENT).toHashSet()
         // A resend that WhatsApp saved no new file for is the same file: it
         // goes once, and the server answers any later copy as a duplicate.
-        val fresh = ready.filter { sighting -> sighting.filePath?.let(queued::add) == true }
-        if (fresh.isNotEmpty()) dao.insertAll(fresh.map(::entryOf))
+        val fresh = ready.mapNotNull { sighting ->
+            sighting.filePath?.takeIf(queued::add)?.let { path -> entryOf(sighting, path) }
+        }
+        if (fresh.isNotEmpty()) dao.insertAll(fresh)
         store.markQueued(ready.mapNotNullTo(HashSet()) { it.filePath })
         debug(TAG) { "${ready.size} document(s) ready, ${fresh.size} queued" }
-        return fresh.size
+        fresh.size
     }
 
-    private fun entryOf(sighting: Sighting): OutboxEntry {
+    // The path exactly as the sighting holds it: the card finds the row by it.
+    private fun entryOf(sighting: Sighting, path: String): OutboxEntry {
         val read = sighting.classification
         return OutboxEntry(
             kind = OutboxKind.DOCUMENT,
             payload = WireJson.encodeToString(
                 DocumentMetadata(
-                    fileName = sighting.fileName ?: sighting.label,
+                    fileName = path.substringAfterLast('/'),
                     mimetype = PDF,
                     kind = read?.kind?.name?.lowercase(),
                     rfc = read?.rfc,
@@ -52,13 +62,16 @@ class DocumentQueue(
                     receivedAt = sighting.at,
                 ),
             ),
-            filePath = sighting.filePath,
+            filePath = path,
             createdAt = now(),
+            enrollment = enrollment,
         )
     }
 
     private companion object {
         const val TAG = "DocumentQueue"
+
+        val queueing = Mutex()
 
         // Only PDFs are read, so only PDFs are ever queued.
         const val PDF = "application/pdf"
@@ -73,24 +86,27 @@ object WhatsAppIntake {
     suspend fun process(context: Context) {
         val app = CompanionApp.from(context)
         app.whatsapp.classifyPending(reader::classify)
-        val queued = DocumentQueue(app.whatsapp, app.database.outbox()).queueClassified()
-        if (queued == 0) return
-        val settings = app.config.currentOrNull() ?: return
+        val settings = app.config.currentOrNull()
+        val queued = DocumentQueue(app.whatsapp, app.database.outbox(), settings?.enrollment)
+            .queueClassified()
+        if (queued == 0 || settings == null) return
         if (settings.isEnrolled) SyncScheduler.uploadNow(context, settings.wifiOnlyUploads)
     }
 
     // A file the outbox no longer holds, of a document marked queued: it was
     // delivered. Read off the queue rather than recorded, since only the
     // drain knows, and it knows nothing of WhatsApp.
-    fun uploadStateOf(sighting: Sighting, queue: Map<String, Boolean>): UploadState? {
+    fun uploadStateOf(sighting: Sighting, queue: Map<String, QueuedFileState>): UploadState? {
         if (sighting.classification?.kind?.uploads != true) return null
         if (!sighting.queued) return UploadState.WAITING
-        return when (queue[sighting.filePath]) {
-            null -> UploadState.DELIVERED
-            true -> UploadState.SET_ASIDE
-            false -> UploadState.QUEUED
+        val row = queue[sighting.filePath] ?: return UploadState.DELIVERED
+        return when (row.deadReason) {
+            null -> UploadState.QUEUED
+            DeadReason.GONE -> UploadState.GONE
+            DeadReason.WITHDRAWN -> UploadState.WITHDRAWN
+            else -> UploadState.SET_ASIDE
         }
     }
 }
 
-enum class UploadState { WAITING, QUEUED, DELIVERED, SET_ASIDE }
+enum class UploadState { WAITING, QUEUED, DELIVERED, SET_ASIDE, GONE, WITHDRAWN }

@@ -54,6 +54,7 @@ SDK with `platforms;android-37.2` installed; `local.properties` must point at th
 tools/lint.sh [--fix] [--static-only] # ktlint + detekt (+ Android Lint)
 tools/check-release-wire.sh          # after assembleRelease: R8 kept the payload
 tools/smoke-test.sh <url> <id> <tok> # replay real payloads, assert every answer
+tools/sip-stub.py --cert … --key …   # a stand-in phone system: registers, rings on SIGUSR1
 ```
 
 **`tools/lint.sh` refuses a tool that is not the pinned version**, which is in
@@ -168,6 +169,11 @@ machine at `http://10.0.2.2:<port>`.
   deletes only the row (`FileKind.ownsFile = false`), and the 90-day purge of dead rows
   (`deadFilesBefore`) reads recording rows only. Before that query was scoped, purging
   a set-aside document would have deleted the customer's PDF from WhatsApp.
+  **And its row outlives a lost file.** A recording whose file is gone is deleted --
+  there is nothing for the harvest to queue again -- but a document's row is the
+  WhatsApp card's only memory of it, and once deleted the card read the empty queue as
+  delivered. It is set aside as `DeadReason.GONE`, which the undeliverable count leaves
+  out like `kept_on_disk`: no operator action brings the file back.
 - **The configured interval is the interval.** `app_restrictions.xml` calls
   `location_interval_seconds` "seconds between position reports" and the README
   repeats it, but `requestUpdates` set `setMinUpdateIntervalMillis` to *half* the
@@ -199,6 +205,12 @@ machine at `http://10.0.2.2:<port>`.
   `sdcard_rw` and then could not delete it, so every uploaded recording stayed on the
   phone for ever — the one level where `requestLegacyExternalStorage` is in force is
   the one where reading is not deleting.
+  **From Android 17 a local server is a fifth such input**: at `targetSdk` 37 an Odoo or a
+  phone system on a LAN address is reachable only with `ACCESS_LOCAL_NETWORK` (runtime,
+  *Nearby devices*), and without it every upload timed out after 20 s on an API 37 emulator
+  with nothing on the screen but the timeout. `LocalNetwork.anyLocal` decides from the base URL
+  and the softphone's domain (a name is resolved, off the main thread), and `blockers()` and
+  `wantedPermissions()` take `localNetworkWanted` like the other switches.
   `Environment.isExternalStorageManager` is unshimmable (Robolectric 4.14.1 does
   not shadow it) and throws on a device with no external volume, so the probe is
   guarded: a health check must never be what crashes the screen.
@@ -235,8 +247,10 @@ machine at `http://10.0.2.2:<port>`.
   notices the installed `versionCode` changing and calls `reviveUndecodable` once
   per upgrade. Without it a payload written by a newer queue format was dead for
   ever.
-- **Every drain is bounded and says when it stopped early.** Recordings have a
-  byte budget; JSON batches now have `BATCHES_PER_DRAIN`, and both set
+- **Every drain is bounded and says when it stopped early.** Files have one
+  byte budget per pass, on `DrainTally.bytesLeft`, shared by documents and
+  recordings -- each kind used to start its own, so a pass could push twice
+  `FILE_BYTES_PER_DRAIN`; JSON batches have `BATCHES_PER_DRAIN`, and both set
   `moreWorkPending` so `UploadWorker` chains another pass instead of running 100
   requests inside one WorkManager slot. Same shape as `CallLogReader.moreWaiting`.
 - **Harvest is for calls, not for everything with a waveform.**
@@ -298,6 +312,16 @@ machine at `http://10.0.2.2:<port>`.
   `collect-now` chain tags its collectors `UPLOAD_FOLLOWS`; a tagged worker queues
   and leaves the chained `UploadWorker` to drain, instead of enqueueing `upload-now`
   beside it — the third concurrent drain the outbox section counts.
+- **Collectors run one at a time, like the drain.** Each collector runs under three
+  work names (periodic, after a call or a notice, the `collect-now` chain), and
+  each decides what is new by reading before it writes — the call-log cursor, the
+  outbox's file list. Two at once queued the same call or file twice; for a
+  recording the first delivery deleted the file and the second row was counted as
+  `lost`. `CallLogSyncWorker`, `RecordingHarvest.queueNew`,
+  `DocumentQueue.queueClassified` and `SightingStore.classifyPending` (two OCR
+  passes over one PDF) each hold a process-wide `Mutex`; the tests force the
+  overlap with a latch and fail without it. They wait rather than `tryLock`: a pass
+  is short, and the second one sees what settled meanwhile.
 - **An http:// base URL is refused at enrolment on a build that cannot send it.**
   `NetworkSecurityPolicy.isCleartextTrafficPermitted(host)` is the platform's own
   answer, **asked per host** (`refusesCleartext`) because that is what OkHttp asks:
@@ -445,11 +469,11 @@ machine at `http://10.0.2.2:<port>`.
   unchanged.** `_payload_too_large` puts the device's real limit in the body
   (`"Request exceeds maximum size of NKB"`), which the client parsed into a log line
   and threw away while re-sending an identical batch, because `LOCATION_BATCH`,
-  `CALL_LOG_BATCH` and `MAX_RECORDING_BYTES` are compile-time constants. Now
+  `CALL_LOG_BATCH` and `MAX_FILE_BYTES` are compile-time constants. Now
   `UploadOutcome.TooLarge` carries the declared limit: a multi-row batch halves and
   retries within the same drain, a single row is charged, kept and deferred (raising the cap
   is an operator action, so `refused` would be wrong) and the revival bound above is
-  what stops it cycling. **`MAX_RECORDING_BYTES` is the same policy, not a second
+  what stops it cycling. **`MAX_FILE_BYTES` is the same policy, not a second
   one**: it is the 50 MB mobile-category cap divided by base64's 4/3, and a file over
   it takes the kept-and-charged path too, where it used to be `refused` outright.
   A 413 body now also carries `limit_bytes`, which the client prefers to the
@@ -458,7 +482,7 @@ machine at `http://10.0.2.2:<port>`.
   recording against a 1 MB cap pushed **74 MB** before it settled — 28 attempts, each
   streaming the full base64 body, because nothing remembered what the server had
   already said. `DeviceConfig.learnPayloadLimit` keeps it, `drainRecordings` asks
-  `client.recordingWireSize` before posting and declines to send what the server has
+  `client.wireSize` before posting and declines to send what the server has
   declared it will not take, and `learnPayloadLimit(0)` on any revival drops it so a
   raised cap is discovered — and **it expires after a day** (`PAYLOAD_LIMIT_TTL_MILLIS`),
   because on an emulator with no positions flowing a cap raised in Odoo was never
@@ -466,7 +490,7 @@ machine at `http://10.0.2.2:<port>`.
   the revival probe that would have dropped the cap was days away. Every success
   re-stamps it, so a working phone keeps the cap fresh for free. Same scenario after: **10 MB**, which is one probe per
   revival and is the cost of not going permanently blind to an operator's fix. The
-  size asked for is `RecordingBody.contentLength()` itself, not a second copy of the
+  size asked for is `FileBody.contentLength()` itself, not a second copy of the
   base64 arithmetic. The gap is reachable —
   `mixin_inbound_gate.max_payload_size` defaults to **1 MB** and `device_mobile`
   raises it to 50 MB only inside `create`, only when `device_category_id` is already
@@ -483,7 +507,7 @@ machine at `http://10.0.2.2:<port>`.
   retroactively.
 - **A verdict on one row never parks the queue.** A row the server ruled on — a
   500 from an ingest that raises on it, a single row over the cap, a recording over
-  the declared cap or over `MAX_RECORDING_BYTES` — goes through `deferRuledOn`:
+  the declared cap or over `MAX_FILE_BYTES` — goes through `deferRuledOn`:
   charged as a server fault, given its own `retryAfter`, excluded from the rest of
   the pass, and the drain goes on. Only the 500 took that path at first; a
   recording over the cap returned `RETRY`, and as the oldest row it headed every
@@ -529,7 +553,34 @@ machine at `http://10.0.2.2:<port>`.
   when the screen last happened to redraw.
 - **A learned server fact belongs to what it was learned from.** Whether the
   server names itself is forgotten on a new base URL; the payload cap, a setting
-  on the device record, is forgotten on a new base URL *or* identifier.
+  on the device record, is forgotten on a new base URL *or* identifier. "New" is
+  compared on `canonicalBaseUrl` (scheme and host lower-cased, default port and
+  trailing slash dropped), which is how OkHttp reaches the endpoint: a policy that
+  only respelled the URL forgot both facts, and would have held the queue.
+  **And so does a queued row.** `OutboxEntry.enrollment` is `Settings.enrollment`
+  (identifier and base URL) when the row was queued, and every live-queue read --
+  `take`, `countOf`, `depthOf`, the revivals, the status counts -- names the
+  enrolment it reads for; a null row (an upgrade's backlog, or a row queued while the
+  settings could not be read) is the current one's until the enrolment changes, when
+  `DeviceConfig`'s `leaving` callback, inside the same edit, stamps it with the one being
+  left (`claimUnstamped`) -- read as the next one's, a backlog behind an unreachable server
+  went to its replacement. Re-enrolment used to send
+  the old enrolment's calls and audio to the new server under the new device. Held
+  rows must not count as work: counted, `anythingArrivedLate` chained a drain after
+  every drain, for ever. They leave only by *Send here* (`adoptHeld`), *Discard*
+  (`deleteHeldPositions` + `withdrawHeld`, `DeadReason.WITHDRAWN`) or 90 days after
+  collection (`withdrawLongHeld`). The band and its buttons take one previous
+  enrolment, the newest (`HELD_FOR`): "Send here" on a dialog naming one server once
+  handed over every older enrolment's rows too. Another enrolment's exhausted rows
+  are held, not undeliverable -- no fix to this device ever sends them. A DAO default of `enrollment = null` reads only unstamped
+  rows: a test that counts a stamped producer's rows has to name the enrolment.
+  **A new enrolment is a new link, and starts without the old one's backoff.** Measured
+  on an emulator moved off a server that did not answer: *Send here* waited 34 s for an
+  `upload-now` already backing off against the old server, which `uploadNow`'s `KEEP`
+  kept -- WorkManager's backoff reaches five hours, the periodic upload's too. The
+  reconcile compares the enrolment with the one it last applied; on a move it
+  re-registers the periodic upload (`CANCEL_AND_REENQUEUE`) and replaces `upload-now`
+  (`uploadAfresh`), which *Send here* also uses.
 - **`skipped`, `duplicates` and `undecodable` are three different numbers.** The
   server read it and could not store it; the server already had it; this build
   could not decode it. Reporting them as one told an operator that a device
@@ -543,9 +594,17 @@ machine at `http://10.0.2.2:<port>`.
   `skipped_indexes` beside the counter, indexes into the batch as posted, and the
   drain sets aside exactly those rows (`refused` for a call, discarded for a fix)
   and deletes the rest. An older server sending only the count is believed as
-  before. Still unreachable in practice — `CallLogReader` filters blank numbers and
-  `CallDirection.of` never yields a word the server does not know — but the hole is
-  closed rather than documented.
+  before. Still unreachable in practice — `CallLogReader` sends a blank number only
+  with a `presentation` (below) and `CallDirection.of` never yields a word the
+  server does not know — but the hole is closed rather than documented.
+- **A call from a withheld number is a call.** `CallLogReader` dropped every row with
+  a blank number, so a missed call from a private number never reached Odoo. It now
+  reads `NUMBER_PRESENTATION` and sends a restricted, unknown or payphone call with an
+  empty number and `presentation` -- also when the row carries only telephony's
+  placeholder (`-1`, `-2`, `-3`), which used to upload as the number;
+  `device_phone_call` stores it with `caller_presentation` and no number (odoo
+  `phone.call`). A server older than that skips it, and the drain sets it aside as
+  `refused`, which the undeliverable count shows.
 - **A collector whose feature is off is cancelled, not merely not scheduled.**
   `schedulePeriodicWork` takes the whole `Settings` and reconciles: registering
   all three periodic workers unconditionally woke the process every 30 min and
@@ -567,7 +626,7 @@ machine at `http://10.0.2.2:<port>`.
   `<permission>` + `<uses-permission>` pair in the manifest the process dies on
   Android 10, 11, 12 and 12L — every launch, boot and worker — while `minSdk = 29`
   claims to support them. Nothing caught it because **every other test runs at the
-  default Robolectric SDK, which is `targetSdk` (36)**, and the crash is gone at
+  default Robolectric SDK, which is `targetSdk` (37)**, and the crash is gone at
   API 33+ where `Api33Impl` takes over. `MinSdkStartupTest` is pinned `@Config(sdk
   = [29])`. Robolectric does not model the install-time grant of a self-declared
   signature permission (`PackageManager.checkPermission` says GRANTED while
@@ -634,7 +693,9 @@ tests are plain JVM, where `android.util.Log` is an unmocked stub.
 
 ## Privacy posture
 
-A recording's path is personal data and never reaches a log — `tools/lint.sh` gates it.
+A recording's path is personal data and never reaches a log — `tools/lint.sh` gates it,
+and with it any member naming a person (`chat`, `sender`, `phone`, `rfc`, `label`,
+`number`, `contactName`, `remote`) except in a test against `null`.
 The full security pass (what was checked, what was accepted, and why) is `README.md`'s
 "Privacy posture" section; read it before touching logging, backups, exported
 components or local storage.

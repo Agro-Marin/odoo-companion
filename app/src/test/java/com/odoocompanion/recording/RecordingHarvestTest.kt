@@ -9,6 +9,9 @@ import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.net.RecordingMetadata
 import com.odoocompanion.net.WireJson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -19,6 +22,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -206,5 +211,32 @@ class RecordingHarvestTest {
 
         assertEquals(43L, audioDurationSeconds(file))
         assertEquals(null, audioDurationSeconds(File(root, "missing.m4a")))
+    }
+
+    // The periodic harvest, the one a call's end asks for and the Sync now
+    // chain are three work names, and two of them at once each found the file
+    // unqueued. The first delivery deleted it, and the second row was then
+    // counted as a recording lost.
+    @Test
+    fun `two harvests at once queue a recording once`() = runTest {
+        recording("call_5512345678.m4a")
+        val bothInside = CountDownLatch(2)
+        fun overlapping() = RecordingHarvest(
+            dao,
+            root,
+            durationOf = {
+                bothInside.countDown()
+                bothInside.await(OVERLAP_MILLIS, TimeUnit.MILLISECONDS)
+                null
+            },
+        ) { clock }
+
+        coroutineScope { repeat(2) { launch(Dispatchers.IO) { overlapping().queueNew() } } }
+
+        assertEquals(1, dao.filesQueued(OutboxKind.RECORDING).size)
+    }
+
+    private companion object {
+        const val OVERLAP_MILLIS = 500L
     }
 }

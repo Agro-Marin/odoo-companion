@@ -29,6 +29,7 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputLayout
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
@@ -38,10 +39,12 @@ import com.odoocompanion.config.ManagedKey
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.OutboxCounts
 import com.odoocompanion.data.OutboxKind
+import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.databinding.ActivityMainBinding
 import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.DeviceHealth
+import com.odoocompanion.system.LocalNetwork
 import com.odoocompanion.whatsapp.ContactBook
 import com.odoocompanion.whatsapp.DocumentKind
 import com.odoocompanion.whatsapp.Sighting
@@ -49,13 +52,20 @@ import com.odoocompanion.whatsapp.UploadState
 import com.odoocompanion.whatsapp.WhatsAppIntake
 import com.odoocompanion.whatsapp.WhatsAppNotificationListener
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -84,6 +94,13 @@ class MainActivity : AppCompatActivity() {
 
     private var shownAlerts: List<String> = emptyList()
 
+    // Whether the screen last found Odoo or the phone system on a local address:
+    // what the grant button asks for is what the screen says is missing.
+    private var localNetworkShown = false
+
+    // What the held band offers to send or discard, as last drawn.
+    private var shownHeld: HeldQueue? = null
+
     private var alertsUnfolded = false
 
     // "Last upload: 2 minutes ago" is how long the phone has been silent, and an
@@ -100,7 +117,7 @@ class MainActivity : AppCompatActivity() {
     private var whatsappMissing: WhatsAppGrant? = null
 
     // Each document file in the outbox, and whether it was set aside.
-    private var documentQueue: Map<String, Boolean> = emptyMap()
+    private var documentQueue: Map<String, QueuedFileState> = emptyMap()
 
     override fun onResume() {
         super.onResume()
@@ -163,12 +180,13 @@ class MainActivity : AppCompatActivity() {
                 // upload: 2 minutes ago" on a phone nothing else redraws.
                 combine(
                     app.config.settings,
-                    app.database.outbox().counts(),
+                    queueCounts(),
                     refusal,
                     merge(healthChecks, minutes),
-                    app.softphones.configured,
-                ) { settings, counts, refused, _, softphone ->
-                    panelText(settings, counts, refused, softphone)
+                    combine(app.softphones.configured, localNetworkWanted(app), ::Pair),
+                ) { settings, counts, refused, _, (softphone, localNetwork) ->
+                    localNetworkShown = localNetwork
+                    panelText(settings, counts, refused, softphone, localNetwork)
                 }
                     .distinctUntilChanged()
                     .collect(::showPanel)
@@ -182,7 +200,7 @@ class MainActivity : AppCompatActivity() {
                     app.database.outbox().fileStates(OutboxKind.DOCUMENT),
                     merge(healthChecks, minutes),
                 ) { sightings, queue, _ ->
-                    documentQueue = queue.associate { it.filePath to it.dead }
+                    documentQueue = queue.associateBy { it.filePath }
                     WhatsAppPanel.card(
                         listenerOn = WhatsAppNotificationListener.isEnabled(this@MainActivity),
                         listenerConnected = WhatsAppNotificationListener.connected,
@@ -221,9 +239,14 @@ class MainActivity : AppCompatActivity() {
                 app.applyConfiguration()
                 val settings = app.config.current()
                 val softphone = app.softphones.current() != null
+                val localNetwork = localNetworkWanted(app, settings)
+                val health = DeviceHealth.report(this@MainActivity)
                 val missing = !LocationForegroundService.canRun(this@MainActivity) ||
-                    (softphone && !DeviceHealth.report(this@MainActivity).microphoneGranted)
-                if (settings.isEnrolled && missing) requestPermissions(settings, softphone)
+                    (softphone && !health.microphoneGranted) ||
+                    (localNetwork && !health.localNetworkGranted)
+                if (settings.isEnrolled && missing) {
+                    requestPermissions(settings, softphone, localNetwork)
+                }
 
                 binding.locationInterval.showSeconds(settings.locationIntervalSeconds)
                 binding.uploadWindow.showSeconds(settings.uploadWindowSeconds)
@@ -240,11 +263,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.heldSend.setOnClickListener { confirmHeld(send = true) }
+        binding.heldDiscard.setOnClickListener { confirmHeld(send = false) }
+
         binding.grantPermissions.setOnClickListener {
             showActions(false)
             lifecycleScope.launch {
                 val settings = app.config.current()
-                requestPermissions(settings, app.softphones.current() != null)
+                requestPermissions(
+                    settings,
+                    softphoneWanted = app.softphones.current() != null,
+                    localNetworkWanted = localNetworkShown,
+                )
                 requestBatteryExemption()
                 if (settings.recordingsEnabled) requestRecordingStorageAccess()
             }
@@ -293,14 +323,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestPermissions(settings: Settings, softphoneWanted: Boolean) {
+    private fun requestPermissions(
+        settings: Settings,
+        softphoneWanted: Boolean,
+        localNetworkWanted: Boolean,
+    ) {
         val wanted = DeviceHealth.wantedPermissions(
             callLogWanted = settings.callLogEnabled,
             recordingsWanted = settings.recordingsEnabled,
             softphoneWanted = softphoneWanted,
+            localNetworkWanted = localNetworkWanted,
         )
         permissionLauncher.launch(wanted.toTypedArray())
     }
+
+    // Whether Odoo or the phone system is on a local address. A name is
+    // resolved, so this runs off the main thread.
+    private suspend fun localNetworkWanted(app: CompanionApp, settings: Settings): Boolean =
+        withContext(Dispatchers.IO) {
+            LocalNetwork.anyLocal(
+                settings.baseUrl.takeIf { settings.isEnrolled },
+                app.softphones.current()?.domain,
+            )
+        }
+
+    // The same, as the status screen follows it: asked again on every resume,
+    // since a lookup that failed offline says nothing about the address.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun localNetworkWanted(app: CompanionApp): Flow<Boolean> = combine(
+        app.config.settings.map { it.baseUrl.takeIf { _ -> it.isEnrolled } },
+        app.softphones.domain,
+        healthChecks,
+    ) { baseUrl, domain, _ -> baseUrl to domain }
+        .mapLatest { (baseUrl, domain) -> LocalNetwork.anyLocal(baseUrl, domain) }
+        .flowOn(Dispatchers.IO)
+        .distinctUntilChanged()
 
     // Both fields are read back with toLongOrNull(), so the digits have to stay
     // machine-parseable: a locale-formatted number is what SetTextI18n asks for
@@ -410,6 +467,8 @@ class MainActivity : AppCompatActivity() {
                 UploadState.QUEUED -> R.string.whatsapp_upload_queued
                 UploadState.DELIVERED -> R.string.whatsapp_upload_done
                 UploadState.SET_ASIDE -> R.string.whatsapp_upload_failed
+                UploadState.GONE -> R.string.whatsapp_upload_gone
+                UploadState.WITHDRAWN -> R.string.whatsapp_upload_withdrawn
                 null -> null
             }
             listOfNotNull(
@@ -418,7 +477,12 @@ class MainActivity : AppCompatActivity() {
                 upload?.let(::getString),
             ).joinToString(" · ")
         } ?: getString(
-            if (sighting.found) R.string.whatsapp_kind_pending else R.string.whatsapp_kind_unread,
+            when {
+                sighting.unreadable -> R.string.whatsapp_kind_unreadable
+                sighting.missing -> R.string.whatsapp_kind_unread
+                sighting.found -> R.string.whatsapp_kind_pending
+                else -> R.string.whatsapp_kind_unread
+            },
         )
         return getString(
             R.string.whatsapp_item,
@@ -608,16 +672,67 @@ class MainActivity : AppCompatActivity() {
         val lastAttempt: String?,
         val lastError: String?,
         val queues: OutboxCounts,
+        val held: HeldQueue?,
     )
+
+    // The queue as the current enrolment sees it: what is its own, and what is
+    // held for another one.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun queueCounts() = CompanionApp.from(this).let { app ->
+        app.config.settings
+            .map { it.enrollment }
+            .distinctUntilChanged()
+            .flatMapLatest { app.database.outbox().counts(it) }
+    }
+
+    // Both ends are asked first: sending gives another organisation's records
+    // to this server, and discarding cannot be undone.
+    private fun confirmHeld(send: Boolean) {
+        val held = shownHeld ?: return
+        MaterialAlertDialogBuilder(this)
+            .setTitle(if (send) R.string.held_send_title else R.string.held_discard_title)
+            .setMessage(
+                if (send) {
+                    getString(R.string.held_send_message, held.collectedFor)
+                } else {
+                    getString(R.string.held_discard_message)
+                },
+            )
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(
+                if (send) R.string.action_held_send else R.string.action_held_discard,
+            ) { _, _ ->
+                val app = CompanionApp.from(this)
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val settings = app.config.currentOrNull() ?: return@launch
+                    val enrollment = settings.enrollment ?: return@launch
+                    val outbox = app.database.outbox()
+                    if (send) {
+                        outbox.adoptHeld(enrollment, held.enrollment)
+                        SyncScheduler.uploadAfresh(this@MainActivity, settings.wifiOnlyUploads)
+                    } else {
+                        outbox.deleteHeldPositions(enrollment, held.enrollment)
+                        outbox.withdrawHeld(enrollment, held.enrollment, System.currentTimeMillis())
+                    }
+                }
+            }
+            .show()
+    }
 
     private fun panelText(
         settings: Settings,
         counts: OutboxCounts,
         refused: Int?,
         softphoneWanted: Boolean,
+        localNetworkWanted: Boolean,
     ): PanelText {
-        val panel =
-            StatusScreen.panel(settings, DeviceHealth.report(this), counts, softphoneWanted)
+        val panel = StatusScreen.panel(
+            settings,
+            DeviceHealth.report(this),
+            counts,
+            softphoneWanted,
+            localNetworkWanted,
+        )
         return PanelText(
             enrolled = panel.enrolled,
             managed = panel.managed,
@@ -627,6 +742,7 @@ class MainActivity : AppCompatActivity() {
             lastAttempt = panel.lastAttempt?.let(::format),
             lastError = panel.lastError?.let(::format),
             queues = panel.queues,
+            held = panel.held,
         )
     }
 
@@ -650,6 +766,12 @@ class MainActivity : AppCompatActivity() {
             panel.queues.recordings,
             R.string.status_queued_recordings,
         )
+        binding.queueDocuments.showFigure(panel.queues.documents, R.string.status_queued_documents)
+        shownHeld = panel.held
+        binding.heldBand.isVisible = panel.held != null
+        binding.heldText.text = panel.held?.let {
+            resources.getQuantityString(R.plurals.status_held, it.rows, it.rows, it.collectedFor)
+        }
     }
 
     // One band however many alerts there are, so the form still fits the

@@ -7,16 +7,22 @@ import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.net.RecordingMetadata
 import com.odoocompanion.net.WireJson
 import com.odoocompanion.system.debug
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import java.io.File
 
 class RecordingHarvest(
     private val dao: OutboxDao,
     private val root: File,
+    private val enrollment: String? = null,
     private val durationOf: (File) -> Long? = ::audioDurationSeconds,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun queueNew(): Int {
+    // Three work names run a harvest -- the periodic one, the one a call's end
+    // asks for, and the Sync now chain -- and the outbox is its only memory of
+    // a file: two at once each found the file unqueued and queued it twice.
+    suspend fun queueNew(): Int = harvesting.withLock {
         // Live and dead rows alike: a recording set aside, or one uploaded
         // whose file could not be removed, must not be queued a second time.
         val alreadyQueued = dao.filesQueued(OutboxKind.RECORDING).toHashSet()
@@ -31,7 +37,7 @@ class RecordingHarvest(
             dao.insertAll(fresh)
             Log.i(TAG, "Queued ${fresh.size} recording(s)")
         }
-        return fresh.size
+        fresh.size
     }
 
     private fun entryFor(scanned: ScannedRecording): OutboxEntry {
@@ -50,11 +56,14 @@ class RecordingHarvest(
             ),
             filePath = file.absolutePath,
             createdAt = now(),
+            enrollment = enrollment,
         )
     }
 
     companion object {
         private const val TAG = "RecordingHarvest"
+
+        private val harvesting = Mutex()
 
         fun mimeTypeOf(file: File): String = when (file.extension.lowercase()) {
             "m4a", "mp4" -> "audio/mp4"

@@ -45,7 +45,9 @@ import org.unifiedpush.android.connector.UnifiedPush
 import java.io.File
 
 class CompanionApp : Application() {
-    val config: DeviceConfig by lazy { DeviceConfig(this) }
+    val config: DeviceConfig by lazy {
+        DeviceConfig(this) { leaving -> database.outbox().claimUnstamped(leaving) }
+    }
 
     val database: CompanionDatabase by lazy {
         Room.databaseBuilder(this, CompanionDatabase::class.java, "companion.db")
@@ -100,7 +102,11 @@ class CompanionApp : Application() {
         }
         retryWhatTheLastBuildCouldNotRead()
         val settings = config.current()
-        SyncScheduler.schedulePeriodicWork(this, settings)
+        val moved = settings.enrollment != null && reconciledEnrollment != null &&
+            settings.enrollment != reconciledEnrollment
+        settings.enrollment?.let { reconciledEnrollment = it }
+        SyncScheduler.schedulePeriodicWork(this, settings, newLink = moved)
+        if (moved) SyncScheduler.uploadAfresh(this, settings.wifiOnlyUploads)
         if (settings.isEnrolled) {
             LocationForegroundService.start(this)
         } else {
@@ -116,7 +122,7 @@ class CompanionApp : Application() {
         Log.i(TAG, "Odoo woke this handset: $command")
         when (command) {
             PushCommand.SYNC -> scope.launch {
-                val settings = config.current()
+                val settings = config.currentOrNull() ?: return@launch
                 if (settings.isEnrolled) {
                     SyncScheduler.collectAndUploadNow(this@CompanionApp, settings.wifiOnlyUploads)
                 }
@@ -194,7 +200,7 @@ class CompanionApp : Application() {
     }
 
     private suspend fun refreshPush() {
-        val settings = config.current()
+        val settings = config.currentOrNull() ?: return
         val lookup = if (settings.isEnrolled) {
             client.pushKey(settings)
         } else {
@@ -258,6 +264,10 @@ class CompanionApp : Application() {
     }
 
     private val reconfiguring = Mutex()
+
+    // The enrolment the last reconcile applied, to tell a move from a repeat;
+    // read and written under reconfiguring.
+    private var reconciledEnrollment: String? = null
 
     private fun installedVersion(): Long = runCatching {
         PackageInfoCompat.getLongVersionCode(

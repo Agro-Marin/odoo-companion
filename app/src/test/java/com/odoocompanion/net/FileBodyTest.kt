@@ -19,7 +19,7 @@ import org.junit.Test
 import java.io.File
 import java.util.Base64
 
-class RecordingBodyTest {
+class FileBodyTest {
     private lateinit var server: MockWebServer
 
     @Before
@@ -57,7 +57,7 @@ class RecordingBodyTest {
     fun `a recording at the size cap uploads without exhausting the heap`() = runTest {
         server.enqueue(MockResponse(body = """{"status":"success"}"""))
         val meta = """{"number":"+525512345678"}"""
-        val file = recordingOf(OutboxDrainer.MAX_RECORDING_BYTES.toInt())
+        val file = recordingOf(OutboxDrainer.MAX_FILE_BYTES.toInt())
 
         val outcome = OdooClient().post(settings(), "recording", file, metadata(meta))
 
@@ -65,7 +65,7 @@ class RecordingBodyTest {
 
         val envelope = meta.dropLast(1).length + ""","audio_b64":"""".length + """"}""".length
         assertEquals(
-            envelope + 4 * (OutboxDrainer.MAX_RECORDING_BYTES / 3),
+            envelope + 4 * (OutboxDrainer.MAX_FILE_BYTES / 3),
             server.takeRequest().bodySize,
         )
         file.delete()
@@ -91,7 +91,7 @@ class RecordingBodyTest {
 
     @Test
     fun `a recording body is sent once per attempt, never re-streamed by the transport`() {
-        val body = RecordingBody(
+        val body = FileBody(
             metadata("""{"number":"+52"}"""),
             recordingOf(16),
             "application/json".toMediaType(),

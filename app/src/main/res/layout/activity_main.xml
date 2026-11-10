@@ -12,8 +12,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/canvas">
+    android:layout_height="match_parent">
 
     <ScrollView
         android:id="@+id/formScroll"
@@ -27,7 +26,7 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:orientation="vertical">
 
             <!-- The name and, beside it, whether this phone is enrolled. -->
@@ -119,7 +118,7 @@
                     android:gravity="center_vertical"
                     android:textColor="@color/alert_ink"
                     android:textSize="13sp"
-                    android:drawableStart="@drawable/ic_alert" />
+                    app:drawableStartCompat="@drawable/ic_alert" />
 
                 <Button
                     android:id="@+id/alertGrant"
@@ -240,6 +239,64 @@
                             android:text="@string/figure_recordings" />
                     </LinearLayout>
 
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/queueDocuments"
+                            style="@style/Text.Companion.Figure"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <TextView
+                            style="@style/Text.Companion.Label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/figure_documents" />
+                    </LinearLayout>
+
+                    </LinearLayout>
+
+                    <!-- Rows collected for an enrolment the handset no longer
+                         has: held, never sent to this one unless asked. -->
+                    <LinearLayout
+                        android:id="@+id/heldBand"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/heldText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/alert_ink"
+                            android:textSize="13sp" />
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="end"
+                            android:orientation="horizontal">
+
+                            <Button
+                                android:id="@+id/heldSend"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/action_held_send" />
+
+                            <Button
+                                android:id="@+id/heldDiscard"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/action_held_discard" />
+                        </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

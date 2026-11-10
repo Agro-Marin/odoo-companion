@@ -76,6 +76,14 @@ check "a batch route names the rows it could not store" 200 "$BASE/calllog" "{\"
     {\"number\":\"\",\"direction\":\"incoming\",\"timestamp\":$((NOW + 600)),\"duration\":1}]}" \
     "$SERVICE" '"skipped":1' '"skipped_indexes":[1]'
 
+# CallLogReader sends a withheld caller this way: no number, and the
+# presentation. A server older than phone.call.caller_presentation skips it, as
+# it skips the blank number above.
+check "a call from a withheld number is stored without one" 200 "$BASE/calllog" "{\"calls\":[
+    {\"number\":\"\",\"direction\":\"missed\",\"timestamp\":$((NOW + 700)),\"duration\":0,
+     \"presentation\":\"restricted\"}]}" \
+    "$SERVICE" '"accepted":1'
+
 check "the raw integer an older queue still holds" 200 "$BASE/calllog" "{\"calls\":[
     {\"number\":\"$NUMBER\",\"direction\":\"1\",\"timestamp\":$((NOW + 1000)),\"duration\":7}]}" \
     '"accepted":1'

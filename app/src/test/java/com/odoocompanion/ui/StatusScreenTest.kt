@@ -31,6 +31,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class StatusScreenTest {
@@ -495,7 +496,11 @@ class StatusScreenTest {
     // Android 12 lets the person choose approximate. Only a precise grant used
     // to lead on to the all-the-time prompt, so an approximate one stopped at
     // "while using the app" -- the grant that goes quiet after a reboot.
+    // At SDK 36: Robolectric 4.17 at 37 answers a permission request itself, at
+    // once and denied, before a test can answer it as the person would. The
+    // rule here does not depend on the SDK.
     @Test
+    @Config(sdk = [36])
     fun `an approximate grant still leads on to the all-the-time prompt`() = runTest {
         val activity = open()
         settle()

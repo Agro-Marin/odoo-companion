@@ -8,9 +8,12 @@ import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.odoocompanion.CompanionApp
+import com.odoocompanion.config.Settings
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.debug
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class CallLogSyncWorker(context: Context, params: WorkerParameters) :
@@ -20,7 +23,14 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         val settings = app.config.currentOrNull() ?: return@withContext Result.retry()
         if (!settings.isEnrolled || !settings.callLogEnabled) return@withContext Result.success()
         if (!hasPermission()) return@withContext Result.success()
+        reading.withLock { collect(app, settings) }
+        Result.success()
+    }
 
+    // Three work names run this worker -- the periodic pass, the pass a call's
+    // end asks for and the Sync now chain. Two at once read from the same
+    // cursor and queued the same calls twice.
+    private suspend fun collect(app: CompanionApp, settings: Settings) {
         val reader = CallLogReader(applicationContext.contentResolver)
         val since = startingId(app, reader)
         val batch = reader.readSince(since)
@@ -30,7 +40,9 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         }
 
         if (batch.entries.isNotEmpty()) {
-            app.database.outbox().insertAll(batch.entries)
+            app.database.outbox().insertAll(
+                batch.entries.map { it.copy(enrollment = settings.enrollment) },
+            )
             if (SyncScheduler.UPLOAD_FOLLOWS !in tags) {
                 SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
             }
@@ -38,7 +50,6 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         if (batch.cursor > since) app.config.setCallLogIdCursor(batch.cursor)
 
         if (batch.moreWaiting) SyncScheduler.collectCallLogNow(applicationContext)
-        Result.success()
     }
 
     // Where this pass starts, which is the stored id except in the two cases
@@ -80,5 +91,7 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
 
     private companion object {
         const val TAG = "CallLogSyncWorker"
+
+        val reading = Mutex()
     }
 }

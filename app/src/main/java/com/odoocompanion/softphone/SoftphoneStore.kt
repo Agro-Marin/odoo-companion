@@ -24,6 +24,9 @@ class SoftphoneStore(private val store: DataStore<Preferences>) {
     /** Whether Odoo has handed this handset an extension, as the status screen asks. */
     val configured: Flow<Boolean> = store.data.map { it[USERNAME] != null }.distinctUntilChanged()
 
+    /** The phone system's host, whose address decides whether local network access is needed. */
+    val domain: Flow<String?> = store.data.map { it[DOMAIN] }.distinctUntilChanged()
+
     suspend fun current(): SoftphoneSettings? {
         val prefs = store.data.first()
         val username = prefs[USERNAME] ?: return null

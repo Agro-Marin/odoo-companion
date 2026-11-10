@@ -24,7 +24,14 @@ class DocumentClassifierTest {
 
     @Test
     fun `OCR noise in the title does not hide it`() {
-        assertEquals(DocumentKind.CSF, kindOf("C0NSTANCIA  DE SITUACION\nFISCAL"))
+        assertEquals(
+            DocumentKind.CSF,
+            kindOf("C0NSTANCIA  DE SITUACION\nFISCAL\nidCIF: 22091234567")
+        )
+        assertEquals(
+            DocumentKind.CSF,
+            kindOf("CEDULADEIDENTIFICACION FISCAL CONSTANCIADESITUACIÓN FISCAL")
+        )
     }
 
     @Test
@@ -42,16 +49,28 @@ class DocumentClassifierTest {
     }
 
     @Test
-    fun `an INE is told by its issuer, its title or its machine-readable zone`() {
-        assertEquals(DocumentKind.INE, kindOf("INSTITUTO NACIONAL ELECTORAL\nMÉXICO"))
-        assertEquals(DocumentKind.INE, kindOf("CREDENCIAL PARA VOTAR\nNOMBRE"))
-        assertEquals(DocumentKind.INE, kindOf("INSTITUTO FEDERAL ELECTORAL"))
+    fun `an INE is told by two of what its front prints, or its machine-readable zone`() {
+        assertEquals(
+            DocumentKind.INE,
+            kindOf("MÉXICO\nINSTITUTO NACIONAL ELECTORAL\nCREDENCIAL PARA VOTAR\nNOMBRE"),
+        )
+        assertEquals(
+            DocumentKind.INE,
+            kindOf("CREDENCIAL PARA VOTAR\nCURP PEGJ800101HDFRRN09"),
+        )
+        assertEquals(
+            DocumentKind.INE,
+            kindOf("INSTITUTO FEDERAL ELECTORAL\nCLAVE DE ELECTOR PRGRJN80010109H700"),
+        )
         assertEquals(DocumentKind.INE, kindOf("garbled\nIDMEX1234567890<<1234\n"))
     }
 
     @Test
-    fun `a passport is told by its word or its MRZ, however OCR reads the filler`() {
-        assertEquals(DocumentKind.PASSPORT, kindOf("ESTADOS UNIDOS MEXICANOS\nPASAPORTE"))
+    fun `a passport is told by its data page or its MRZ, however OCR reads the filler`() {
+        assertEquals(
+            DocumentKind.PASSPORT,
+            kindOf("ESTADOS UNIDOS MEXICANOS\nPASAPORTE PASSPORT\nApellidos / Surname\nPEREZ"),
+        )
         assertEquals(DocumentKind.PASSPORT, kindOf("P<MEXPEREZ<GARCIA<<JUAN<<<<<<<<<"))
         assertEquals(DocumentKind.PASSPORT, kindOf("PKUSASMITH<<JOHN<<<<<<<<<<<<<<"))
     }
@@ -78,5 +97,19 @@ class DocumentClassifierTest {
             DocumentKind.OTHER,
             kindOf("", listOf("https://example.com/?D3=1_PCA221013LF1"))
         )
+    }
+
+    // A title alone is not the document: each of these is what a customer may
+    // well send, and each was uploaded as an identity document or a constancia.
+    @Test
+    fun `a document that only mentions an identity document stays on the handset`() {
+        listOf(
+            "CONTRATO DE ARRENDAMIENTO. EL ARRENDATARIO, DE NACIONALIDAD MEXICANA, " +
+                "PRESENTA IDENTIFICACIÓN OFICIAL (INE O PASAPORTE).",
+            "ESTIMADO CLIENTE: PARA SU ALTA LE SOLICITAMOS SU CONSTANCIA DE SITUACIÓN " +
+                "FISCAL ACTUALIZADA. RFC: PCA221013LF1",
+            "PEDIDO 4411 TENIS COMPAS SPORT TALLA 27",
+            "COTIZACIÓN DE FERTILIZANTE, PAGO CON CREDENCIAL PARA VOTAR VIGENTE",
+        ).forEach { assertEquals(it, DocumentKind.OTHER, kindOf(it)) }
     }
 }

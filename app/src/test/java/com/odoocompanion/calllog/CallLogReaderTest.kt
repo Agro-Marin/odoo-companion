@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -28,6 +29,7 @@ internal data class Call(
     val duration: Long = 30,
     val cachedName: String? = null,
     val modified: Long = date,
+    val presentation: Int = CallLog.Calls.PRESENTATION_ALLOWED,
     // Zero means "let the provider assign one", which it does by position, the
     // way an insert would. A test that cares about ids sets them itself.
     val id: Long = 0,
@@ -46,6 +48,7 @@ internal class FakeCallLogProvider : ContentProvider() {
         lastSelection = selection
         lastLimit = uri.getQueryParameter(CallLog.Calls.LIMIT_PARAM_KEY)?.toIntOrNull()
         if (returnsNull) return null
+        if (selection?.startsWith(CallLog.Calls._ID) == true) onRead()
 
         val argument = selectionArgs?.firstOrNull()?.toLong() ?: 0
         var rows = withIds().filter { row ->
@@ -76,6 +79,7 @@ internal class FakeCallLogProvider : ContentProvider() {
                     CallLog.Calls.DATE -> row.date
                     CallLog.Calls.DURATION -> row.duration
                     CallLog.Calls.CACHED_NAME -> row.cachedName
+                    CallLog.Calls.NUMBER_PRESENTATION -> row.presentation
                     CallLog.Calls.LAST_MODIFIED -> row.modified
                     else -> null
                 }
@@ -99,6 +103,9 @@ internal class FakeCallLogProvider : ContentProvider() {
         var returnsNull = false
         var lastSelection: String? = null
         var lastLimit: Int? = null
+
+        // Runs inside every read of new calls, on the reading thread.
+        var onRead: () -> Unit = {}
     }
 }
 
@@ -111,6 +118,7 @@ class CallLogReaderTest {
     fun setUp() {
         FakeCallLogProvider.calls = emptyList()
         FakeCallLogProvider.returnsNull = false
+        FakeCallLogProvider.onRead = {}
         ShadowContentResolver.registerProviderInternal(
             CallLog.AUTHORITY,
             FakeCallLogProvider().apply { onCreate() },
@@ -196,6 +204,64 @@ class CallLogReaderTest {
 
         assertEquals(0, batch.entries.size)
         assertEquals(2, batch.cursor)
+    }
+
+    @Test
+    fun `a call from a withheld number is sent, with why it has none`() {
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "", date = 10, presentation = CallLog.Calls.PRESENTATION_RESTRICTED),
+            Call(number = "-2", date = 20, presentation = CallLog.Calls.PRESENTATION_RESTRICTED),
+            Call(number = null, date = 30, presentation = CallLog.Calls.PRESENTATION_PAYPHONE),
+            Call(number = "", date = 40, presentation = CallLog.Calls.PRESENTATION_UNKNOWN),
+            Call(number = "", date = 50, presentation = CallLog.Calls.PRESENTATION_ALLOWED),
+        )
+
+        val payloads = payloadsOf(reader().readSince(0))
+
+        assertEquals(
+            listOf("restricted", "restricted", "payphone", "unknown"),
+            payloads.map { it.getValue("presentation").jsonPrimitive.content },
+        )
+        assertEquals(
+            "a placeholder is not a number",
+            setOf(""),
+            payloads.map { it.getValue("number").jsonPrimitive.content }.toSet(),
+        )
+    }
+
+    @Test
+    fun `a placeholder number without a presentation is still a withheld caller`() {
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "-2", date = 10),
+            Call(number = "-1", date = 20),
+            Call(number = "-3", date = 30),
+        )
+
+        val payloads = payloadsOf(reader().readSince(0))
+
+        assertEquals(
+            listOf("restricted", "unknown", "payphone"),
+            payloads.map { it.getValue("presentation").jsonPrimitive.content },
+        )
+        assertEquals(
+            setOf(""),
+            payloads.map {
+                it.getValue("number").jsonPrimitive.content
+            }.toSet()
+        )
+    }
+
+    @Test
+    fun `a call with a number says nothing about presentation`() {
+        FakeCallLogProvider.calls = listOf(
+            Call(
+                number = "+5215512345678",
+                date = 10,
+                presentation = CallLog.Calls.PRESENTATION_ALLOWED
+            ),
+        )
+
+        assertFalse("presentation" in payloadsOf(reader().readSince(0)).single())
     }
 
     @Test

@@ -12,9 +12,8 @@ class WhatsAppDocuments(private val root: File) {
     fun scan(): List<DocumentFile> = CANDIDATE_DIRECTORIES
         .map { File(root, it) }
         .filter { it.isDirectory }
-        .flatMap { it.walkTopDown().maxDepth(MAX_DEPTH) }
+        .flatMap { it.received().maxDepth(MAX_DEPTH) }
         .filter { it.isFile && !it.name.startsWith(".") }
-        .filterNot { it.parentFile?.name?.lowercase() in NOT_RECEIVED_DIRECTORIES }
         .distinctBy { it.absolutePath }
         .map { DocumentFile(it.absolutePath, it.name, it.lastModified(), it.length()) }
 
@@ -23,9 +22,15 @@ class WhatsAppDocuments(private val root: File) {
     fun watchedDirectories(): List<File> = CANDIDATE_DIRECTORIES
         .map { File(root, it) }
         .filter { it.isDirectory }
-        .flatMap { it.walkTopDown().maxDepth(MAX_DEPTH - 1).filter(File::isDirectory) }
+        .flatMap { it.received().maxDepth(MAX_DEPTH - 1).filter(File::isDirectory) }
         .filterNot { it.name.lowercase() in NOT_RECEIVED_DIRECTORIES }
         .distinctBy { it.absolutePath }
+
+    // Sent and Private are not entered: walked and then filtered out, every
+    // file in them cost three calls over the storage's FUSE layer. A folder
+    // refused here is still listed itself, which only the watch list sees.
+    private fun File.received(): FileTreeWalk =
+        walkTopDown().onEnter { it.name.lowercase() !in NOT_RECEIVED_DIRECTORIES }
 
     companion object {
         // Android 11 moved WhatsApp's media under Android/media; the bare

@@ -14,9 +14,9 @@ to whatever Odoo instance those point at.
 
 | Piece | Version |
 |-------|---------|
-| Odoo | 19.0 with `device_mobile` (positions) and `device_phone_call` (calls, recordings) installed, and `device_voip` for the softphone |
-| Android | 10 (API 29) minimum, targets API 36 |
-| Build | JDK 25 (pinned in `tools/versions.env`), Android SDK 37, Gradle 9.7.1 |
+| Odoo | 19.0 with `device_mobile` (positions) and `device_phone_call` (calls, recordings) installed, and `voip_device` for the softphone |
+| Android | 10 (API 29) minimum, targets API 37 (Android 17) |
+| Build | JDK 25 (pinned in `tools/versions.env`), Android SDK platform 37.2, Gradle 9.9.1 |
 
 ## Endpoints used
 
@@ -49,7 +49,9 @@ when absent, which it always is here; sending km/h from the phone without that k
 would be stored 3.6× too high and nothing would say so. And `altitude` is height
 above the WGS84 ellipsoid, not above mean sea level, though the field it lands in
 is labelled for the latter — the two differ by tens of metres. A call carries `number`,
-`direction`, `timestamp`, `duration` and optional `contact_name`. `direction` is one of
+`direction`, `timestamp`, `duration` and optional `contact_name`; a call from a withheld
+number carries an empty `number` and `presentation` (`restricted`, `unknown` or
+`payphone`), and the server stores it without a number. `direction` is one of
 `incoming`, `outgoing`, `missed`, `voicemail`, `rejected`, `blocked` — the app translates
 Android's `CallLog.Calls.TYPE` itself, so the endpoint does not have to track an Android
 enumeration. It used to send the raw integer, and when Android added
@@ -63,7 +65,7 @@ next.
 
 The softphone settings answer `{"sip": {"username", "secret", "domain", "transport"}}`:
 the extension of the device's **user** on the company phone system (Odoo's
-`device_voip`), or 404 with `"error": "no_extension"` when that user has none. The app
+`voip_device`), or 404 with `"error": "no_extension"` when that user has none. The app
 asks on every reconciliation (`CompanionApp.applyConfiguration`), keeps the last answer
 in its own store, and keeps registering with it while Odoo cannot be reached — an
 Odoo outage must not silence the company number. `no_extension`, a 401 or 403 from
@@ -175,6 +177,24 @@ from then on a reply that would remove rows must name it too or is retried as no
 older server that never names itself is believed as before, and a re-enrolment onto another
 base URL forgets what was learned.
 
+**A row goes only to the enrolment it was collected for.** Every outbox row is stamped
+with `Settings.enrollment` -- the device identifier and base URL -- when it is queued, and
+the drain takes only rows of the current one. A row without a stamp -- queued before this
+build, or while the settings could not be read -- is the current enrolment's, and is
+stamped with it the moment a save or a policy moves the handset to another: read as the
+next one's, an upgrade's backlog stuck behind an unreachable server went to the server
+that replaced it. A phone re-enrolled onto another Odoo, or onto another device
+record, used to send the old enrolment's calls, recordings and positions to the new one,
+under the new device. They are now held, counted on the status screen with the server
+they were for, and never revived, taken or waited on by this enrolment's drain. *Send
+here* hands them to the current enrolment, for a server that only changed address;
+*Discard* deletes the positions and sets the rest aside as `withdrawn`, so the 90-day
+purge takes a recording's audio with it. The band names one previous enrolment at a time,
+the newest, and its buttons act on that one alone. A phone nobody looks at withdraws held
+rows itself once they were collected more than 90 days ago -- counted from collection,
+since nothing records when a row became held, so a row that had sat 89 days in a stuck
+queue goes a day after the re-enrolment. A rotated token keeps the enrolment.
+
 The 422 row above is the one that had to be split. The endpoint chose its status
 from `accepted > 0`, and it drops rows it already holds *before* taking that
 count — so "nothing here was storable" and "the server already had every row"
@@ -239,7 +259,12 @@ each document and where it stands.
   sighting, with no chat and no number. A notice that arrives later takes the loose file
   over. WhatsApp keeps a single copy of a file it already has. So when the same chat
   resends the same name and no new file appears within 60 s, the resend takes the file
-  the first notice took.
+  the first notice took -- but only where downloads are seen to be automatic, that is,
+  the first file was written with its notice. Where it was written later, at a tap, no
+  new file is also what a different document nobody has tapped yet looks like, and it
+  used to be given the first one's file; it now waits for its own. A file written with
+  the resend's own notice counts too, in case WhatsApp writes its one copy again when the
+  same file comes back -- not measured either way.
 - **The sender's number.** On a handset, no `Person.key`, `Person.uri`, shortcut id or
   tag carried the number of a saved contact; the notice names the sender only by contact
   name. `ContactBook` looks that name up, with `READ_CONTACTS`, which is asked from the
@@ -247,20 +272,49 @@ each document and where it stands.
   (`vnd.com.whatsapp.profile`, whose `DATA1` is the JID), then in the contact's phone
   numbers. Two different lines under one name give no number (`ContactNumbers.choose`).
 - **What a document is.** Only a Constancia de Situación Fiscal, an INE or a passport
-  is to leave the handset, so the handset decides. `PageReader` draws the first two pages
-  of a PDF with `PdfRenderer` and reads them with ML Kit's on-device OCR and QR reader,
-  using the Play-services models, which are fetched at install and not bundled.
-  `DocumentClassifier` decides from what was read:
-  - a CSF by its title or by the SAT's QR, whose `D3=idCIF_RFC` gives the RFC;
-  - a passport by its word or by an MRZ line starting `P<`;
-  - an INE by its issuer, its title or an `IDMEX` MRZ line.
+  is to leave the handset, so the handset decides. `PageReader` draws a PDF's pages with
+  `PdfRenderer`, one at a time and at most two, and reads each with ML Kit's on-device OCR
+  and QR reader; it stops at the first page that decides. The models are bundled in the
+  APK (`com.google.mlkit:text-recognition` and `barcode-scanning`). The Play-services
+  variants fetched them through the Play Store at install: on an emulator without it the
+  fetch failed ("Unable to bind to Phonesky"), so a handset without the store never read
+  a document, and nothing said so. With the models bundled, on the same emulator with the
+  Play Store disabled, ML Kit selected its local module and read a constancia (with its
+  RFC), an INE and a contract correctly. The cost is about 18 MB per ABI in the APK:
+  `libmlkit_google_ocr_pipeline.so` 11 MB, `libbarhopper_v3.so` 5 MB, 2.4 MB of models. A page is drawn 1,600 px wide, or
+  narrower when that would pass 4.5 million pixels: drawn by width alone, a 72 × 14,400 pt
+  page asked for about 2 GB, and on an Android 16 emulator with 2.5 GB the low-memory
+  killer took 40 other apps while it was drawn, on every pass, since the page stayed
+  unread. `DocumentClassifier` decides from what was read, and a title alone is never
+  enough -- a contract asking for "identificación oficial (INE o pasaporte)", a supplier's
+  letter asking for the constancia, a quote paid "con credencial para votar" and "COMPAS
+  SPORT" (which run together contains "PASSPORT") all used to leave the handset:
+  - a CSF by the SAT's QR, whose `D3=idCIF_RFC` gives the RFC, or by two of its title,
+    the cédula's header and the idCIF;
+  - a passport by an MRZ line starting `P<`, or by its word beside one of the English
+    labels of its data page (surname, nationality, date of birth…), which a Spanish
+    letter does not carry;
+  - an INE by an `IDMEX` MRZ line, or by two of its issuer, its title, "clave de
+    elector" and a CURP.
+
+  Words are matched whole, and OCR may drop the spaces inside a phrase.
 
   Drawing the page, rather than extracting its text, is what reads a scanned INE. A read
-  that failed, for example while the model is still downloading, is tried again later
-  and is not ruled "other".
+  that failed is tried again on the next pass and is not ruled "other"; after five
+  failures (`Sighting.MAX_READ_ATTEMPTS`) the file is not read again and the card says it
+  could not be read, where it used to say "Reading the document…" for ever. A file no
+  longer on disk -- deleted from WhatsApp's folder, or out of reach while all-files access
+  is revoked -- is not a failed read: it is not read, the card says the file is missing,
+  and it is read once it is back.
 - **What it keeps.** `SightingStore` keeps the last 50 sightings in
   `files/whatsapp_sightings.json` in the app's private storage, which is excluded from
-  backup. It is a window for testing on a real handset, not a queue.
+  backup. It is a window for testing on a real handset, not a queue -- but it is also the
+  only memory of which files were already handled, since the outbox forgets a row once it
+  is delivered. So a row trimmed out of the window leaves its file's path behind (the last
+  500, `MAX_RETIRED`), and the loose-file pass never takes that file again: WhatsApp may
+  write a file days after its notice, and a trimmed row's file used to come back as a loose
+  document, read by OCR and uploaded a second time. The file is written aside and renamed
+  over (`AtomicFile`), and only when something changed.
 - **Turning it on.** On the main screen, the WhatsApp card's *Turn on* button opens the
   notification access switch, then all-files access. On Android 13 and later, an APK
   installed outside a store must first be allowed restricted settings: App info → ⋮ →
@@ -270,7 +324,10 @@ each document and where it stands.
   `document` row, once per file. The drain sends it to `/remote/mobile/<id>/document`
   under `file_b64`, along the recording's streamed path, with one difference: **the file
   is WhatsApp's, so it is never deleted**, neither on delivery nor when a set-aside row
-  is purged. The 90-day purge deletes only recording audio. On the server,
+  is purged. The 90-day purge deletes only recording audio. A file that leaves WhatsApp's
+  folder before it is sent sets its row aside as `gone`, which the card shows as such:
+  the row is the card's only memory of the document, and while it was deleted the card
+  read the empty queue as delivered. On the server,
   `device_mobile_document` (odoo) files it in Documents as uploaded by the phone's
   holder. From there the company's upload sort, and `l10n_mx_partner_import`'s offer to
   create the contact, take over. A file another row already read takes that verdict and
@@ -333,6 +390,27 @@ From an emulator the host is `10.0.2.2`, but Asterisk offers media on the addres
 handset's connection arrived at, which the emulator's NAT makes the host's loopback:
 give the lab Asterisk a TLS transport on the host's LAN address and point the
 extension's provider (`pbx_ip`) at it, or calls ring with one-way audio.
+
+Without an Asterisk, `tools/sip-stub.py` stands in for one: it takes the handset's
+REGISTER over TLS, and on `kill -USR1` rings it with a DTLS-SRTP offer, ACKs the answer
+and hangs up. No media flows, so it proves registration, ringing through Core-Telecom,
+answering and the hang-up, not audio. Its certificate must name the address the
+extension's `pbx_ip` holds, and its CA goes in `files/extra-ca.pem` as above:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out lab-ca.pem -days 7 \
+    -subj "/CN=Lab CA" -addext "basicConstraints=critical,CA:TRUE"
+openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=10.0.2.2"
+openssl x509 -req -in server.csr -CA lab-ca.pem -CAkey ca.key -CAcreateserial -days 7 \
+    -out server.pem -extfile <(printf "subjectAltName=IP:10.0.2.2\n")
+tools/sip-stub.py --cert server.pem --key server.key &    # then: kill -USR1 %1
+```
+
+Run that way on 2026-11-10 against an Android 17 emulator: Linphone registered over TLS
+to `10.0.2.2:5061`, the call rang as the system's incoming-call notification with the
+app in the background, was answered, ran with Telecom's foreground service (phone call
+and microphone types) and ended on the stub's BYE with cause `REMOTE`; with local network
+access revoked the registration failed after 15 s and nothing reached the stub.
 
 ### Signing a release
 
@@ -445,6 +523,19 @@ server — including `http://10.0.2.2:8069`, the host loopback as seen from an e
 on-premise instance genuinely must serve plain HTTP in production, add a
 `network_security_config.xml` pinning that one host rather than re-enabling cleartext globally;
 the enrolment check honours it, since it asks about the URL's host and not the build as a whole.
+
+## An Odoo on the local network
+
+From Android 17 an app that targets it reaches a local-network address only with the
+`ACCESS_LOCAL_NETWORK` runtime permission, in the *Nearby devices* group. Without it the
+connection times out: measured on an Android 17 emulator against `http://10.0.2.2:8137`, every
+upload failed with `failed to connect … after 20000ms` and nothing reached Odoo; granted, the
+same drain delivered at once. So when the Odoo base URL or the phone system the softphone
+registers with is a local address (`LocalNetwork`: the private ranges, link-local, IPv6
+unique-local, or a `.local` name; a name is resolved first, since an internal DNS name usually
+points at one), the app asks for the permission with the others and the status screen names it
+as a blocker until it is granted. A cloud Odoo is never shown the prompt. An MDM can grant it
+like any runtime permission.
 
 ## Diagnosing a phone that stopped reporting
 
@@ -621,7 +712,9 @@ re-derives them.
   diagnostic (it names the per-OEM folder that `CANDIDATE_DIRECTORIES` is a knob
   for) and holds nothing personal. `asLoggableDirectory` does that, the path is
   resolved into a local *before* the `Log` call so the rule needs no exemption, and
-  `tools/lint.sh` fails on `absolutePath` or `filePath` appearing anywhere inside a
+  `tools/lint.sh` fails on `absolutePath` or `filePath` -- and on a member naming a
+  person (`chat`, `sender`, `phone`, `senderPhone`, `rfc`, `label`, `number`,
+  `contactName`, `remote`) unless it is only tested against `null` -- appearing anywhere inside a
   `Log.*(…)` call in `app/src/main`. Both gates in that script have been shown to
   fire by reintroducing the regression they exist for; one that has never been seen
   to fail is worth nothing. `loggableDirectory` is a top-level `internal` function

@@ -8,16 +8,14 @@ import com.odoocompanion.softphone.SoftphoneLookup
 import com.odoocompanion.softphone.SoftphoneSettings
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -73,71 +71,49 @@ class OdooClient(
         suffix: String,
         file: File,
         metadata: JsonObject,
-        fileKey: String = RecordingBody.AUDIO_KEY,
-    ): UploadOutcome = post(settings, suffix, RecordingBody(metadata, file, JSON, fileKey))
+        fileKey: String = FileBody.AUDIO_KEY,
+    ): UploadOutcome = post(settings, suffix, FileBody(metadata, file, JSON, fileKey))
 
-    fun recordingWireSize(
-        file: File,
-        metadata: JsonObject,
-        fileKey: String = RecordingBody.AUDIO_KEY,
-    ): Long = RecordingBody(metadata, file, JSON, fileKey).contentLength()
+    fun wireSize(file: File, metadata: JsonObject, fileKey: String = FileBody.AUDIO_KEY,): Long =
+        FileBody(metadata, file, JSON, fileKey).contentLength()
 
     private suspend fun post(
         settings: Settings,
         suffix: String,
         body: RequestBody,
-    ): UploadOutcome = try {
-        val request = Request.Builder()
-            .url(settings.endpoint(suffix))
-            .addHeader("Authorization", "Bearer ${settings.token}")
-            .post(body)
-            .build()
-        http.newCall(request).await().use { response ->
-            val text = response.peekBody(MAX_READ_BYTES).string()
-            val body = text.asJsonObject()
-            if (!settings.serverNamesItself && body.namesTheService()) onServerNamedItself()
-            classify(response.code, text, body, settings.serverNamesItself)
-        }
-    } catch (e: IOException) {
-        Log.w(TAG, "Upload to $suffix failed", e)
-        UploadOutcome.Retry(e.message ?: "network failure", linkDown = e !is InterruptedIOException)
-    } catch (e: IllegalArgumentException) {
-        Log.w(TAG, "Cannot build a request for $suffix", e)
-        UploadOutcome.Retry(e.message ?: "malformed endpoint URL", linkDown = true)
+    ): UploadOutcome = exchange(
+        settings,
+        suffix,
+        body,
+        failed = { reason, cause ->
+            UploadOutcome.Retry(reason, linkDown = cause !is InterruptedIOException)
+        },
+    ) { code, text, reply ->
+        if (!settings.serverNamesItself && reply.namesTheService()) onServerNamedItself()
+        classify(code, text, reply, settings.serverNamesItself)
     }
 
     /** The softphone settings Odoo holds for this handset's user. */
-    suspend fun softphone(settings: Settings): SoftphoneLookup = try {
-        val request = Request.Builder()
-            .url(settings.endpoint(SOFTPHONE))
-            .addHeader("Authorization", "Bearer ${settings.token}")
-            .get()
-            .build()
-        http.newCall(request).await().use { response ->
-            val text = response.peekBody(MAX_READ_BYTES).string()
-            val body = text.asJsonObject()
-            when {
-                !body.namesTheService() -> SoftphoneLookup.Unavailable(notOdoo(response.code, text))
+    suspend fun softphone(settings: Settings): SoftphoneLookup = exchange(
+        settings,
+        SOFTPHONE,
+        body = null,
+        failed = { reason, _ -> SoftphoneLookup.Unavailable(reason) },
+    ) { code, text, reply ->
+        when {
+            !reply.namesTheService() -> SoftphoneLookup.Unavailable(notOdoo(code, text))
 
-                response.code in 200..299 ->
-                    SoftphoneSettings.fromReply(body)?.let { SoftphoneLookup.Found(it) }
-                        ?: SoftphoneLookup.Unavailable("unusable softphone settings")
+            code in 200..299 ->
+                SoftphoneSettings.fromReply(reply)?.let { SoftphoneLookup.Found(it) }
+                    ?: SoftphoneLookup.Unavailable("unusable softphone settings")
 
-                response.code == HTTP_NOT_FOUND && body.errorIs(NO_EXTENSION) ->
-                    SoftphoneLookup.NoExtension
+            code == HTTP_NOT_FOUND && reply.errorIs(NO_EXTENSION) -> SoftphoneLookup.NoExtension
 
-                // Odoo itself refusing the token: a gateway's 401 never gets here
-                response.code in AUTH_REFUSED -> SoftphoneLookup.Refused(response.code)
+            // Odoo itself refusing the token: a gateway's 401 never gets here
+            code in AUTH_REFUSED -> SoftphoneLookup.Refused(code)
 
-                else -> SoftphoneLookup.Unavailable(reasonFor(response.code, text))
-            }
+            else -> SoftphoneLookup.Unavailable(reasonFor(code, text))
         }
-    } catch (e: IOException) {
-        Log.w(TAG, "Softphone settings lookup failed", e)
-        SoftphoneLookup.Unavailable(e.message ?: "network failure")
-    } catch (e: IllegalArgumentException) {
-        Log.w(TAG, "Cannot build the softphone settings request", e)
-        SoftphoneLookup.Unavailable(e.message ?: "malformed endpoint URL")
     }
 
     /** The key Odoo signs wake-ups with, and whether this handset is registered against it. */
@@ -159,32 +135,54 @@ class OdooClient(
         return push(settings, body.toString().toRequestBody(JSON))
     }
 
-    private suspend fun push(settings: Settings, body: RequestBody?): PushKeyLookup = try {
-        val builder = Request.Builder()
-            .url(settings.endpoint(PUSH))
-            .addHeader("Authorization", "Bearer ${settings.token}")
-        val request = (if (body == null) builder.get() else builder.post(body)).build()
-        http.newCall(request).await().use { response ->
-            val text = response.peekBody(MAX_READ_BYTES).string()
-            val reply = text.asJsonObject()
-            val key = reply.stringAt("vapid_public_key")
-            when {
-                !reply.namesTheService() -> PushKeyLookup.Unavailable(notOdoo(response.code, text))
+    private suspend fun push(settings: Settings, body: RequestBody?): PushKeyLookup = exchange(
+        settings,
+        PUSH,
+        body,
+        failed = { reason, _ -> PushKeyLookup.Unavailable(reason) },
+    ) { code, text, reply ->
+        val key = reply.primitive("vapid_public_key")?.takeIf { it.isString }?.content
+        when {
+            !reply.namesTheService() -> PushKeyLookup.Unavailable(notOdoo(code, text))
 
-                response.code in 200..299 && key != null ->
-                    PushKeyLookup.Found(key, reply.booleanAt("registered"))
+            code in 200..299 && key != null ->
+                PushKeyLookup.Found(key, reply.primitive("registered")?.booleanOrNull == true)
 
-                reply.errorIs(PUSH_UNAVAILABLE) -> PushKeyLookup.Off
+            reply.errorIs(PUSH_UNAVAILABLE) -> PushKeyLookup.Off
 
-                else -> PushKeyLookup.Unavailable(reasonFor(response.code, text))
-            }
+            else -> PushKeyLookup.Unavailable(reasonFor(code, text))
         }
-    } catch (e: IOException) {
-        Log.w(TAG, "Push registration exchange failed", e)
-        PushKeyLookup.Unavailable(e.message ?: "network failure")
-    } catch (e: IllegalArgumentException) {
-        Log.w(TAG, "Cannot build the push registration request", e)
-        PushKeyLookup.Unavailable(e.message ?: "malformed endpoint URL")
+    }
+
+    // One request to the device's endpoint: a GET without a body, a POST with
+    // one. A URL that will not build is a fault of the enrolment and a failed
+    // exchange one of the link; `read` sees every reply, whatever its code.
+    private suspend fun <T> exchange(
+        settings: Settings,
+        suffix: String,
+        body: RequestBody?,
+        failed: (reason: String, cause: Exception) -> T,
+        read: suspend (code: Int, text: String, reply: JsonObject?) -> T,
+    ): T {
+        val request = try {
+            Request.Builder()
+                .url(settings.endpoint(suffix))
+                .addHeader("Authorization", "Bearer ${settings.token}")
+                .apply { if (body == null) get() else post(body) }
+                .build()
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "Cannot build a request for $suffix", e)
+            return failed(e.message ?: "malformed endpoint URL", e)
+        }
+        return try {
+            http.newCall(request).await().use { response ->
+                val text = response.peekBody(MAX_READ_BYTES).string()
+                read(response.code, text, text.asJsonObject())
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "Request to $suffix failed", e)
+            failed(e.message ?: "network failure", e)
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -207,10 +205,13 @@ class OdooClient(
         body: JsonObject?,
         mustNameItself: Boolean,
     ): UploadOutcome {
+        // Tallies, not the proof of delivery -- `status` is -- so a counter
+        // that will not read as an integer counts as absent: refusing the reply
+        // over it retried a delivered batch for ever, and ended every pass.
         val counts = Counts(
-            accepted = body.intAt("accepted"),
-            duplicates = body.intAt("duplicates"),
-            skipped = body.intAt("skipped"),
+            accepted = body.countAt("accepted"),
+            duplicates = body.countAt("duplicates"),
+            skipped = body.countAt("skipped"),
         )
         return when {
             removesRows(code) && !body.isOdooReply(mustNameItself) ->
@@ -224,7 +225,7 @@ class OdooClient(
                 counts.duplicates,
                 counts.skipped,
                 body.indexesAt("skipped_indexes"),
-                body?.get("max_payload_bytes")?.jsonPrimitive?.longOrNull,
+                body.primitive("max_payload_bytes")?.longOrNull,
             )
 
             code == HTTP_CONFLICT -> UploadOutcome.Duplicate
@@ -250,7 +251,7 @@ class OdooClient(
     }
 
     private fun declaredLimit(text: String, body: JsonObject?): Long? =
-        body?.get("limit_bytes")?.jsonPrimitive?.longOrNull
+        body.primitive("limit_bytes")?.longOrNull
             ?: DECLARED_KILOBYTES.find(text)?.groupValues?.get(1)?.toLongOrNull()?.times(1024)
 
     private fun removesRows(code: Int): Boolean =
@@ -262,23 +263,27 @@ class OdooClient(
 
     private data class Counts(val accepted: Int, val duplicates: Int, val skipped: Int)
 
+    private fun JsonObject?.countAt(key: String): Int = primitive(key)?.intOrNull ?: 0
+
     private fun JsonObject?.isOdooReply(mustNameItself: Boolean): Boolean = when {
         this == null -> false
         mustNameItself -> namesTheService()
         else -> "status" in this || "error" in this
     }
 
-    private fun JsonObject?.namesTheService(): Boolean =
-        this?.get("service")?.jsonPrimitive?.contentOrNull == SERVICE
+    private fun JsonObject?.namesTheService(): Boolean = textAt("service") == SERVICE
 
-    private fun JsonObject?.errorIs(code: String): Boolean =
-        this?.get("error")?.jsonPrimitive?.contentOrNull == code
+    private fun JsonObject?.errorIs(code: String): Boolean = textAt("error") == code
 
-    private fun JsonObject?.reportsSuccess(): Boolean =
-        this?.get("status")?.jsonPrimitive?.contentOrNull == "success"
+    private fun JsonObject?.reportsSuccess(): Boolean = textAt("status") == "success"
 
     private fun JsonObject?.reportsDelivery(counts: Counts): Boolean =
         reportsSuccess() && counts.duplicates > 0 && counts.skipped == 0
+
+    private fun JsonObject?.textAt(key: String): String? = primitive(key)?.contentOrNull
+
+    private fun JsonObject?.indexesAt(key: String): List<Int> =
+        (this?.get(key) as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.intOrNull }.orEmpty()
 
     private fun reasonFor(code: Int, text: String): String = when (code) {
         401, 403 -> "auth rejected ($code)"
@@ -298,21 +303,6 @@ class OdooClient(
         text.take(MAX_EXCERPT_CHARS).split(WHITESPACE).filter { it.isNotEmpty() }
             .joinToString(" ")
             .let { if (it.isEmpty()) "" else ": $it" }
-
-    private fun String.asJsonObject(): JsonObject? = runCatching {
-        Json.parseToJsonElement(this).jsonObject
-    }.getOrNull()
-
-    private fun JsonObject?.stringAt(key: String): String? =
-        runCatching { this?.get(key)?.jsonPrimitive?.contentOrNull }.getOrNull()
-
-    private fun JsonObject?.booleanAt(key: String): Boolean =
-        runCatching { this?.get(key)?.jsonPrimitive?.booleanOrNull }.getOrNull() == true
-
-    private fun JsonObject?.intAt(key: String): Int = this?.get(key)?.jsonPrimitive?.intOrNull ?: 0
-
-    private fun JsonObject?.indexesAt(key: String): List<Int> =
-        (this?.get(key) as? JsonArray)?.mapNotNull { it.jsonPrimitive.intOrNull }.orEmpty()
 
     private companion object {
         const val TAG = "OdooClient"

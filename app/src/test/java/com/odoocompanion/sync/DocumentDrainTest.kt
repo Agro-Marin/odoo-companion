@@ -5,11 +5,19 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.CompanionDatabase
+import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.OutboxLimits
 import com.odoocompanion.net.OdooClient
+import com.odoocompanion.whatsapp.Classification
+import com.odoocompanion.whatsapp.DocumentKind
+import com.odoocompanion.whatsapp.Sighting
+import com.odoocompanion.whatsapp.UploadState
+import com.odoocompanion.whatsapp.WhatsAppIntake
+import com.odoocompanion.whatsapp.WhatsAppNotices
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -140,5 +148,32 @@ class DocumentDrainTest {
 
     private companion object {
         val PDF = "%PDF-1.4 a constancia".toByteArray()
+    }
+
+    // A document's row is the card's only memory of what became of it: dropped
+    // when WhatsApp's file went, the card read the empty queue as delivered.
+    @Test
+    fun `a document whose file is gone is never shown as delivered`() = runTest {
+        val pdf = queueDocument()
+        pdf.delete()
+
+        val report = drainer().drainAll()
+
+        assertEquals(0, server.requestCount)
+        assertEquals(1, report.lost)
+        val queue = dao.fileStates(OutboxKind.DOCUMENT).first().associateBy { it.filePath }
+        assertEquals(DeadReason.GONE, queue.getValue(pdf.absolutePath).deadReason)
+        assertEquals("nothing an operator can fix", 0, dao.counts(null).first().undeliverable)
+        val sighting = Sighting(
+            app = WhatsAppNotices.WHATSAPP,
+            chat = "Yop",
+            sender = "Yop",
+            label = pdf.name,
+            at = 1L,
+            filePath = pdf.absolutePath,
+            classification = Classification(DocumentKind.CSF),
+            queued = true,
+        )
+        assertEquals(UploadState.GONE, WhatsAppIntake.uploadStateOf(sighting, queue))
     }
 }

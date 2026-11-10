@@ -300,4 +300,20 @@ class OutboxMigrationTest {
             assertEquals("no deferral was recorded, so none is imposed", 0L, cursor.getLong(0))
         }
     }
+
+    @Test
+    fun `migrating to v8 leaves every existing row to the current enrolment`() {
+        val db = openV1()
+        db.execSQL(
+            "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
+                "('calllog', '{\"number\":\"+52\"}', 10, 3)",
+        )
+        for (version in 1..7) migrate(db, version, version + 1)
+
+        db.query("SELECT enrollment FROM outbox").use { cursor ->
+            assertEquals(1, cursor.count)
+            cursor.moveToFirst()
+            assertTrue("queued before stamping, so it is the current one's", cursor.isNull(0))
+        }
+    }
 }

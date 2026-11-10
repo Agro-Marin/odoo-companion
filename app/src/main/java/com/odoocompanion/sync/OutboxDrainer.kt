@@ -11,10 +11,10 @@ import com.odoocompanion.data.OutboxLimits
 import com.odoocompanion.net.CallLogUpload
 import com.odoocompanion.net.CallRecord
 import com.odoocompanion.net.DocumentMetadata
+import com.odoocompanion.net.FileBody
 import com.odoocompanion.net.LocationFix
 import com.odoocompanion.net.LocationUpload
 import com.odoocompanion.net.OdooClient
-import com.odoocompanion.net.RecordingBody
 import com.odoocompanion.net.RecordingMetadata
 import com.odoocompanion.net.UploadOutcome
 import com.odoocompanion.net.WireJson
@@ -68,6 +68,10 @@ private class DrainTally {
 
     var payloadLimit = 0L
     var persistedLimit: Long? = null
+
+    // Bytes the file kinds may still put on the wire in this pass: one budget,
+    // shared by documents and recordings, or the pass's bound doubles.
+    var bytesLeft = OutboxDrainer.FILE_BYTES_PER_DRAIN
 
     fun note(counter: MutableMap<String, Int>, kind: String, count: Int) {
         counter[kind] = (counter[kind] ?: 0) + count
@@ -123,11 +127,12 @@ class OutboxDrainer(
             return reportUnreadableSettings(tally, cause)
         }
         tally.payloadLimit = settings.payloadLimit(now())
+        withdrawLongHeld(settings, tally)
         val outcome = drainUntilTheLinkFails(settings, tally)
-        reviveWhatOnlyRanOutOfRetries(tally, outcome)
+        reviveWhatOnlyRanOutOfRetries(settings, tally, outcome)
 
         if (outcome == Outcome.DONE && !tally.moreWork) {
-            tally.moreWork = anythingArrivedLate(settings.uploadWindowSeconds)
+            tally.moreWork = anythingArrivedLate(settings)
         }
         return tally.report(outcome).also { debug(TAG) { "drain finished: $it" } }
     }
@@ -153,16 +158,38 @@ class OutboxDrainer(
         return outcome
     }
 
-    private suspend fun anythingArrivedLate(windowSeconds: Long): Boolean {
+    // Rows held for another enrolment are not work for this pass: counted,
+    // they asked for a follow-up drain after every drain, for ever.
+    private suspend fun anythingArrivedLate(settings: Settings): Boolean {
         val now = now()
-        if (OutboxKind.IRREPLACEABLE.any { dao.countOf(it, now) > 0 }) return true
-        val positions = dao.depthOf(OutboxKind.LOCATION, now)
+        val enrollment = settings.enrollment
+        if (OutboxKind.IRREPLACEABLE.any { dao.countOf(it, now, enrollment) > 0 }) return true
+        val positions = dao.depthOf(OutboxKind.LOCATION, now, enrollment)
         return UploadCadence.dueNow(
             queued = positions.queued,
             oldestCreatedAt = positions.oldestCreatedAt,
-            windowSeconds = windowSeconds,
+            windowSeconds = settings.uploadWindowSeconds,
             now = now,
         )
+    }
+
+    // A handset nobody looks at -- a managed one moved to another server --
+    // would hold the old enrolment's rows, and a recording's audio, for ever.
+    // Collected longer ago than the retention a dead row gets, they are
+    // withdrawn, and the purge takes them as it takes any dead row. Counted from
+    // collection: nothing records when a row became held.
+    private suspend fun withdrawLongHeld(settings: Settings, tally: DrainTally) {
+        val enrollment = settings.enrollment ?: return
+        val before = now() - OutboxLimits.DEAD_RETENTION_MILLIS
+        val positions = dao.deleteHeldPositions(enrollment, before = before)
+        val withdrawn = dao.withdrawHeld(enrollment, from = null, now = now(), before = before)
+        tally.discarded += positions
+        if (positions + withdrawn > 0) {
+            Log.i(
+                TAG,
+                "Withdrew ${positions + withdrawn} row(s) of a previous enrolment, collected 90 days ago",
+            )
+        }
     }
 
     // When a row the server ruled on may be offered again: doubling from a
@@ -200,13 +227,20 @@ class OutboxDrainer(
         tally.deadLettered += tally.unreachable
     }
 
-    private suspend fun reviveWhatOnlyRanOutOfRetries(tally: DrainTally, outcome: Outcome) {
+    // Only this enrolment's rows: a delivery here proves nothing about a row
+    // collected for another server, and reviving it would hand it to this one.
+    private suspend fun reviveWhatOnlyRanOutOfRetries(
+        settings: Settings,
+        tally: DrainTally,
+        outcome: Outcome,
+    ) {
         if (outcome != Outcome.DONE) return
+        val enrollment = settings.enrollment
         tally.revived = when {
-            tally.delivered -> dao.reviveExhausted(ATTEMPTS_AFTER_REVIVAL)
+            tally.delivered -> dao.reviveExhausted(ATTEMPTS_AFTER_REVIVAL, enrollment)
 
             !tally.attempted && tally.deadLettered == 0 ->
-                dao.reviveOldestExhausted(REVIVAL_PROBE, ATTEMPTS_AFTER_REVIVAL)
+                dao.reviveOldestExhausted(REVIVAL_PROBE, ATTEMPTS_AFTER_REVIVAL, enrollment)
 
             else -> 0
         }
@@ -274,7 +308,7 @@ class OutboxDrainer(
                 tally.moreWork = true
                 return Outcome.DONE
             }
-            val entries = dao.take(wire.kind, size + poisoned.size, now())
+            val entries = dao.take(wire.kind, size + poisoned.size, now(), settings.enrollment)
                 .filter { it.id !in poisoned }
             debug(TAG) {
                 "${wire.kind}: took ${entries.size} at batch size $size, " +
@@ -395,29 +429,29 @@ class OutboxDrainer(
         settings: Settings,
         tally: DrainTally,
     ): Outcome {
-        var budget = RECORDING_BYTES_PER_DRAIN
         // The same exclusion as drainBatch's, for the same reason.
         val poisoned = mutableSetOf<Long>()
         while (true) {
-            val entries = dao.take(files.kind, RECORDING_BATCH + poisoned.size, now())
-                .filter { it.id !in poisoned }
+            val entries =
+                dao.take(files.kind, FILE_BATCH + poisoned.size, now(), settings.enrollment)
+                    .filter { it.id !in poisoned }
             if (entries.isEmpty()) return Outcome.DONE
             for (entry in entries) {
                 val file = entry.filePath?.let(::File)
                 if (file == null || !file.exists()) {
-                    forgetLostFile(tally, entry, files.noun)
+                    forgetLostFile(tally, entry, files)
                     continue
                 }
-                if (file.length() > MAX_RECORDING_BYTES) {
+                if (file.length() > MAX_FILE_BYTES) {
                     poisoned += deferRuledOn(
                         tally,
                         entry,
                         "${files.noun} of ${file.length()} bytes is over the " +
-                            "${MAX_RECORDING_BYTES / 1024 / 1024} MB any mobile device accepts",
+                            "${MAX_FILE_BYTES / 1024 / 1024} MB any mobile device accepts",
                     )
                     continue
                 }
-                if (budget <= 0) {
+                if (tally.bytesLeft <= 0) {
                     tally.moreWork = true
                     return Outcome.DONE
                 }
@@ -435,12 +469,12 @@ class OutboxDrainer(
                     )
                     continue
                 }
-                val wireSize = client.recordingWireSize(file, metadata, files.fileKey)
+                val wireSize = client.wireSize(file, metadata, files.fileKey)
                 val declared = tally.payloadLimit
                 debug(TAG) {
                     "${files.noun} row ${entry.id}: ${file.length()} bytes, " +
                         "$wireSize on the wire, cap $declared, " +
-                        "attempt ${entry.attempts + 1}, $budget budget left"
+                        "attempt ${entry.attempts + 1}, ${tally.bytesLeft} budget left"
                 }
                 if (declared in 1..<wireSize) {
                     poisoned += deferRuledOn(
@@ -451,7 +485,7 @@ class OutboxDrainer(
                     )
                     continue
                 }
-                budget -= wireSize
+                tally.bytesLeft -= wireSize
                 tally.attempted = true
 
                 val outcome = attempt {
@@ -519,15 +553,21 @@ class OutboxDrainer(
         }
     }
 
-    private suspend fun forgetLostFile(tally: DrainTally, entry: OutboxEntry, noun: String) {
+    // A recording's row goes with its file: the harvest finds files, and there
+    // is none left to queue again. A document's row stays, set aside as gone,
+    // because it is the WhatsApp card's only memory of that document.
+    private suspend fun forgetLostFile(tally: DrainTally, entry: OutboxEntry, files: FileKind) {
         val folder = entry.filePath.orEmpty().loggableDirectory()
-        dao.delete(listOf(entry.id))
+        val reason = "its file is no longer under $folder, so nothing can be uploaded"
+        val verb = if (files.ownsFile) {
+            dao.delete(listOf(entry.id))
+            "Dropping"
+        } else {
+            dao.markDeadIds(listOf(entry.id), now(), reason, DeadReason.GONE)
+            "Setting aside"
+        }
         tally.lost++
-        Log.w(
-            TAG,
-            "Dropping $noun row ${entry.id}: its file is no longer under " +
-                "$folder, so nothing can be uploaded",
-        )
+        Log.w(TAG, "$verb ${files.noun} row ${entry.id}: $reason")
     }
 
     private suspend fun abandon(
@@ -624,16 +664,16 @@ class OutboxDrainer(
     companion object {
         const val LOCATION_BATCH = 200
         const val CALL_LOG_BATCH = 100
-        const val RECORDING_BATCH = 3
+        const val FILE_BATCH = 3
         const val MAX_ATTEMPTS = 25
 
         const val MAX_REVIVALS = 3
 
         const val ATTEMPTS_AFTER_REVIVAL = MAX_ATTEMPTS - 1
 
-        const val MAX_RECORDING_BYTES = 36L * 1024 * 1024
+        const val MAX_FILE_BYTES = 36L * 1024 * 1024
 
-        const val RECORDING_BYTES_PER_DRAIN = 64L * 1024 * 1024
+        const val FILE_BYTES_PER_DRAIN = 64L * 1024 * 1024
 
         const val BATCHES_PER_DRAIN = 25
 
@@ -666,7 +706,7 @@ class OutboxDrainer(
             OutboxKind.RECORDING,
             "recording",
             "recording",
-            RecordingBody.AUDIO_KEY,
+            FileBody.AUDIO_KEY,
             ownsFile = true,
         ) {
             WireJson.encodeToJsonElement(WireJson.decodeFromString<RecordingMetadata>(it))
@@ -677,7 +717,7 @@ class OutboxDrainer(
             OutboxKind.DOCUMENT,
             "document",
             "document",
-            RecordingBody.FILE_KEY,
+            FileBody.FILE_KEY,
             ownsFile = false,
         ) {
             WireJson.encodeToJsonElement(WireJson.decodeFromString<DocumentMetadata>(it))

@@ -8,7 +8,6 @@ import org.junit.Test
 
 class WhatsAppPanelTest {
     private fun sighting(n: Int, found: Boolean = false) = Sighting(
-        key = "k$n",
         app = "com.whatsapp",
         chat = "A",
         sender = "A",

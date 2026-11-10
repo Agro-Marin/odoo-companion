@@ -35,16 +35,22 @@ object SyncScheduler {
 
     // A call writes its row and then updates it; one pass covers both.
     private val CALL_LOG_QUIET: Duration = Duration.ofSeconds(5)
-    private const val UPLOAD_NOW = "upload-now"
+    internal const val UPLOAD_NOW = "upload-now"
     private const val COLLECT_NOW = "collect-now"
     const val UPLOAD_FOLLOWS = "upload-follows"
 
-    fun schedulePeriodicWork(context: Context, settings: Settings) {
+    // A new link -- the handset moved to another enrolment -- re-registers the
+    // periodic upload: UPDATE keeps its backoff, which the previous server earned.
+    fun schedulePeriodicWork(context: Context, settings: Settings, newLink: Boolean = false) {
         val manager = WorkManager.getInstance(context)
 
         manager.enqueueUniquePeriodicWork(
             UPLOAD_PERIODIC,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            if (newLink) {
+                ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+            } else {
+                ExistingPeriodicWorkPolicy.UPDATE
+            },
             PeriodicWorkRequestBuilder<UploadWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(networkConstraints(settings.wifiOnlyUploads))
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
@@ -167,6 +173,17 @@ object SyncScheduler {
             CALL_LOG_NOW,
             ExistingWorkPolicy.APPEND_OR_REPLACE,
             OneTimeWorkRequestBuilder<CallLogSyncWorker>().build(),
+        )
+    }
+
+    // An upload that starts now whatever is pending: for a new enrolment, and
+    // for what a person just asked to be sent. uploadNow's KEEP keeps a request
+    // backing off -- up to five hours -- and every later ask waits behind it.
+    fun uploadAfresh(context: Context, wifiOnlyUploads: Boolean) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            UPLOAD_NOW,
+            ExistingWorkPolicy.REPLACE,
+            uploadRequest(wifiOnlyUploads),
         )
     }
 

@@ -1,13 +1,13 @@
 package com.odoocompanion.softphone
 
+import com.odoocompanion.net.objectAt
+import com.odoocompanion.net.primitive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The extension this handset's softphone registers on the company phone system:
- * its user's, as Odoo's device_voip hands it out behind the device token.
+ * its user's, as Odoo's voip_device hands it out behind the device token.
  */
 data class SoftphoneSettings(val username: String, val secret: String, val domain: String,) {
     val identity: String get() = "sip:$username@$domain"
@@ -24,10 +24,8 @@ data class SoftphoneSettings(val username: String, val secret: String, val domai
 
         /** The `sip` object of a softphone reply, or null when it is unusable. */
         fun fromReply(body: JsonObject?): SoftphoneSettings? {
-            val sip = runCatching { body?.get("sip")?.jsonObject }.getOrNull() ?: return null
-            fun field(name: String) = runCatching {
-                sip[name]?.jsonPrimitive?.contentOrNull
-            }.getOrNull()?.trim().orEmpty()
+            val sip = body.objectAt("sip") ?: return null
+            fun field(name: String) = sip.primitive(name)?.contentOrNull?.trim().orEmpty()
             val settings = SoftphoneSettings(field("username"), field("secret"), field("domain"))
             val transport = field("transport").ifEmpty { "tls" }
             return settings.takeIf {
