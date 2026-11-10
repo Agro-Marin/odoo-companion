@@ -111,14 +111,11 @@ class RecordingHarvestTest {
         assertEquals(2, harvest().queueNew())
     }
 
-    // Proven on the previous tree: the second file was never queued, because
-    // its write time fell below where the cursor had already reached.
     @Test
     fun `a recording stamped before an earlier harvest is still queued`() = runTest {
         recording("first.m4a", modifiedAt = clock - 120_000)
         harvest().queueNew()
 
-        // The phone's clock is corrected an hour backwards before the next call.
         clock -= 3_600_000
         recording("second.m4a", modifiedAt = clock - 120_000)
         clock += 7_200_000
@@ -127,8 +124,6 @@ class RecordingHarvestTest {
         assertEquals(2, dao.countOf(OutboxKind.RECORDING))
     }
 
-    // Delivered, file left behind because it would not delete: the row is kept
-    // dead precisely so that this pass does not treat the file as new.
     @Test
     fun `a recording delivered but left on disk is not queued again`() = runTest {
         recording("a.m4a")
@@ -213,10 +208,6 @@ class RecordingHarvestTest {
         assertEquals(null, audioDurationSeconds(File(root, "missing.m4a")))
     }
 
-    // The periodic harvest, the one a call's end asks for and the Sync now
-    // chain are three work names, and two of them at once each found the file
-    // unqueued. The first delivery deleted it, and the second row was then
-    // counted as a recording lost.
     @Test
     fun `two harvests at once queue a recording once`() = runTest {
         recording("call_5512345678.m4a")

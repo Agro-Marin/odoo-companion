@@ -186,7 +186,6 @@ class OdooClientTest {
         return (OdooClient().post(settings(), "calllog", "{}") as UploadOutcome.Retry).linkDown
     }
 
-    // Which retries end a drain pass: the ones the next request would meet too.
     @Test
     fun `a failure that answers for every request is told apart from one that does not`() =
         runTest {
@@ -200,9 +199,6 @@ class OdooClientTest {
             assertTrue("a portal", linkDownFor(MockResponse(body = "<html>login</html>")))
         }
 
-    // A 401 or a 404 is about the device and its token only when Odoo says it.
-    // A firewall's own 403 page is about this request's content, and a proxy's
-    // 503 says the server behind it is down, whatever page it serves.
     @Test
     fun `only Odoo's refusal of the device ends the pass, a firewall's page does not`() = runTest {
         val page = "<html>Request blocked</html>"
@@ -235,10 +231,6 @@ class OdooClientTest {
         assertFalse(timedOut.reason, timedOut.linkDown)
     }
 
-    // `status` proves the delivery; the counters only tally it. Reading them
-    // threw on any other shape, and the drain recorded the parser's own message
-    // under "Cannot build a request". Refusing the reply over them instead
-    // retried a delivered batch for ever and stopped every pass behind it.
     @Test
     fun `a success whose counters are mistyped is still a delivery`() = runTest {
         listOf("""{"n":2}""", "\"2\"", "2.0").forEach { accepted ->

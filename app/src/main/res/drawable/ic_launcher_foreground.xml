@@ -1,6 +1,3 @@
-<!-- The launcher pin, drawn in the 108dp space an adaptive foreground uses.
-     The mark is scaled to 60dp and centred, which keeps it inside the 72dp
-     safe zone every launcher mask is guaranteed to leave visible. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"

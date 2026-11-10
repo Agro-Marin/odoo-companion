@@ -30,8 +30,6 @@ internal data class Call(
     val cachedName: String? = null,
     val modified: Long = date,
     val presentation: Int = CallLog.Calls.PRESENTATION_ALLOWED,
-    // Zero means "let the provider assign one", which it does by position, the
-    // way an insert would. A test that cares about ids sets them itself.
     val id: Long = 0,
 )
 
@@ -104,7 +102,6 @@ internal class FakeCallLogProvider : ContentProvider() {
         var lastSelection: String? = null
         var lastLimit: Int? = null
 
-        // Runs inside every read of new calls, on the reading thread.
         var onRead: () -> Unit = {}
     }
 }
@@ -285,9 +282,6 @@ class CallLogReaderTest {
         assertEquals(250, numbers.toSet().size)
     }
 
-    // A first sync, or one after the provider's storage was wiped, asked for the
-    // whole log and read a thousand rows of it: the provider built a cursor over
-    // every row above the cursor regardless.
     @Test
     fun `a batch asks the provider for no more rows than it can read`() {
         FakeCallLogProvider.calls =
@@ -300,9 +294,6 @@ class CallLogReaderTest {
         assertTrue(batch.moreWaiting)
     }
 
-    // The rule this replaces let a batch overrun its limit to avoid cutting
-    // through rows that shared a timestamp, because a cursor set mid-run would
-    // skip the rest of it. Ids do not tie, so the limit is now exactly a limit.
     @Test
     fun `a batch stops at its limit, since ids cannot tie across the boundary`() {
         FakeCallLogProvider.calls = listOf(
@@ -330,8 +321,6 @@ class CallLogReaderTest {
         assertEquals(77, batch.cursor)
     }
 
-    // Proven against the LAST_MODIFIED cursor before this change: it read
-    // nothing at all, for ever, and the worker reported success.
     @Test
     fun `rows the provider never stamped are still read`() {
         FakeCallLogProvider.calls = listOf(
@@ -345,8 +334,6 @@ class CallLogReaderTest {
         assertEquals(2, batch.cursor)
     }
 
-    // Proven against the LAST_MODIFIED cursor before this change: the call
-    // stamped after the correction landed below the cursor and was lost.
     @Test
     fun `a call stamped after the clock stepped backwards is still read`() {
         FakeCallLogProvider.calls = listOf(
@@ -474,14 +461,11 @@ class CallLogCursorTest {
 
     @Test
     fun `a long call that ends after a shorter one was synced is read on the next pass`() {
-        // Android inserts a call-log row when the call ENDS, stamped with its START time.
-        // A: starts at 100, still in progress. B: call-waiting at 200, missed, row written.
         FakeCallLogProvider.calls = listOf(Call(number = "+B", date = 200))
         val reader = CallLogReader(context.contentResolver) { 1_000 }
         val first = reader.readSince(0)
         assertEquals(1, first.entries.size)
 
-        // A ends now; its row lands with DATE 100, behind a cursor kept on DATE.
         FakeCallLogProvider.calls = listOf(
             Call(number = "+B", date = 200),
             Call(number = "+A", date = 100, modified = 700),
@@ -491,8 +475,6 @@ class CallLogCursorTest {
         val payload = Json.parseToJsonElement(second.entries.single().payload).jsonObject
         assertEquals("+A", payload.getValue("number").jsonPrimitive.content)
         assertEquals(100, payload.getValue("timestamp").jsonPrimitive.content.toLong())
-        // The cursor is the row's id now, not the moment it was stamped. What
-        // this test pins is unchanged: the late row is read on the next pass.
         assertEquals(2, second.cursor)
     }
 }

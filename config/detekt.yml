@@ -2,8 +2,6 @@ build:
   maxIssues: 0
 
 style:
-  # Timeouts, HTTP status codes and batch sizes read better inline than as a
-  # wall of one-use constants; the ones that carry meaning are already named.
   MagicNumber:
     active: false
   ReturnCount:

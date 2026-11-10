@@ -13,19 +13,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import com.odoocompanion.R
 
-/**
- * Rings an incoming company call: the app's own job, since the system's
- * ringing UI is not shown for a self-managed call and the SIP stack's native
- * ringing needs androidx.media, which this app does not ship (it falls back to
- * a ringtone file the APK leaves out). The channel carries the handset's
- * ringtone and a vibration; the notification repeats both until it is answered,
- * declined or the caller gives up.
- */
 object SoftphoneRinging {
     private const val TAG = "SoftphoneRinging"
 
-    // A channel's sound is fixed once it exists, so the first build's silent
-    // channel is replaced under a new id rather than edited.
     const val CHANNEL_ID = "softphone_incoming"
     private const val RETIRED_CHANNEL_ID = "softphone_ringing"
     private const val NOTIFICATION_ID = 3
@@ -53,10 +43,6 @@ object SoftphoneRinging {
         )
     }
 
-    /**
-     * Rings, over the lock screen when the system lets it. [silent] keeps the
-     * notification and drops the sound: the volume key silences a ringing call.
-     */
     fun ring(context: Context, remote: String?, silent: Boolean = false) {
         ensureChannel(context)
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -71,8 +57,6 @@ object SoftphoneRinging {
             InCallActivity.intent(context),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        // answering opens the call screen, which is what lets the service take
-        // the microphone from the background
         val answer = PendingIntent.getActivity(
             context,
             1,

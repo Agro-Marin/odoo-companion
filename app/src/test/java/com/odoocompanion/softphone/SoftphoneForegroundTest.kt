@@ -34,8 +34,6 @@ class SoftphoneForegroundTest {
 
     @Test
     fun `every set keeps a type android 15 allows after a boot start`() {
-        // the boot-start reason is kept for the service's life, and a set with
-        // none of the allowed types is refused for it as the boot start would be
         val all = SoftphoneService.foregroundChoices(false) +
             SoftphoneService.foregroundChoices(true)
 

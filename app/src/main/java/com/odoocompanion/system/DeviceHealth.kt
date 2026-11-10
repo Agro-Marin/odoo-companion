@@ -31,11 +31,8 @@ data class HealthReport(
     val recordingStorageGranted: Boolean,
     val exemptFromBatteryOptimization: Boolean,
     val microphoneGranted: Boolean,
-    // Always true below Android 17, where no such permission exists.
     val localNetworkGranted: Boolean,
 ) {
-    // localNetworkWanted: Odoo or the phone system is on a local address
-    // (LocalNetwork.anyLocal), which an app targeting 17 cannot reach without it.
     fun blockers(
         callLogWanted: Boolean,
         recordingsWanted: Boolean,
@@ -73,10 +70,6 @@ object DeviceHealth {
             granted(context, Manifest.permission.ACCESS_LOCAL_NETWORK),
     )
 
-    // What to ask for, from the same switches blockers() reads, so a
-    // collector that is off never costs the person a prompt. Storage is the
-    // legacy pair: from Android 11 recordings need all-files access instead,
-    // which is a settings screen, not a runtime permission.
     fun wantedPermissions(
         callLogWanted: Boolean,
         recordingsWanted: Boolean,

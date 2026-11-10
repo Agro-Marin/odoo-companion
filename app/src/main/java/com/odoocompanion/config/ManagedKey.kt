@@ -1,10 +1,5 @@
 package com.odoocompanion.config
 
-// Each name is three things at once: the restriction key in
-// app_restrictions.xml, the preference key the value is stored under, and the
-// key the form locks by. DeviceConfig decides whether a field is governed by
-// comparing its preference key's name with the policy's keys, which only works
-// while the two are one string -- so they are spelled once, here.
 object ManagedKey {
     const val BASE_URL = "base_url"
     const val IDENTIFIER = "identifier"

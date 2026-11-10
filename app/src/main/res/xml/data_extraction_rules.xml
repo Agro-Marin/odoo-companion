@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The config store holds a device Bearer token and the outbox holds unsent
-     location and call data. Neither belongs in a cloud backup or on a phone the
-     user transferred to, so both transports are excluded outright. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" />

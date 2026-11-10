@@ -10,14 +10,7 @@ import org.linphone.core.Core
 import org.linphone.core.Reason
 import org.linphone.core.RegistrationState
 
-/**
- * The softphone's calls, between the SIP stack that carries them and the
- * system's Telecom framework that routes their audio and holds them. Which
- * call owns which connection is [SoftphoneCallBook]'s, checkable on its own;
- * this is the glue that applies it. Everything here runs on the main thread:
- * the SIP stack iterates there and Telecom calls back there.
- */
-@SuppressLint("StaticFieldLeak") // the application context, never an activity
+@SuppressLint("StaticFieldLeak")
 object SoftphoneCalls {
     private const val TAG = "SoftphoneCalls"
     private const val MAX_CALL_MILLIS = 4L * 60 * 60 * 1000
@@ -32,21 +25,17 @@ object SoftphoneCalls {
 
     val book = SoftphoneCallBook<SoftphoneConnection>()
 
-    /** Told after every call event: the service moves its foreground type with it. */
     var onChanged: (() -> Unit)? = null
 
-    /** Whether audio goes to the loudspeaker, as Telecom last reported the route. */
     var speaker = false
         private set
 
     private var earpiece = false
     private var proximity: PowerManager.WakeLock? = null
 
-    /** The call the screen shows: the one whose connection Telecom holds. */
     val call: Call?
         get() = book.current?.let(::callOf)
 
-    /** Whoever is on the other end of the current call, for the screen. */
     val remote: String?
         get() = call?.let(::nameOf)
 
@@ -59,7 +48,6 @@ object SoftphoneCalls {
         Log.i(TAG, "Call $state")
         val id = call.callLog.callId
         if (id == null) {
-            // nothing to key it by, so nothing it could be matched to
             if (state == Call.State.IncomingReceived) call.decline(Reason.Busy)
             return
         }
@@ -69,8 +57,6 @@ object SoftphoneCalls {
             Call.State.Connected, Call.State.StreamsRunning -> book.connectionOf(id)?.activate()
 
             Call.State.End, Call.State.Error, Call.State.Released -> {
-                // only the call a connection belongs to may end it: a second
-                // call declined busy ends here too, and must leave the first alone
                 val ended = book.ended(id)
                 if (ended != null) {
                     val cause = SoftphoneCallBook.disconnectCause(
@@ -101,7 +87,6 @@ object SoftphoneCalls {
         }
     }
 
-    /** The system will not take the reported call: decline it so the caller hears busy. */
     fun refuse(callId: String?) {
         val refused = book.refuseIncoming(callId) ?: return
         core?.getCallByCallid(refused)?.decline(Reason.Busy)
@@ -117,20 +102,14 @@ object SoftphoneCalls {
         if (call.state in INCOMING) call.decline(Reason.Declined) else call.terminate()
     }
 
-    /** Whether the current call is still ringing, on the screen and on the red button alike. */
     val ringing: Boolean
         get() = call?.state in INCOMING
 
-    // The red button, on the call screen or the ringing notice: declines a call
-    // still ringing and ends one on the line. With no connection there is no
-    // call, only the insistent ringing a call that is gone may have left --
-    // after a process death nothing else cancels it, and Decline did nothing.
     fun hangUpCurrent(context: Context) {
         val connection = book.current ?: return SoftphoneRinging.stop(context)
         if (ringing) connection.reject() else connection.disconnect()
     }
 
-    /** Whether the current call is one the system held, for a cellular call over it. */
     val held: Boolean
         get() = call?.state == Call.State.Paused
 
@@ -140,7 +119,6 @@ object SoftphoneCalls {
 
     fun resume(connection: SoftphoneConnection): Boolean = callOf(connection)?.resume() == 0
 
-    /** Dials out; the new call belongs to [connection]. False when it could not be placed. */
     fun dial(number: String, connection: SoftphoneConnection): Boolean {
         val core = core ?: return false
         val address = core.interpretUrl(number, true) ?: return false
@@ -163,14 +141,12 @@ object SoftphoneCalls {
     val muted: Boolean
         get() = core?.isMicEnabled == false
 
-    /** The system's report of where the audio goes. */
     fun onRoute(speaker: Boolean, earpiece: Boolean) {
         this.speaker = speaker
         this.earpiece = earpiece
         changed()
     }
 
-    /** Every connection still open, for a SIP stack going away under them. */
     fun abandon() {
         book.clear().forEach { it.end(DisconnectCause.LOCAL) }
         changed()
@@ -184,8 +160,6 @@ object SoftphoneCalls {
         InCallActivity.refresh()
     }
 
-    // the screen goes dark against the ear, as the dialer's does, so a cheek
-    // cannot hang up or mute the call
     private fun holdProximity(wanted: Boolean) {
         val lock = proximity ?: newProximityLock()?.also { proximity = it } ?: return
         if (wanted && !lock.isHeld) {

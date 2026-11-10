@@ -99,8 +99,6 @@ class DocumentClassifierTest {
         )
     }
 
-    // A title alone is not the document: each of these is what a customer may
-    // well send, and each was uploaded as an identity document or a constancia.
     @Test
     fun `a document that only mentions an identity document stays on the handset`() {
         listOf(

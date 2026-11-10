@@ -28,7 +28,6 @@ class SoftphoneCallBookTest {
         ringing()
 
         assertEquals(Offer.DECLINE_BUSY, book.offer("call-2"))
-        // the SIP stack reports the declined call's End and Released
         assertNull(book.ended("call-2"))
         assertNull(book.ended("call-2"))
 
@@ -143,7 +142,6 @@ class SoftphoneCallBookTest {
 
     @Test
     fun `every way a call ends is a cause telecom takes for an app's own call`() {
-        // CallControl.disconnect throws on any other, and nothing catches it
         val states = listOf(Call.State.End, Call.State.Error, Call.State.Released, null)
         val statuses = Call.Status.entries + null
         val reasons = Reason.entries + null

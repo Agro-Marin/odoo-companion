@@ -11,7 +11,6 @@ import com.odoocompanion.databinding.ActivityInCallBinding
 import org.linphone.core.Call
 import java.lang.ref.WeakReference
 
-/** The company line's call screen: answer, hang up, mute, speaker, or dial. */
 class InCallActivity : AppCompatActivity() {
     private lateinit var binding: ActivityInCallBinding
 
@@ -36,9 +35,6 @@ class InCallActivity : AppCompatActivity() {
         if (savedInstanceState == null) handle(intent)
     }
 
-    // The system silenced a ringing call with the volume or power key through
-    // onSilence, which Core-Telecom does not carry; with the call screen in
-    // front, a volume key does it here.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode !in SILENCING_KEYS || !SoftphoneCalls.ringing) {
             return super.onKeyDown(keyCode, event)
@@ -55,8 +51,6 @@ class InCallActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         current = WeakReference(this)
-        // on screen, the service may take the microphone it could not take
-        // from the background when the call was answered
         SoftphoneCalls.changed()
     }
 

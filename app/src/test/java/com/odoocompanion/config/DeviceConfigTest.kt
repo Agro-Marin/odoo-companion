@@ -72,9 +72,6 @@ class DeviceConfigTest {
         )
     }
 
-    // The form already refused this; a policy carrying it was stored, and every
-    // upload after it died in the socket on a release build, each one charged
-    // to the queue as though the link were at fault.
     @Test
     fun `a build that cannot send cleartext ignores an http base url a policy pushes`() = runTest {
         val file = File.createTempFile("companion", ".preferences_pb").apply { delete() }
@@ -98,9 +95,6 @@ class DeviceConfigTest {
         assertTrue("the key is still the policy's", "base_url" in settings.governedKeys)
     }
 
-    // The documented way to let one production host take plain HTTP is a
-    // network_security_config.xml entry for it, and OkHttp asks the policy per
-    // host. Asking the global question refused that host at enrolment.
     @Test
     fun `a host the network security policy opens takes an http base url`() = runTest {
         val file = File.createTempFile("companion", ".preferences_pb").apply { delete() }

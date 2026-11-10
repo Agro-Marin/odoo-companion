@@ -35,10 +35,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
 
-// A row goes only to the server and device record it was collected for. A
-// handset moved to another Odoo -- or to another device record on the same one
-// -- used to send the old enrolment's calls, recordings and positions to the
-// new one, under the new device.
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
 class EnrollmentHoldTest {
@@ -213,9 +209,6 @@ class EnrollmentHoldTest {
         assertNull("nothing to stamp before there is an enrolment", Settings().enrollment)
     }
 
-    // An exhausted row of the old enrolment is never revived here, so calling it
-    // undeliverable -- "fix the device in Odoo and they will be retried" -- told
-    // the operator to fix a device the row will never be sent to.
     @Test
     fun `an exhausted row of a previous enrolment is held, not undeliverable`() = runTest {
         val theirs = queueCall(previous)
@@ -227,9 +220,6 @@ class EnrollmentHoldTest {
         assertEquals(1, counts.held)
     }
 
-    // Moved twice: the band names the newest previous enrolment, so that is all
-    // that its buttons may hand over. Sending the oldest one's rows to this
-    // server on the word of a dialog naming another was the leak this closes.
     @Test
     fun `the held band counts, sends and discards one previous enrolment at a time`() = runTest {
         val oldest = settings("phone-00").enrollment!!
@@ -253,9 +243,6 @@ class EnrollmentHoldTest {
         assertEquals(2, dao.counts(current).first().calls)
     }
 
-    // An upgrade's backlog was queued before rows carried their enrolment, and
-    // a null row reads as the current enrolment's: moved while that backlog
-    // waited out an unreachable server, the handset sent it to the new one.
     @Test
     fun `rows queued before rows were stamped stay with the enrolment that was left`() = runTest {
         val file = File.createTempFile("enrolment", ".preferences_pb").apply { delete() }
@@ -276,7 +263,6 @@ class EnrollmentHoldTest {
         assertEquals(1, counts.held)
         assertEquals(previous, counts.heldFor)
 
-        // A policy moves the handset the same way the form does.
         queueCall(null, at = 2L)
         config.applyManaged(
             ManagedValues(

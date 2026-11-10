@@ -29,18 +29,13 @@ object SyncScheduler {
     internal const val CALL_ENDED_TRIGGER = "call-ended-trigger"
     internal const val RECORDING_AFTER_CALL = "recording-after-call"
 
-    // The scanner takes a file only once it has been still for SETTLE_MILLIS, so
-    // a harvest asked for as the call ends would find the recording too fresh.
     internal const val RECORDING_AFTER_CALL_DELAY_MILLIS = RecordingScanner.SETTLE_MILLIS + 30_000L
 
-    // A call writes its row and then updates it; one pass covers both.
     private val CALL_LOG_QUIET: Duration = Duration.ofSeconds(5)
     internal const val UPLOAD_NOW = "upload-now"
     private const val COLLECT_NOW = "collect-now"
     const val UPLOAD_FOLLOWS = "upload-follows"
 
-    // A new link -- the handset moved to another enrolment -- re-registers the
-    // periodic upload: UPDATE keeps its backoff, which the previous server earned.
     fun schedulePeriodicWork(context: Context, settings: Settings, newLink: Boolean = false) {
         val manager = WorkManager.getInstance(context)
 
@@ -79,18 +74,12 @@ object SyncScheduler {
         }
     }
 
-    // The periodic collectors are the safety net; this trigger is what makes a
-    // call and its recording reach Odoo minutes after the call instead of up
-    // to an hour later. Observing the call log needs the permission to read it.
     fun wantsCallEndedTrigger(context: Context, settings: Settings): Boolean =
         settings.isEnrolled &&
             (settings.callLogEnabled || settings.recordingsEnabled) &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) ==
             PackageManager.PERMISSION_GRANTED
 
-    // Called by the trigger's own worker while it is still running: APPEND
-    // queues the next trigger behind it, where REPLACE would cancel the worker
-    // and KEEP would see the running worker and enqueue nothing.
     fun rearmCallEndedTrigger(context: Context) {
         armCallEndedTrigger(WorkManager.getInstance(context), ExistingWorkPolicy.APPEND_OR_REPLACE)
     }
@@ -110,9 +99,6 @@ object SyncScheduler {
         )
     }
 
-    // Each collector asks for its own upload when it queued something, as it
-    // does when run periodically. A second call inside the delay replaces the
-    // pending harvest, so the later recording has settled when it runs.
     fun afterCall(context: Context, settings: Settings) {
         if (!settings.isEnrolled) return
         if (settings.callLogEnabled) collectCallLogNow(context)
@@ -176,9 +162,6 @@ object SyncScheduler {
         )
     }
 
-    // An upload that starts now whatever is pending: for a new enrolment, and
-    // for what a person just asked to be sent. uploadNow's KEEP keeps a request
-    // backing off -- up to five hours -- and every later ask waits behind it.
     fun uploadAfresh(context: Context, wifiOnlyUploads: Boolean) {
         WorkManager.getInstance(context).enqueueUniqueWork(
             UPLOAD_NOW,

@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# Formatting (ktlint), static analysis (detekt) and Android Lint in one pass.
-#
-# Usage: tools/lint.sh [--fix] [--static-only]
-#
-#   --fix          let ktlint rewrite what it can
-#   --static-only  ktlint and detekt, without Android Lint: for a machine with
-#                  no Gradle or SDK setup, or a pass that does not need a full
-#                  Android build to answer.
-#
-# KTLINT and DETEKT may point at a specific binary; otherwise PATH is used. The
-# version is checked either way, because "clean" is only a claim about the
-# version that said it.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,11 +18,6 @@ for arg in "$@"; do
     esac
 done
 
-# A tool that is absent, or is not the pinned version, does not get to report a
-# clean tree. Both failures used to pass silently: a CI job (since deleted)
-# chmod'd a launcher name that does not exist in the release zip, so it died
-# before either tool ran, and a local ktlint two minors ahead of the pin called the tree clean when
-# the pinned one would not.
 require() {
     local name="$1" tool="$2" want="$3" got
     if ! got=$("$tool" --version 2>/dev/null); then
@@ -61,16 +44,8 @@ else
 fi
 
 echo "== detekt $DETEKT_VERSION =="
-# Tests included: they are half the Kotlin here, they encode the delivery
-# semantics nothing else states, and they were analysed by nothing.
 "$DETEKT" --input app/src/main/java,app/src/test/java --config config/detekt.yml || status=1
 
-# detekt's SwallowedException and TooGenericExceptionCaught are both on, and
-# neither can see this: they inspect `catch` blocks, and `runCatching` catches
-# Throwable -- CancellationException included. A drain stopped by WorkManager
-# was being charged to the retry budget as if the server had refused it, with a
-# clean detekt report the whole time. `attempt` in OutboxDrainer rethrows
-# cancellation; nothing in the upload path may go back to the bare form.
 echo "== cancellation-safe suspend calls =="
 bare=$(grep -rn 'runCatching' app/src/main/java/com/odoocompanion/sync || true)
 if [ -n "$bare" ]; then
@@ -79,16 +54,6 @@ if [ -n "$bare" ]; then
     status=1
 fi
 
-# A call recording is named by an OEM dialer, and the project's own filename
-# corpus is why that matters: "call_5512345678.m4a", "Call recording
-# +525512345678_251028_143501.m4a". A log line carrying the path carries the
-# counterparty's phone number into logcat, into every bug report, and into
-# whatever the OEM ships logs to. The directory is the useful diagnostic --
-# it names the per-OEM folder -- and holds nothing personal.
-# The same holds for what WhatsApp and the call log say about a person: a
-# chat's or sender's name, a phone number, an RFC, a document's label, the
-# number a call came from. Testing one against null logs only that it is there,
-# which is allowed; anything else that names it inside a log call fails.
 echo "== no recording paths or personal fields in log statements =="
 leaked=$(python3 - <<'PYEOF'
 import pathlib, re, sys
@@ -111,8 +76,6 @@ for path in pathlib.Path("app/src/main").rglob("*.kt"):
             index += 1
         return index
 
-    # debug {} takes its message as a trailing lambda, so the call runs to the
-    # closing brace, not the closing parenthesis.
     for match in re.finditer(r"(?:\bLog\.[vdiwe]|\bdebug)\(", text):
         index = closing(match.end() - 1, "(", ")")
         rest = text[index + 1:]

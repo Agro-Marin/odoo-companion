@@ -100,8 +100,6 @@ class UploadWorkerTest {
         assertEquals(settings.lastUploadAt, settings.lastAttemptAt)
     }
 
-    // 503 is the link, not a verdict on the row: that is the path that still
-    // asks WorkManager to retry. A 500 now defers the row and reports success.
     @Test
     fun `a failed drain records the attempt as well as the error`() = runTest {
         enroll()

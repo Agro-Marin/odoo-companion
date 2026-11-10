@@ -37,9 +37,6 @@ import org.robolectric.annotation.Config
 import java.io.File
 import java.util.Base64
 
-// A document rides the recording's path -- one streamed file per request --
-// with the one difference that its file is WhatsApp's: it is never deleted,
-// not on delivery and not when a set-aside row is purged.
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
 class DocumentDrainTest {
@@ -150,8 +147,6 @@ class DocumentDrainTest {
         val PDF = "%PDF-1.4 a constancia".toByteArray()
     }
 
-    // A document's row is the card's only memory of what became of it: dropped
-    // when WhatsApp's file went, the card read the empty queue as delivered.
     @Test
     fun `a document whose file is gone is never shown as delivered`() = runTest {
         val pdf = queueDocument()

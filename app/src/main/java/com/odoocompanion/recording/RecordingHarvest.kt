@@ -19,12 +19,7 @@ class RecordingHarvest(
     private val durationOf: (File) -> Long? = ::audioDurationSeconds,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    // Three work names run a harvest -- the periodic one, the one a call's end
-    // asks for, and the Sync now chain -- and the outbox is its only memory of
-    // a file: two at once each found the file unqueued and queued it twice.
     suspend fun queueNew(): Int = harvesting.withLock {
-        // Live and dead rows alike: a recording set aside, or one uploaded
-        // whose file could not be removed, must not be queued a second time.
         val alreadyQueued = dao.filesQueued(OutboxKind.RECORDING).toHashSet()
         val fresh = mutableListOf<OutboxEntry>()
         val found = RecordingScanner(root, now).scan()

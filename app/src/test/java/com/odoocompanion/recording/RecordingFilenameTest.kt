@@ -9,7 +9,6 @@ import java.io.File
 import java.util.Calendar
 
 class RecordingFilenameTest {
-    // 40 days past any stamp used in these names.
     private val movedLater = 1_800_000_000_000L
 
     @get:Rule
@@ -92,10 +91,6 @@ class RecordingFilenameTest {
         assertEquals(target.lastModified(), parsed.recordedAtMillis)
     }
 
-    // Every case below is the same file after its write time stopped agreeing
-    // with the stamp in its name: copied off the handset, restored from a
-    // backup, or touched by a file manager. Before this, all three uploaded the
-    // stamp as the caller's number.
     private val longAfterTheStamp = movedLater
 
     @Test
@@ -125,8 +120,6 @@ class RecordingFilenameTest {
         assertNull(parsed.number)
     }
 
-    // The rule is the shape, and it has to stop where the shape stops being
-    // certain: fourteen digits that are not a real clock are just digits.
     @Test
     fun `fourteen digits with an impossible hour are still a number`() {
         val parsed = RecordingFilename.of(File("20260915993022.m4a"), longAfterTheStamp)

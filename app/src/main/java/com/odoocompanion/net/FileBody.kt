@@ -8,9 +8,6 @@ import java.io.File
 import java.io.InputStream
 import java.util.Base64
 
-// A JSON object whose last member is a file, base64-encoded as it is streamed
-// so a file of tens of megabytes is never held in memory. The member is
-// audio_b64 for a recording and file_b64 for a document.
 internal class FileBody(
     metadata: JsonObject,
     private val file: File,

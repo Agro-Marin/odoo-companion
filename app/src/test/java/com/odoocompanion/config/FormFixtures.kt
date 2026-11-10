@@ -20,7 +20,6 @@ internal fun form(
     uploadWindowSeconds = uploadWindowSeconds,
 )
 
-// Save with only the enrolment typed: every switch stays as stored.
 internal suspend fun DeviceConfig.enrol(
     baseUrl: String,
     identifier: String,

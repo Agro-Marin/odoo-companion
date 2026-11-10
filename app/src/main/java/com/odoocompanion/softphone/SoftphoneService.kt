@@ -28,20 +28,10 @@ import org.linphone.core.MediaEncryption
 import org.linphone.core.RegistrationState
 import org.linphone.core.TransportType
 
-/**
- * Keeps this handset registered as its user's extension on the company phone
- * system, so a call to the company number rings here as it rings in the
- * browser. The phone system records every call; nothing is recorded here.
- *
- * Waiting for a call it runs in the foreground as `specialUse`, a type Android
- * 15 still lets a boot start; only while a call is on the line is it also
- * `phoneCall` and `microphone`, the two types a boot start may not take.
- */
 class SoftphoneService : LifecycleService() {
     private var core: Core? = null
     private var running: SoftphoneSettings? = null
 
-    // what arrived while a call was up, applied when the line is free again
     private var waiting: SoftphoneSettings? = null
     private var stopWhenFree = false
 
@@ -74,7 +64,6 @@ class SoftphoneService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         SoftphoneCalls.appContext = applicationContext
-        // A new service holds no call: any ringing is a dead process's.
         SoftphoneRinging.stop(this)
         SoftphoneRinging.ensureChannel(this)
         if (!enterForeground(onTheLine = false)) {
@@ -96,7 +85,6 @@ class SoftphoneService : LifecycleService() {
             ACTION_STOP -> stopWhenFree()
 
             else -> lifecycleScope.launch {
-                // the app holds the one store: DataStore refuses two on one file
                 val settings = CompanionApp.from(applicationContext).softphones.current()
                 if (settings == null) {
                     stopWhenFree()
@@ -125,7 +113,6 @@ class SoftphoneService : LifecycleService() {
         }
     }
 
-    // a change of extension or secret never cuts a call short
     private fun configure(settings: SoftphoneSettings) {
         if (settings == running) {
             waiting = null
@@ -142,8 +129,6 @@ class SoftphoneService : LifecycleService() {
     private fun onCallsChanged() {
         enterForeground(SoftphoneCalls.onTheLine())
         if (waiting == null && !stopWhenFree) return
-        // the SIP stack is mid-callback here: replace or stop it after it
-        // returns, which Main.immediate, the scope's own dispatcher, would not wait for
         lifecycleScope.launch(Dispatchers.Main) {
             if (!lineFree()) return@launch
             if (stopWhenFree) {
@@ -157,7 +142,6 @@ class SoftphoneService : LifecycleService() {
         }
     }
 
-    /** Foreground as the moment needs, false when the system refuses even that. */
     private fun enterForeground(onTheLine: Boolean): Boolean {
         for (types in foregroundChoices(onTheLine)) {
             if (types == foregroundTypes) return true
@@ -166,12 +150,8 @@ class SoftphoneService : LifecycleService() {
                 foregroundTypes = types
                 return true
             } catch (e: SecurityException) {
-                // the microphone, from the background: the call goes on as
-                // phoneCall, and the call screen coming up takes it again
                 Log.w(TAG, "Foreground type 0x${types.toString(HEX)} refused", e)
             } catch (e: IllegalStateException) {
-                // ForegroundServiceStartNotAllowedException: never a crash, which
-                // would take the location service down with it
                 Log.w(TAG, "Foreground type 0x${types.toString(HEX)} not allowed now", e)
             }
         }
@@ -190,17 +170,13 @@ class SoftphoneService : LifecycleService() {
     private fun register(settings: SoftphoneSettings) {
         release()
         val factory = Factory.instance()
-        // read when the core is created, so they go in before it is
         val config = factory.createConfigFromString(SoftphoneEngine.CONFIG)
         val core = factory.createCoreWithConfig(config, applicationContext).apply {
             isVideoCaptureEnabled = false
             isVideoDisplayEnabled = false
-            // DTLS-SRTP and ICE, as the phone system's WebRTC extension expects;
-            // a call is never sent in the clear
             mediaEncryption = MediaEncryption.DTLS
             isMediaEncryptionMandatory = true
             isKeepAliveEnabled = true
-            // SoftphoneRinging rings, with the handset's ringtone
             isNativeRingingEnabled = false
             ring = null
             ExtraTrust.rootCaData(applicationContext, rootCa)?.let(::setRootCaData)
@@ -278,8 +254,6 @@ class SoftphoneService : LifecycleService() {
         private const val ACTION_DECLINE = "com.odoocompanion.softphone.DECLINE"
         private const val ACTION_STOP = "com.odoocompanion.softphone.STOP"
 
-        // ServiceCompat drops a type the running platform does not define, so
-        // below API 34 the service waits as a plain foreground service
         @SuppressLint("InlinedApi")
         private const val IDLE = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         private const val CALL_TYPES_NO_MICROPHONE =
@@ -289,19 +263,9 @@ class SoftphoneService : LifecycleService() {
         private const val CALL_TYPES =
             CALL_TYPES_NO_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
 
-        /**
-         * The foreground types to try, best first. specialUse stays in every set:
-         * the reason the system recorded for a boot start is kept for the
-         * service's life, and Android 15 refuses a later set holding none of the
-         * types a boot start may take just as it refuses the boot start itself.
-         * Without the microphone, which the background cannot take, a call still
-         * goes on as phoneCall.
-         */
         internal fun foregroundChoices(onTheLine: Boolean): List<Int> =
             if (onTheLine) listOf(CALL_TYPES, CALL_TYPES_NO_MICROPHONE) else listOf(IDLE)
 
-        // whether stop has anything to stop: starting the service only to stop
-        // it would put it in the foreground first
         @Volatile
         private var alive = false
 
@@ -310,7 +274,6 @@ class SoftphoneService : LifecycleService() {
         fun declineIntent(context: Context): Intent =
             Intent(context, SoftphoneService::class.java).setAction(ACTION_DECLINE)
 
-        /** Starts or re-reads the settings; false when the system refused the start. */
         fun start(context: Context): Boolean = try {
             ContextCompat.startForegroundService(
                 context,
@@ -318,12 +281,10 @@ class SoftphoneService : LifecycleService() {
             )
             true
         } catch (e: IllegalStateException) {
-            // ForegroundServiceStartNotAllowedException, from a background trigger
             Log.w(TAG, "Softphone start not allowed now; will retry", e)
             false
         }
 
-        /** Stops, once the line is free: a call in progress is finished, not cut. */
         fun stop(context: Context) {
             if (!alive) return
             val intent = Intent(context, SoftphoneService::class.java)

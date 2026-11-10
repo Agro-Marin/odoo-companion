@@ -283,10 +283,6 @@ class ManagedConfigTest {
         assertTrue(!values!!.policyPresent)
     }
 
-    // What a console offers an administrator is app_restrictions.xml; what this
-    // app reads is ManagedKey. A key in one and not the other is a setting the
-    // console shows and the phone ignores, or one the phone reads that no
-    // console can send.
     @Test
     fun `the restriction schema declares exactly the keys the app reads`() {
         val context: Context = ApplicationProvider.getApplicationContext()

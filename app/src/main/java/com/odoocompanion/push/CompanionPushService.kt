@@ -20,7 +20,6 @@ class CompanionPushService : PushService() {
     }
 
     override fun onMessage(message: PushMessage, instance: String) {
-        // only Odoo holds the auth secret, so only what it sealed is obeyed
         if (!message.decrypted) {
             Log.w(TAG, "Ignoring a wake-up that was not sealed to this handset")
             return

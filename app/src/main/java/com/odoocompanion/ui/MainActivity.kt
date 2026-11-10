@@ -86,26 +86,18 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var guide: EnrollmentGuideView
 
-    // The steps the person closed with "Got it": each comes back once its
-    // field has been filled in and emptied again.
     private val dismissedSteps = mutableSetOf<GuideField>()
 
     private var governedKeys: Set<String> = emptySet()
 
     private var shownAlerts: List<String> = emptyList()
 
-    // Whether the screen last found Odoo or the phone system on a local address:
-    // what the grant button asks for is what the screen says is missing.
     private var localNetworkShown = false
 
-    // What the held band offers to send or discard, as last drawn.
     private var shownHeld: HeldQueue? = null
 
     private var alertsUnfolded = false
 
-    // "Last upload: 2 minutes ago" is how long the phone has been silent, and an
-    // idle phone writes nothing to the store that would redraw it: without a
-    // tick it said "2 minutes ago" for as long as the screen stayed open.
     private val minutes = flow {
         while (true) {
             emit(Unit)
@@ -113,18 +105,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // The grant the WhatsApp card's button opens, as the card last said.
     private var whatsappMissing: WhatsAppGrant? = null
 
-    // Each document file in the outbox, and whether it was set aside.
     private var documentQueue: Map<String, QueuedFileState> = emptyMap()
 
     override fun onResume() {
         super.onResume()
         healthChecks.value++
-        // The screen does the listener's looking too, so what arrived is shown
-        // whether or not the system kept the listener bound: a document
-        // downloaded since its notice, and one that came with no notice at all.
         val whatsapp = CompanionApp.from(this).whatsapp
         val contacts = ContactBook(this)
         WhatsAppNotificationListener.reconnect(this)
@@ -135,7 +122,6 @@ class MainActivity : AppCompatActivity() {
             }
             if (contacts.granted) whatsapp.fillNumbers(contacts::numberOf)
             WhatsAppIntake.process(this@MainActivity)
-            // A rebind takes a moment; the card asks again once it may be done.
             delay(REBIND_GRACE_MILLIS)
             healthChecks.value++
         }
@@ -159,10 +145,6 @@ class MainActivity : AppCompatActivity() {
         setUpGuide()
         setUpActions()
 
-        // Every field once, then only the ones a policy governs: the store
-        // re-emits on every write -- each upload records its attempt -- and
-        // repainting the whole form put the stored values back over whatever
-        // was being typed into the fields the policy leaves to the user.
         var populated = false
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -172,12 +154,6 @@ class MainActivity : AppCompatActivity() {
                         populated = true
                     }
                 }
-                // Redrawn from what it shows: the settings, the queue -- which
-                // changes on every fix and every upload without touching a
-                // setting -- a refused save, the softphone, and two plain
-                // triggers: the permissions, which change behind a dialog that
-                // only pauses this screen, and the minute, which ages "Last
-                // upload: 2 minutes ago" on a phone nothing else redraws.
                 combine(
                     app.config.settings,
                     queueCounts(),
@@ -281,16 +257,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // targetSdk 36 means Android draws this window edge to edge and does not
-    // ask: without this the first line of the status text sits under the clock
-    // and the battery icon, and that line is the one that says whether the
-    // phone is enrolled -- the first thing anyone reads when a phone stopped
-    // reporting.
     private fun keepContentOutFromUnderTheSystemBars() {
         val scroll = binding.formScroll
-        // Captured once. The listener runs again on rotation and whenever the
-        // keyboard opens, and padding added to whatever is currently set would
-        // grow a little further each time.
         val menuOffset =
             (binding.actionsMenu.layoutParams as ViewGroup.MarginLayoutParams).topMargin
         val base = listOf(
@@ -302,9 +270,6 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
-            // The keyboard is taller than the navigation bar it covers, so the
-            // larger of the two is what keeps Save and the guide reachable
-            // while a field is being typed into.
             val bottom = maxOf(bars.bottom, keyboard.bottom)
             scroll.setPadding(
                 base[0] + bars.left,
@@ -316,8 +281,6 @@ class MainActivity : AppCompatActivity() {
             binding.actionsMenu.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 topMargin = bars.top + menuOffset
             }
-            // Typing, the keyboard and the guide together would cover the very
-            // field being filled in: the guide steps aside until it closes.
             binding.guideDock.isVisible = !insets.isVisible(WindowInsetsCompat.Type.ime())
             insets
         }
@@ -337,8 +300,6 @@ class MainActivity : AppCompatActivity() {
         permissionLauncher.launch(wanted.toTypedArray())
     }
 
-    // Whether Odoo or the phone system is on a local address. A name is
-    // resolved, so this runs off the main thread.
     private suspend fun localNetworkWanted(app: CompanionApp, settings: Settings): Boolean =
         withContext(Dispatchers.IO) {
             LocalNetwork.anyLocal(
@@ -347,8 +308,6 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-    // The same, as the status screen follows it: asked again on every resume,
-    // since a lookup that failed offline says nothing about the address.
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun localNetworkWanted(app: CompanionApp): Flow<Boolean> = combine(
         app.config.settings.map { it.baseUrl.takeIf { _ -> it.isEnrolled } },
@@ -359,9 +318,6 @@ class MainActivity : AppCompatActivity() {
         .flowOn(Dispatchers.IO)
         .distinctUntilChanged()
 
-    // Both fields are read back with toLongOrNull(), so the digits have to stay
-    // machine-parseable: a locale-formatted number is what SetTextI18n asks for
-    // and is exactly what would fail to parse on a handset with non-Latin digits.
     @SuppressLint("SetTextI18n")
     private fun EditText.showSeconds(value: Long) = setText(value.toString())
 
@@ -396,8 +352,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Straight to this app's own switch where Android has that screen (11+),
-    // otherwise to the list of every app with notification access.
     private fun requestNotificationAccess() {
         val list = Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -489,8 +443,6 @@ class MainActivity : AppCompatActivity() {
             kind,
             sighting.label,
             who,
-            // A message's own time can run a few seconds ahead of this clock,
-            // which read "in 0 minutes".
             DateUtils.getRelativeTimeSpanString(minOf(sighting.at, System.currentTimeMillis())),
             file,
             phone,
@@ -565,14 +517,10 @@ class MainActivity : AppCompatActivity() {
             alertsUnfolded = !alertsUnfolded
             showAlerts(shownAlerts, binding.alertGrant.isVisible)
         }
-        // The labels are short so both fit on one row; the range and what 0
-        // means are said while the field is being edited.
         explainWhileEditing(binding.locationIntervalLayout, R.string.config_location_interval)
         explainWhileEditing(binding.uploadWindowLayout, R.string.config_upload_window)
     }
 
-    // Save, Sync now and Grant live behind the gear, so the form itself fits
-    // the screen; the alert band keeps a shortcut to Grant while one is due.
     private val closeActionsOnBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = showActions(false)
     }
@@ -613,20 +561,8 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // A field is locked when the policy is managing THAT field, not merely
-    // when a policy exists. A console that publishes the declared defaults of
-    // app_restrictions.xml -- and several do, whether or not an administrator
-    // filled anything in -- sends the five non-text keys and none of the three
-    // that enrol. Locking the whole form on that leaves a phone nobody can
-    // configure: not the MDM, which never supplied an identity, and not the
-    // person holding it, whose fields are greyed out. A key that arrived and
-    // turned out unusable is still managed, because the administrator is
-    // plainly setting it; that is why this reads the keys the bundle carried
-    // rather than the values that survived parsing.
     private fun applyManagedLock(settings: Settings) {
         val keys = settings.governedKeys
-        // Both halves of each field: disabling only the inner edit text leaves
-        // the box and its label drawn as though they were still editable.
         val governed = listOf(
             ManagedKey.BASE_URL to listOf(binding.baseUrl, binding.baseUrlLayout),
             ManagedKey.IDENTIFIER to listOf(binding.identifier, binding.identifierLayout),
@@ -642,8 +578,6 @@ class MainActivity : AppCompatActivity() {
         for ((key, views) in governed) {
             views.forEach { it.isEnabled = key !in keys }
         }
-        // Save writes every field at once, so it belongs to the form rather
-        // than to any one key: it goes only when there is nothing left to save.
         binding.save.isEnabled = governed.any { (key, _) -> key !in keys }
     }
 
@@ -661,8 +595,6 @@ class MainActivity : AppCompatActivity() {
             getString(line.text, DateUtils.getRelativeTimeSpanString(line.at))
     }
 
-    // Formatted before it is compared, so the minute tick redraws "2 minutes
-    // ago" while an unchanged panel draws nothing.
     private data class PanelText(
         val enrolled: Boolean,
         val managed: Boolean,
@@ -675,8 +607,6 @@ class MainActivity : AppCompatActivity() {
         val held: HeldQueue?,
     )
 
-    // The queue as the current enrolment sees it: what is its own, and what is
-    // held for another one.
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun queueCounts() = CompanionApp.from(this).let { app ->
         app.config.settings
@@ -685,8 +615,6 @@ class MainActivity : AppCompatActivity() {
             .flatMapLatest { app.database.outbox().counts(it) }
     }
 
-    // Both ends are asked first: sending gives another organisation's records
-    // to this server, and discarding cannot be undone.
     private fun confirmHeld(send: Boolean) {
         val held = shownHeld ?: return
         MaterialAlertDialogBuilder(this)
@@ -774,9 +702,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // One band however many alerts there are, so the form still fits the
-    // screen: the first one and how many follow, unfolded on a tap. Every one
-    // of them is read aloud either way.
     private fun showAlerts(alerts: List<String>, blocked: Boolean) {
         shownAlerts = alerts
         binding.alerts.isVisible = alerts.isNotEmpty()
@@ -793,7 +718,6 @@ class MainActivity : AppCompatActivity() {
         isVisible = value != null
     }
 
-    // The figure is the number alone; what it counts is read aloud whole.
     @SuppressLint("SetTextI18n")
     private fun TextView.showFigure(value: Int, @StringRes spoken: Int) {
         text = value.toString()

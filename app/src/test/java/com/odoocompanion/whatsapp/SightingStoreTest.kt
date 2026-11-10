@@ -19,8 +19,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-// Robolectric for android.util.Log, which the store writes to when a file will
-// not read; nothing else here needs a runtime.
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
 class SightingStoreTest {
@@ -170,9 +168,6 @@ class SightingStoreTest {
         )
     }
 
-    // Downloads by hand: the first constancia was written an hour after its
-    // notice, when someone tapped it. A second "CSF.pdf" with no new file is
-    // then a document nobody has tapped yet, not the first one again.
     @Test
     fun `where downloads wait for a tap, a same-named document is not given the first file`() =
         runTest {
@@ -193,9 +188,6 @@ class SightingStoreTest {
             assertEquals("/w/CSF (1).pdf", store.sightings.value!!.maxBy { it.at }.filePath)
         }
 
-    // Not measured either way on a handset: should WhatsApp write its one copy
-    // again when the same file comes back, the file is stamped with the resend's
-    // notice. That too is a download that came by itself.
     @Test
     fun `a resend whose arrival rewrote the kept file is still given it`() = runTest {
         onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16))
@@ -309,9 +301,6 @@ class SightingStoreTest {
         )
     }
 
-    // Deleted from WhatsApp's folder, or out of reach while all-files access was
-    // revoked: each pass counted a failed read, and five passes later the card
-    // said the file could not be read -- and never read it again once it was back.
     @Test
     fun `a file gone from disk is missing, not unreadable, and is read once it is back`() =
         runTest {
@@ -373,7 +362,6 @@ class SightingStoreTest {
         val read = store.sightings.value!!.single { it.found }.classification
         assertEquals(DocumentKind.CSF, read?.kind)
         assertEquals("PCA221013LF1", read?.rfc)
-        // Only the file on disk was read, and never again once classified.
         assertEquals(listOf("CSF.pdf", "CSF.pdf"), reads)
     }
 
@@ -391,10 +379,6 @@ class SightingStoreTest {
         assertEquals(DocumentKind.INE, reopened.sightings.value!!.single().classification?.kind)
     }
 
-    // The window keeps its rows by the notice's time, while WhatsApp may write a
-    // file days after the notice: a row trimmed out left its file unclaimed, and
-    // the file came back as a loose document -- read by OCR, queued and
-    // uploaded a second time, and shown again without its chat or number.
     @Test
     fun `a file whose row left the window is not taken again as loose`() = runTest {
         val store = store()
@@ -421,7 +405,6 @@ class SightingStoreTest {
         )
     }
 
-    // OCR takes seconds a page, and every trigger of the intake runs it.
     @Test
     fun `two passes at once read a file once`() = runTest {
         onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000L, 16))

@@ -13,10 +13,6 @@ import com.google.android.material.textfield.TextInputLayout
 import com.odoocompanion.R
 import com.odoocompanion.databinding.GuideCardBinding
 
-// Draws the step EnrollmentGuide chose: its card slides in over the bottom of
-// the form and breathes, and the field it is about is outlined in the accent.
-// Nothing is animated when the system has animations off; the form keeps its
-// place, so it still fits the screen while the guide is up.
 class EnrollmentGuideView(
     private val steps: Map<GuideField, Pair<TextInputLayout, GuideCardBinding>>,
     onDismiss: (GuideField) -> Unit,
@@ -85,10 +81,8 @@ class EnrollmentGuideView(
         root.visibility = View.GONE
     }
 
-    // The field the card is about, outlined in the accent until it is filled.
     private fun light(layout: TextInputLayout) {
         val accent = MaterialColors.getColor(layout, androidx.appcompat.R.attr.colorPrimary)
-        // stateful on purpose: a single color only replaces the focused one
         layout.setBoxStrokeColorStateList(
             ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_focused), intArrayOf()),

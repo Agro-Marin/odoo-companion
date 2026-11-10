@@ -109,7 +109,6 @@ class DocumentQueueTest {
     fun `a resend that shares the first one's file is not queued a second time`() = runTest {
         seen("CSF.pdf" to DocumentKind.CSF)
         queue().queueClassified()
-        // WhatsApp kept one file for both: the store gave the resend that file.
         store.record(listOf(notice("CSF.pdf", at = 9_999_000L)))
         clock = 9_999_000L + SightingStore.RESEND_SETTLE_MILLIS
         store.rematch()
@@ -146,7 +145,6 @@ class DocumentQueueTest {
         assertNull(WhatsAppIntake.uploadStateOf(other, emptyMap()))
     }
 
-    // A notice, the folder watch, the poll and the screen each run the intake.
     @Test
     fun `two intakes at once queue a document once`() = runTest {
         seen("CSF.pdf" to DocumentKind.CSF)

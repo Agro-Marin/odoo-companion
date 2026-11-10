@@ -1,11 +1,5 @@
 buildscript {
     dependencies {
-        // AGP brings its own Kotlin plugin (2.2.10 in AGP 9.5.1) and resolution
-        // would keep it unless something newer is on the same classpath. The
-        // serialization plugin happens to pull the catalog's Kotlin, which makes the
-        // Kotlin version this project compiles with a side effect of a
-        // dependency nobody would think to check before removing. This states
-        // it instead.
         constraints {
             classpath(libs.kotlin.gradle.plugin)
         }

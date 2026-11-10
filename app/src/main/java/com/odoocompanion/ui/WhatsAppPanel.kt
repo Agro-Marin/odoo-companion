@@ -4,12 +4,8 @@ import androidx.annotation.StringRes
 import com.odoocompanion.R
 import com.odoocompanion.whatsapp.Sighting
 
-// What the WhatsApp card says, from what the handset has granted and what it
-// has seen. Notification access comes first: without it nothing is seen, and
-// asking for file access then would be asking for the second half of nothing.
 data class WhatsAppCard(
     @StringRes val state: Int,
-    // the grant the button opens, if one is missing
     val missing: WhatsAppGrant?,
     val seen: Int,
     val found: Int,

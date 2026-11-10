@@ -60,7 +60,6 @@ class CallLogSyncWorkerTest {
         app.config.enrol("https://odoo.example.com", "phone-01", "token")
     }
 
-    // Every call is queued for the enrolment it was read under.
     private suspend fun queued(): Int =
         app.database.outbox().countOf(OutboxKind.CALL_LOG, enrollment = ENROLMENT)
 
@@ -172,8 +171,6 @@ class CallLogSyncWorkerTest {
         run()
         assertEquals(4L, app.config.callLogIdCursor())
 
-        // Cleared and used again: ids restart below the cursor, and reading on
-        // from it would return nothing for ever while reporting success.
         FakeCallLogProvider.calls = listOf(Call(number = "+52fresh", date = 99, id = 1))
         val dao = app.database.outbox()
         dao.delete(dao.take(OutboxKind.CALL_LOG, 1000, enrollment = ENROLMENT).map { it.id })
@@ -189,8 +186,6 @@ class CallLogSyncWorkerTest {
         reset()
         enroll()
         grantCallLog()
-        // What the previous build left behind: a moment, not an id, and no id
-        // cursor at all.
         app.config.setCallLogCursor(2_000)
         app.config.clearCallLogIdCursor()
         FakeCallLogProvider.calls = listOf(
@@ -253,9 +248,6 @@ class CallLogSyncWorkerTest {
         )
     }
 
-    // Three work names run this worker -- the periodic pass, the pass a call's
-    // end asks for and the Sync now chain -- and nothing kept two of them
-    // apart: both read from the same cursor and queued the same calls twice.
     @Test
     fun `two passes at once queue each call once`() = runTest {
         reset()
@@ -276,7 +268,6 @@ class CallLogSyncWorkerTest {
     private companion object {
         const val OVERLAP_MILLIS = 500L
 
-        // What enroll() makes it, spelled by Settings, not by this test.
         val ENROLMENT = Settings(baseUrl = "https://odoo.example.com", identifier = "phone-01")
             .enrollment!!
     }

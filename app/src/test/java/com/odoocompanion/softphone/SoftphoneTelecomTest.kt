@@ -36,7 +36,6 @@ class SoftphoneTelecomTest {
 
     @Test
     fun `a company call stays out of the handset's call log`() {
-        // the call-log sync would upload it as a second phone.call
         val attributes = SoftphoneTelecom.attributes(
             Uri.parse("sip:100@pbx"),
             "Front desk",
@@ -100,8 +99,6 @@ class SoftphoneTelecomTest {
 
     @Test
     fun `declining a ringing call ends it as rejected`() {
-        // the SIP stack reports the end of its call before decline() returns,
-        // as a remote end: the decline's own cause must still be the one kept
         val control = FakeControl()
         connection(control, hangUpSip = { it.end(DisconnectCause.REMOTE) }).reject()
         idle()
@@ -134,7 +131,6 @@ class SoftphoneTelecomTest {
 
     @Test
     fun `a resume the SIP stack cannot carry out hands the focus back`() {
-        // no SIP stack here, so resuming the SIP call fails after the system agreed
         val control = FakeControl()
         connection(control).resume()
         idle()
@@ -175,8 +171,6 @@ class SoftphoneTelecomTest {
 
     @Test
     fun `a hold the SIP stack cannot carry out is refused to the system`() {
-        // throwing is how a Core-Telecom callback refuses; returning would tell the
-        // system the microphone is free while the call still holds it
         val connection = connection(FakeControl())
         assertThrows(IllegalStateException::class.java) { connection.onSystemHold() }
         assertThrows(IllegalStateException::class.java) { connection.onSystemResume() }
@@ -215,7 +209,6 @@ class SoftphoneTelecomTest {
         override suspend fun answer(callType: Int) = CallControlResult.Success()
 
         override suspend fun disconnect(disconnectCause: DisconnectCause): CallControlResult {
-            // as the platform's CallControl.disconnect does, from Android 14
             require(disconnectCause.code in SoftphoneCallBook.VOIP_CAUSES) {
                 "Telecom refuses cause ${disconnectCause.code}"
             }

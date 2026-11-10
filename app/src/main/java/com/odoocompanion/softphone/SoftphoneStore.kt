@@ -14,17 +14,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-/**
- * The last softphone settings Odoo handed out, so the softphone keeps
- * registering through a restart or an outage of Odoo itself.
- */
 class SoftphoneStore(private val store: DataStore<Preferences>) {
     constructor(context: Context) : this(storeFor(context))
 
-    /** Whether Odoo has handed this handset an extension, as the status screen asks. */
     val configured: Flow<Boolean> = store.data.map { it[USERNAME] != null }.distinctUntilChanged()
 
-    /** The phone system's host, whose address decides whether local network access is needed. */
     val domain: Flow<String?> = store.data.map { it[DOMAIN] }.distinctUntilChanged()
 
     suspend fun current(): SoftphoneSettings? {

@@ -79,9 +79,6 @@ class PayloadContractTest {
         )
     }
 
-    // the recording's length in whole seconds, read by phone.call.store_device_recording
-    // as vals["duration"]. Omitted rather than sent as 0 when the container
-    // would not say: the server stores 0 for absent either way.
     @Test
     fun `recording metadata carries the audio length in seconds when known`() {
         assertEquals(

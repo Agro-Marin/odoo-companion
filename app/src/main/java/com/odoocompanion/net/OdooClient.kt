@@ -46,10 +46,6 @@ sealed interface UploadOutcome {
 
     data object Duplicate : UploadOutcome
 
-    // linkDown: the failure answers for the next request too -- no connection,
-    // the device or its token refused, something other than Odoo answering --
-    // so a drain stops instead of sending the other kinds into it. A timeout or
-    // a 502/504 belongs to the request that met it.
     data class Retry(
         val reason: String,
         val serverFault: Boolean = false,
@@ -93,7 +89,6 @@ class OdooClient(
         classify(code, text, reply, settings.serverNamesItself)
     }
 
-    /** The softphone settings Odoo holds for this handset's user. */
     suspend fun softphone(settings: Settings): SoftphoneLookup = exchange(
         settings,
         SOFTPHONE,
@@ -109,17 +104,14 @@ class OdooClient(
 
             code == HTTP_NOT_FOUND && reply.errorIs(NO_EXTENSION) -> SoftphoneLookup.NoExtension
 
-            // Odoo itself refusing the token: a gateway's 401 never gets here
             code in AUTH_REFUSED -> SoftphoneLookup.Refused(code)
 
             else -> SoftphoneLookup.Unavailable(reasonFor(code, text))
         }
     }
 
-    /** The key Odoo signs wake-ups with, and whether this handset is registered against it. */
     suspend fun pushKey(settings: Settings): PushKeyLookup = push(settings, null)
 
-    /** Tells Odoo where to send wake-ups; null takes the handset off them. */
     suspend fun registerPush(settings: Settings, registration: PushRegistration?): PushKeyLookup {
         val body = buildJsonObject {
             if (registration == null) {
@@ -154,9 +146,6 @@ class OdooClient(
         }
     }
 
-    // One request to the device's endpoint: a GET without a body, a POST with
-    // one. A URL that will not build is a fault of the enrolment and a failed
-    // exchange one of the link; `read` sees every reply, whatever its code.
     private suspend fun <T> exchange(
         settings: Settings,
         suffix: String,
@@ -205,9 +194,6 @@ class OdooClient(
         body: JsonObject?,
         mustNameItself: Boolean,
     ): UploadOutcome {
-        // Tallies, not the proof of delivery -- `status` is -- so a counter
-        // that will not read as an integer counts as absent: refusing the reply
-        // over it retried a delivered batch for ever, and ended every pass.
         val counts = Counts(
             accepted = body.countAt("accepted"),
             duplicates = body.countAt("duplicates"),
@@ -321,8 +307,6 @@ class OdooClient(
         const val PUSH_UNAVAILABLE = "push_unavailable"
         val AUTH_REFUSED = setOf(401, 403)
 
-        // The integration layer's answer to a body it cannot parse. This client
-        // sends only what it serialised, so the answer is about the link.
         const val DAMAGED_BODY = "invalid_json"
         val JSON = "application/json; charset=utf-8".toMediaType()
 
@@ -330,12 +314,6 @@ class OdooClient(
 
         val ROW_FAULTS = (500..599) - setOf(502, 503, 504)
 
-        // Odoo refusing the device record or its token: the same answer waits
-        // for every route. Only Odoo's own reply says so -- a firewall's 403 page
-        // is about one request's content. 503 is the whole server, whoever
-        // answers it. 502 and 504 are left out on purpose: a worker killed by the
-        // memory limit, or a gateway that gave up on one slow ingest, says
-        // nothing about a small request after it.
         val DEVICE_REFUSALS = setOf(401, 403, 404, 429)
         const val HTTP_UNAVAILABLE = 503
 

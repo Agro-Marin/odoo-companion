@@ -27,9 +27,6 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         Result.success()
     }
 
-    // Three work names run this worker -- the periodic pass, the pass a call's
-    // end asks for and the Sync now chain. Two at once read from the same
-    // cursor and queued the same calls twice.
     private suspend fun collect(app: CompanionApp, settings: Settings) {
         val reader = CallLogReader(applicationContext.contentResolver)
         val since = startingId(app, reader)
@@ -52,13 +49,9 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         if (batch.moreWaiting) SyncScheduler.collectCallLogNow(applicationContext)
     }
 
-    // Where this pass starts, which is the stored id except in the two cases
-    // that would otherwise leave the phone silent for good.
     private suspend fun startingId(app: CompanionApp, reader: CallLogReader): Long {
         val stored = app.config.callLogIdCursor()
         if (stored == null) {
-            // First pass on this build: carry the timestamp cursor across by
-            // asking the provider which id it names.
             val seeded = reader.idAt(app.config.callLogCursor())
             app.config.setCallLogIdCursor(seeded)
             Log.i(TAG, "Carried the call-log cursor across to row id $seeded")
@@ -66,14 +59,6 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         }
         val newest = reader.newestId()
         if (newest != null && newest < stored) {
-            // The provider's table is AUTOINCREMENT: ids only climb, and
-            // clearing the log does not restart them (measured on API 35: the
-            // call after a clear took the next id). So the newest id falls
-            // below the cursor only when the newest calls were deleted, or the
-            // provider's storage was wiped and its ids began again. Reading on
-            // from the old cursor would miss every call of the second case,
-            // for ever, while reporting success; reading from zero costs the
-            // first case a resend the server answers as duplicates.
             Log.w(
                 TAG,
                 "Call log restarted at id $newest, below the stored cursor " +

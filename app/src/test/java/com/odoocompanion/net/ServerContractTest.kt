@@ -10,12 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-// Every body below was captured from a live remote_mobile (device_mobile at
-// agromarin 931899623, a mobile-phone-category device) on 2026-09-23 --
-// regenerate them from a server with tools/smoke-test.sh rather than editing
-// them by hand. Each is classified twice: by a client that has not yet seen the
-// server name itself, and by one that has, because a handset spends its life in
-// the second state and the answer must not change between them.
 class ServerContractTest {
     private lateinit var server: MockWebServer
 
@@ -85,14 +79,6 @@ class ServerContractTest {
         )
     }
 
-    // The integration layer answers refusals as RFC 9457 problem documents, so
-    // "status" here is the integer 409, not the word "success".
-    // Captured 2026-10-04 from device_phone_call at odoo 020bb2b2fb53, which took
-    // the recording route over from device_mobile (a scratch database, the
-    // device's window shortened to 1 s so the resend reached the model): a
-    // recording the server already holds names the stored row and counts itself
-    // a duplicate. The body above, without the key, is what an older server
-    // still sends.
     @Test
     fun `a recording the server already holds, past the window`() = runTest {
         val first = classify(
@@ -155,10 +141,6 @@ class ServerContractTest {
         assertEquals(UploadOutcome.Rejected(400), outcome)
     }
 
-    // This client only ever sends a body it serialised, so a server that could
-    // not parse it received something else: a body damaged on the way. That is
-    // the link's fault; refusing it dead-lettered a call as `refused`, the one
-    // state no operator action reverses.
     @Test
     fun `a body the server could not parse is the link's fault, not a refusal`() = runTest {
         val outcome = classify(

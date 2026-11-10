@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
-# Replays the payloads the app sends against a live Odoo instance, and checks
-# each answer against what remote_mobile is known to reply. Exits non-zero on
-# the first answer that differs, so it can gate a release rather than be read.
-#
-# Usage: tools/smoke-test.sh <base-url> <device-identifier> <bearer-token>
-# Example: tools/smoke-test.sh http://localhost:8069 phone-01 6389eae0...
-#
-# The device must be in the Mobile Phone category (duplicate detection on, a
-# 50 MB cap), which is how provisioning creates it. Every row posted is stored,
-# so use a device record made for testing.
 set -euo pipefail
 
 if [ $# -ne 3 ]; then
-    sed -n '6,7p' "$0"
+    echo "Usage: tools/smoke-test.sh <base-url> <device-identifier> <bearer-token>" >&2
+    echo "Example: tools/smoke-test.sh http://localhost:8069 phone-01 6389eae0..." >&2
     exit 64
 fi
 
@@ -24,8 +15,6 @@ NUMBER="+525512345678"
 CALL_SECONDS=300
 failures=0
 
-# check <label> <codes> <body> <needle>... : POST the body, require one of the
-# comma-separated status codes and every needle as a substring of the reply.
 check() {
     local label="$1" codes="$2" url="$3" body="$4" token="${TOKEN}"
     shift 4
@@ -65,9 +54,6 @@ CALL="{\"calls\":[
 check "a call, in the words CallDirection sends" 200 "$BASE/calllog" "$CALL" \
     "$SERVICE" '"accepted":1'
 
-# Inside duplicate_window_seconds the transport layer answers 409; past it the
-# model layer answers 200 with duplicates:1. Both are deliveries. A 422 here is
-# the defect that dead-lettered calls the server was holding.
 check "the same batch again is a delivery, not a refusal" 409,200 "$BASE/calllog" "$CALL" \
     "$SERVICE"
 
@@ -76,9 +62,6 @@ check "a batch route names the rows it could not store" 200 "$BASE/calllog" "{\"
     {\"number\":\"\",\"direction\":\"incoming\",\"timestamp\":$((NOW + 600)),\"duration\":1}]}" \
     "$SERVICE" '"skipped":1' '"skipped_indexes":[1]'
 
-# CallLogReader sends a withheld caller this way: no number, and the
-# presentation. A server older than phone.call.caller_presentation skips it, as
-# it skips the blank number above.
 check "a call from a withheld number is stored without one" 200 "$BASE/calllog" "{\"calls\":[
     {\"number\":\"\",\"direction\":\"missed\",\"timestamp\":$((NOW + 700)),\"duration\":0,
      \"presentation\":\"restricted\"}]}" \
@@ -93,9 +76,6 @@ check "an Android call type this build does not know is stored, not refused" 200
     {\"number\":\"$NUMBER\",\"direction\":\"9\",\"timestamp\":$((NOW + 2000)),\"duration\":3}]}" \
     '"accepted":1'
 
-# Stamped the way the app stamps it: the file's write time, which is when the
-# call ended. A stamp a few seconds after the start is what this script used to
-# send, and it matched on a server that could not match a real recording.
 AUDIO=$( { printf '\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00M4A isom'; head -c 2048 /dev/urandom; } | base64 -w0)
 check "a recording stamped at the call's end matches the call" 200 "$BASE/recording" \
     "{\"number\":\"$NUMBER\",\"recorded_at\":$((NOW + CALL_SECONDS * 1000)),

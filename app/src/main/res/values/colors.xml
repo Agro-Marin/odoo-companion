@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- One accent carries the identity; every other color is a neutral. The
-         light value is darker than the dark one so text on it keeps 4.5:1. -->
     <color name="brand_primary">#0A7D55</color>
     <color name="brand_on_primary">#FFFFFF</color>
     <color name="ink">#11161C</color>

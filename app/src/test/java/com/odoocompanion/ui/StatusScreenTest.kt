@@ -69,8 +69,6 @@ class StatusScreenTest {
         return controller!!.get()
     }
 
-    // Everything the status panel says, in reading order: the state, the
-    // alert bands, the activity card -- each figure read as it is spoken.
     private fun status(): String {
         val activity = open()
         var last = ""
@@ -210,8 +208,6 @@ class StatusScreenTest {
         },
     )
 
-    // Every key, which is what a console that has actually been filled in
-    // sends. Save goes with them: there is nothing left on the form to save.
     @Test
     fun `a device managed in full has its form locked, including the interval`() = runTest {
         app.config.applyManaged(
@@ -237,8 +233,6 @@ class StatusScreenTest {
         assertTrue(activity.findViewById<View>(R.id.syncNow).isEnabled)
     }
 
-    // Save is the form's button, not any one field's: while a single field the
-    // policy left alone is still editable, there is something to save.
     @Test
     fun `a partly managed form can still be saved`() = runTest {
         app.config.applyManaged(
@@ -256,10 +250,6 @@ class StatusScreenTest {
         assertTrue(activity.findViewById<View>(R.id.save).isEnabled)
     }
 
-    // The case this whole distinction exists for: a console that publishes the
-    // declared defaults of app_restrictions.xml and nothing an administrator
-    // typed. The device is managed -- a policy did arrive -- but the fields it
-    // never mentioned stay usable, so the handset can still be enrolled.
     @Test
     fun `a policy that never mentioned enrolment leaves those fields usable`() = runTest {
         app.config.applyManaged(
@@ -276,13 +266,9 @@ class StatusScreenTest {
         assertTrue(activity.findViewById<View>(R.id.identifier).isEnabled)
         assertTrue(activity.findViewById<View>(R.id.token).isEnabled)
         assertTrue(activity.findViewById<View>(R.id.save).isEnabled)
-        // What the policy did mention is still governed by it.
         assertFalse(activity.findViewById<View>(R.id.callLogEnabled).isEnabled)
     }
 
-    // A key that arrived and turned out unusable is still a key the
-    // administrator is setting, so it stays locked. This is the case that
-    // policyPresent was added for, and it must keep behaving that way.
     @Test
     fun `a base URL the policy got wrong still locks the base URL`() = runTest {
         app.config.applyManaged(policy("base_url" to "not a url at all"))
@@ -301,9 +287,6 @@ class StatusScreenTest {
         val field = activity.findViewById<android.widget.EditText>(R.id.locationInterval)
         assertTrue(field.text.toString() == "120")
 
-        // Saved against a valid enrolment and waited for: asserted straight
-        // after the click, the stored 120 satisfied ">= 15" before Save had
-        // written anything, so the clamp was never what the test observed.
         activity.type(R.id.baseUrl, "https://odoo.example.com")
         activity.type(R.id.identifier, "phone-01")
         activity.type(R.id.token, "t")
@@ -325,11 +308,6 @@ class StatusScreenTest {
     private fun MainActivity.type(id: Int, value: String) =
         findViewById<android.widget.EditText>(id).setText(value)
 
-    // The case a partial policy exists for: the console publishes the switches
-    // and the person holding the phone types the enrolment. Save writes the
-    // switches first, every write re-emits the settings, and a managed device
-    // used to repaint the whole form on each emission -- so the typed fields
-    // were back to their stored, empty values by the time Save read them.
     @Test
     fun `a partly managed phone saves the enrolment typed into it`() = runTest {
         app.config.applyManaged(policy("call_log_enabled" to true, "wifi_only_uploads" to false))
@@ -363,10 +341,6 @@ class StatusScreenTest {
         )
     }
 
-    // Save used to write each switch as its own edit before validating the
-    // enrolment, and on a managed phone every edit repainted the form -- so a
-    // switch the person changed was the write that put the stored, empty
-    // enrolment back into the fields Save was about to read.
     @Test
     fun `a partly managed phone saves the enrolment typed beside a changed switch`() = runTest {
         app.config.applyManaged(policy("call_log_enabled" to true))
@@ -398,9 +372,6 @@ class StatusScreenTest {
         assertFalse(app.config.current().wifiOnlyUploads)
     }
 
-    // A recording that was delivered and whose file would not delete is kept
-    // only as the harvest's memory of that file. It is not undeliverable, and
-    // counting it told an operator to fix a device that had delivered it.
     @Test
     fun `a delivered recording kept on disk is not counted as undeliverable`() = runTest {
         val dao = app.database.outbox()
@@ -417,8 +388,6 @@ class StatusScreenTest {
         assertFalse(shown, text(R.string.status_undeliverable_hint) in shown)
     }
 
-    // The queue changes on every fix and every upload without a setting
-    // changing, and the screen used to redraw only when a setting did.
     @Test
     fun `the queue counts follow the queue while the screen is open`() = runTest {
         val activity = open()
@@ -433,12 +402,8 @@ class StatusScreenTest {
         assertTrue(shown, app.getString(R.string.status_queued_positions, 1) in shown)
     }
 
-    // "Last upload: 2 minutes ago" is the line that says how long a phone has
-    // been silent, and nothing on an idle phone writes to the store: redrawn only
-    // on a change, it said "2 minutes ago" for as long as anyone looked at it.
     @Test
     fun `the time since the last upload keeps counting while the screen is open`() = runTest {
-        // Robolectric's clock starts at the epoch; give "2 minutes ago" room.
         Shadows.shadowOf(android.os.Looper.getMainLooper())
             .idleFor(java.time.Duration.ofHours(1))
         app.config.recordUpload(
@@ -474,8 +439,6 @@ class StatusScreenTest {
         assertTrue(shown, text(R.string.status_bad_base_url) in shown)
     }
 
-    // The battery-exemption prompt and the permission dialogs only pause this
-    // screen, so nothing that restarts on STARTED ever re-read the grants.
     @Test
     fun `a grant made behind a dialog shows once the screen resumes`() = runTest {
         batteryExemption(true)
@@ -493,12 +456,6 @@ class StatusScreenTest {
         assertFalse(shown, text(R.string.status_location_missing) in shown)
     }
 
-    // Android 12 lets the person choose approximate. Only a precise grant used
-    // to lead on to the all-the-time prompt, so an approximate one stopped at
-    // "while using the app" -- the grant that goes quiet after a reboot.
-    // At SDK 36: Robolectric 4.17 at 37 answers a permission request itself, at
-    // once and denied, before a test can answer it as the person would. The
-    // rule here does not depend on the SDK.
     @Test
     @Config(sdk = [36])
     fun `an approximate grant still leads on to the all-the-time prompt`() = runTest {

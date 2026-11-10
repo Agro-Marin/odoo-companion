@@ -209,8 +209,6 @@ class DeadLetterRecoveryTest {
                     MockResponse(body = """{"status":"success","accepted":1}""")
                 }
         }
-        // Each pass sits past the longest per-row deferral, or the poisoned
-        // row is simply skipped and never accrues the attempts this pins.
         var clock = 5_000L
         val drainer = drainer { clock }
 

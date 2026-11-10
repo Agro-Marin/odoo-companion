@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Geometric sans for what is read, mono for what is measured (counts,
-         times, identifiers, section labels); squarer corners throughout. -->
     <style name="Theme.Companion" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorOnPrimary">@color/brand_on_primary</item>
@@ -65,7 +63,6 @@
         <item name="cardCornerRadius">12dp</item>
     </style>
 
-    <!-- A section label: small, spaced, monospaced and muted. -->
     <style name="Text.Companion.Label" parent="">
         <item name="android:fontFamily">@font/jetbrains_mono</item>
         <item name="android:textSize">11sp</item>

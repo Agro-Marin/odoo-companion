@@ -47,8 +47,6 @@ class LocationForegroundService : LifecycleService() {
             val fixes = result.locations.map { fixOf(it, battery) }
             if (fixes.isEmpty()) return
             lifecycleScope.launch {
-                // Unreadable settings still keep the fix, at the defaults; only
-                // the upload waits, since it would read them first anyway.
                 val settings = app.config.currentOrNull()
                 val due = queue.record(
                     fixes,
@@ -63,14 +61,8 @@ class LocationForegroundService : LifecycleService() {
         }
     }
 
-    // Set when onCreate could not run the service: onStartCommand still follows,
-    // and must neither ask for fixes on a stopping service nor ask to be
-    // restarted into the same refusal.
     private var refused = false
 
-    // The interval the provider was last asked for. Every reconcile starts the
-    // service again -- each save, each policy push -- and asking anew with the
-    // same interval only resets the provider's schedule.
     private var requestedSeconds: Long? = null
 
     override fun onCreate() {

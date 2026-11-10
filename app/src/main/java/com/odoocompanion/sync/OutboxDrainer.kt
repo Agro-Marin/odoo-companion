@@ -69,8 +69,6 @@ private class DrainTally {
     var payloadLimit = 0L
     var persistedLimit: Long? = null
 
-    // Bytes the file kinds may still put on the wire in this pass: one budget,
-    // shared by documents and recordings, or the pass's bound doubles.
     var bytesLeft = OutboxDrainer.FILE_BYTES_PER_DRAIN
 
     fun note(counter: MutableMap<String, Int>, kind: String, count: Int) {
@@ -137,11 +135,6 @@ class OutboxDrainer(
         return tally.report(outcome).also { debug(TAG) { "drain finished: $it" } }
     }
 
-    // A failure that answers for every request -- no connection, the token or
-    // the device refused, a portal answering -- ends the pass: the next kind
-    // would cross the same link with the same token, and would be charged an
-    // attempt for a fault that is not its own. One that belongs to its request
-    // (a timeout, a gateway giving up on a slow ingest) leaves the others to go.
     private suspend fun drainUntilTheLinkFails(settings: Settings, tally: DrainTally): Outcome {
         val kinds: List<suspend () -> Outcome> = listOf(
             { drainBatch(LOCATIONS, settings, tally) },
@@ -158,8 +151,6 @@ class OutboxDrainer(
         return outcome
     }
 
-    // Rows held for another enrolment are not work for this pass: counted,
-    // they asked for a follow-up drain after every drain, for ever.
     private suspend fun anythingArrivedLate(settings: Settings): Boolean {
         val now = now()
         val enrollment = settings.enrollment
@@ -173,11 +164,6 @@ class OutboxDrainer(
         )
     }
 
-    // A handset nobody looks at -- a managed one moved to another server --
-    // would hold the old enrolment's rows, and a recording's audio, for ever.
-    // Collected longer ago than the retention a dead row gets, they are
-    // withdrawn, and the purge takes them as it takes any dead row. Counted from
-    // collection: nothing records when a row became held.
     private suspend fun withdrawLongHeld(settings: Settings, tally: DrainTally) {
         val enrollment = settings.enrollment ?: return
         val before = now() - OutboxLimits.DEAD_RETENTION_MILLIS
@@ -192,10 +178,6 @@ class OutboxDrainer(
         }
     }
 
-    // When a row the server ruled on may be offered again: doubling from a
-    // minute, capped at an hour. Twenty-five attempts at that pace retire the
-    // row within a day, and in the meantime every drain leaves it alone and
-    // gets on with the rows around it.
     private fun deferral(attemptsSoFar: Int): Long {
         val step = minOf(attemptsSoFar, ROW_BACKOFF_DOUBLINGS)
         return now() + minOf(ROW_BACKOFF_MAX_MILLIS, ROW_BACKOFF_BASE_MILLIS shl step)
@@ -227,8 +209,6 @@ class OutboxDrainer(
         tally.deadLettered += tally.unreachable
     }
 
-    // Only this enrolment's rows: a delivery here proves nothing about a row
-    // collected for another server, and reviving it would hand it to this one.
     private suspend fun reviveWhatOnlyRanOutOfRetries(
         settings: Settings,
         tally: DrainTally,
@@ -277,9 +257,6 @@ class OutboxDrainer(
         val encodeBatch: (List<T>) -> String,
     )
 
-    // A kind sent one file per request: a recording, which the harvest made the
-    // outbox's to delete once delivered, or a document, whose file is WhatsApp's
-    // and is never deleted here.
     private class FileKind(
         val kind: String,
         val suffix: String,
@@ -296,12 +273,6 @@ class OutboxDrainer(
     ): Outcome {
         var budget = BATCHES_PER_DRAIN
         var size = wire.batchSize
-        // Rows the server ruled on during this drain. They are excluded from
-        // every further take of this pass and scheduled on their own retryAfter,
-        // so the drain's own outcome no longer carries their verdict: what was
-        // due and deliverable went, and there is nothing transient to wait for.
-        // retryAfter alone does not exclude them: a pass carrying recordings
-        // runs for minutes, longer than the shortest deferral.
         val poisoned = mutableSetOf<Long>()
         while (true) {
             if (budget-- <= 0) {
@@ -429,7 +400,6 @@ class OutboxDrainer(
         settings: Settings,
         tally: DrainTally,
     ): Outcome {
-        // The same exclusion as drainBatch's, for the same reason.
         val poisoned = mutableSetOf<Long>()
         while (true) {
             val entries =
@@ -497,21 +467,14 @@ class OutboxDrainer(
                         tally.delivered = true
                         val success = outcome as? UploadOutcome.Success
                         learn(tally, success?.limitBytes)
-                        // A retry the server recognised by its file answers 200
-                        // with duplicates=1, the transport's 409 past its window.
                         if (success == null || success.duplicates > 0) {
                             tally.note(tally.duplicates, files.kind, 1)
                         } else {
                             tally.note(tally.accepted, files.kind, 1)
                         }
-                        // A document's file is WhatsApp's: delivered, only the
-                        // row goes, and the file stays where WhatsApp keeps it.
                         if (!files.ownsFile || deleteAudio(file)) {
                             dao.delete(listOf(entry.id))
                         } else {
-                            // With no cursor, the harvest's only memory is
-                            // this table. Drop the row and the file comes
-                            // straight back as a new recording.
                             dao.markDeadIds(
                                 listOf(entry.id),
                                 now(),
@@ -553,9 +516,6 @@ class OutboxDrainer(
         }
     }
 
-    // A recording's row goes with its file: the harvest finds files, and there
-    // is none left to queue again. A document's row stays, set aside as gone,
-    // because it is the WhatsApp card's only memory of that document.
     private suspend fun forgetLostFile(tally: DrainTally, entry: OutboxEntry, files: FileKind) {
         val folder = entry.filePath.orEmpty().loggableDirectory()
         val reason = "its file is no longer under $folder, so nothing can be uploaded"
@@ -591,9 +551,6 @@ class OutboxDrainer(
         }
     }
 
-    // A row whose audio will not delete is the harvest's only memory of that
-    // file: purge it and the next scan queues and uploads the file again. It
-    // starts another retention period instead.
     private suspend fun purgeExpiredDeadRows(tally: DrainTally) {
         val before = now() - OutboxLimits.DEAD_RETENTION_MILLIS
         dao.deadFilesBefore(before)
@@ -628,10 +585,6 @@ class OutboxDrainer(
         Result.failure(failure)
     }
 
-    // A row the server has ruled on -- it raised on it, or it is over the cap
-    // -- is charged and waits on its own retryAfter; the rest of the queue
-    // keeps moving. Returning RETRY instead parked every row behind it and
-    // walked the whole worker into WorkManager's five-hour backoff.
     private suspend fun deferRuledOn(tally: DrainTally, entry: OutboxEntry, reason: String): Long {
         Log.w(TAG, "Keeping ${entry.kind} row ${entry.id} the server would not take: $reason")
         dao.markFailed(
@@ -647,8 +600,6 @@ class OutboxDrainer(
     private suspend fun failBatch(tally: DrainTally, ids: List<Long>, cause: Throwable): Outcome =
         chargeTheLink(tally, ids, cause.message ?: cause.javaClass.simpleName, linkDown = false)
 
-    // The rows went and the link failed them: each is charged an attempt, and
-    // linkDown says whether the rest of the pass may still go.
     private suspend fun chargeTheLink(
         tally: DrainTally,
         ids: List<Long>,
@@ -683,7 +634,6 @@ class OutboxDrainer(
 
         const val REVIVAL_PROBE = 1
 
-        // Android 10-11 ship SQLite 3.28, whose host-parameter limit is 999.
         private const val SQLITE_MAX_PARAMETERS = 900
 
         private const val TAG = "OutboxDrainer"

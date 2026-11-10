@@ -4,10 +4,6 @@ import java.io.File
 
 data class DocumentFile(val path: String, val name: String, val modifiedAt: Long, val size: Long)
 
-// The documents WhatsApp has saved on this handset. A notice names a document
-// but carries no file, and WhatsApp's own storage is closed to other apps, so
-// the file is found where WhatsApp copies what it downloads. Reaching that
-// folder takes all-files access, the same grant the recording harvest needs.
 class WhatsAppDocuments(private val root: File) {
     fun scan(): List<DocumentFile> = CANDIDATE_DIRECTORIES
         .map { File(root, it) }
@@ -17,8 +13,6 @@ class WhatsAppDocuments(private val root: File) {
         .distinctBy { it.absolutePath }
         .map { DocumentFile(it.absolutePath, it.name, it.lastModified(), it.length()) }
 
-    // The folders a received document can land in, for a FileObserver: one
-    // does not see into subfolders, so each one the scan reads is listed.
     fun watchedDirectories(): List<File> = CANDIDATE_DIRECTORIES
         .map { File(root, it) }
         .filter { it.isDirectory }
@@ -26,15 +20,10 @@ class WhatsAppDocuments(private val root: File) {
         .filterNot { it.name.lowercase() in NOT_RECEIVED_DIRECTORIES }
         .distinctBy { it.absolutePath }
 
-    // Sent and Private are not entered: walked and then filtered out, every
-    // file in them cost three calls over the storage's FUSE layer. A folder
-    // refused here is still listed itself, which only the watch list sees.
     private fun File.received(): FileTreeWalk =
         walkTopDown().onEnter { it.name.lowercase() !in NOT_RECEIVED_DIRECTORIES }
 
     companion object {
-        // Android 11 moved WhatsApp's media under Android/media; the bare
-        // folders are where Android 10 and older builds still write.
         val CANDIDATE_DIRECTORIES = listOf(
             "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Documents",
             "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/" +
@@ -43,7 +32,6 @@ class WhatsAppDocuments(private val root: File) {
             "WhatsApp Business/Media/WhatsApp Business Documents",
         )
 
-        // What this handset sent, and what WhatsApp keeps out of the gallery.
         val NOT_RECEIVED_DIRECTORIES = setOf("sent", "private")
 
         private const val MAX_DEPTH = 2
@@ -59,13 +47,9 @@ class WhatsAppDocuments(private val root: File) {
 }
 
 object DocumentMatcher {
-    // WhatsApp writes the file when it downloads it: just before the notice
-    // when downloads are automatic, or whenever the person taps it otherwise.
     const val BEFORE_NOTICE_MILLIS = 10L * 60 * 1000
     const val AFTER_NOTICE_MILLIS = 7L * 24 * 60 * 60 * 1000
 
-    // A caption names no file, so only a file written at the notice's own
-    // moment is taken for it.
     const val CAPTION_SLACK_MILLIS = 2L * 60 * 1000
 
     private val EXTENSION = Regex("""\.[A-Za-z0-9]{1,5}$""")
@@ -90,8 +74,6 @@ object DocumentMatcher {
         return candidates.minByOrNull { kotlin.math.abs(it.modifiedAt - notice.at) }
     }
 
-    // "Constancia.pdf", or "Constancia (1).pdf": the name WhatsApp gives a
-    // second file of the same name.
     private fun namePattern(label: String): Regex? {
         val extension = EXTENSION.find(label)?.value ?: return null
         val stem = label.removeSuffix(extension)

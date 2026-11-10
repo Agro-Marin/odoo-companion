@@ -11,10 +11,6 @@ work = "2.12.0"
 room = "2.8.5"
 datastore = "1.3.0"
 playServicesLocation = "21.4.0"
-# On-device OCR and QR for classifying a document before it leaves the
-# handset. The bundled flavour: the models ship inside the APK, about 18 MB per
-# ABI (measured). The Play-services flavour fetches them through the Play Store,
-# so a handset without the store never read a document, and nothing said so.
 mlkitTextRecognition = "16.0.1"
 mlkitBarcodeScanning = "17.3.0"
 okhttp = "5.5.1"
@@ -22,24 +18,9 @@ serialization = "1.12.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
 androidxJunit = "1.3.0"
-# 4.17 reaches jdk.internal.access, which java.base does not export: without
-# the --add-exports app/build.gradle.kts passes the test JVM, every Robolectric
-# test fails before it runs ("Failed to interact with raw FileDescriptor
-# internals"). It emulates API 37, which 4.16.1 refused.
 robolectric = "4.17"
-# The SIP stack of the softphone, GPLv3: the app is installed on company
-# handsets only and never distributed outside the company. The no-video build:
-# the softphone carries voice alone, and the full one tripled the APK every
-# handset downloads over MDM.
 linphone = "5.5.39"
-# Wake-ups from Odoo through any UnifiedPush distributor (ntfy, or an FCM
-# bridge), sealed with RFC 8291 Web Push encryption that the connector opens.
 unifiedpush = "3.3.5"
-# The Tink the connector 3.3.5 declares. The connector carries it as a runtime
-# dependency only; OdooSealedWakeupTest compiles against its HybridDecrypt to
-# open a wake-up sealed by Odoo, so the tests name it at the same version. Not
-# the newest Tink (1.24.0): naming that here moves only the tests, which then
-# check a library the app does not ship. It follows the connector.
 tink = "1.23.0"
 
 [libraries]

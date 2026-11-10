@@ -10,12 +10,6 @@ import org.junit.Test
 import java.security.GeneralSecurityException
 import java.util.Base64
 
-/**
- * A wake-up as Odoo seals it -- mail's web_push._encrypt_payload, RFC 8291
- * aes128gcm with a 4096-octet record -- opened by the Tink decrypter the
- * UnifiedPush connector uses. The fixture was produced by the server code, so
- * this pins the two implementations to each other, not each to itself.
- */
 class OdooSealedWakeupTest {
     private val fixture = Json.parseToJsonElement(
         checkNotNull(javaClass.getResource("/push/odoo_sealed_wakeup.json")).readText(),

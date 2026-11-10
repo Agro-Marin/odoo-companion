@@ -34,9 +34,6 @@ data class Settings(
     val callLogEnabled: Boolean = true,
     val recordingsEnabled: Boolean = false,
     val managed: Boolean = false,
-    // Which fields the policy is actually managing. Being managed is one
-    // question -- is there a policy at all -- and which fields it governs is
-    // another, and the form needs the second one.
     val managedKeys: Set<String> = emptySet(),
     val maxPayloadBytes: Long = 0,
     val maxPayloadLearnedAt: Long = 0,
@@ -51,11 +48,6 @@ data class Settings(
     val governedKeys: Set<String>
         get() = if (managed) managedKeys else emptySet()
 
-    // Which server and device record a queued row was collected for, written on
-    // every row: the payload cap and the server's self-naming are forgotten when
-    // either changes (pointAt), and the queue follows the same two values. A
-    // rotated token keeps it. The identifier cannot hold '@', so the server
-    // reads off after the first one.
     val enrollment: String?
         get() = "$identifier@${canonicalBaseUrl(baseUrl)}"
             .takeIf { baseUrl.isNotBlank() && identifier.isNotBlank() }
@@ -98,13 +90,8 @@ const val PAYLOAD_LIMIT_TTL_MILLIS = 24L * 60 * 60 * 1000
 const val MIN_LOCATION_INTERVAL_SECONDS = 15L
 const val MAX_LOCATION_INTERVAL_SECONDS = 24L * 60 * 60
 
-// Zero keeps every fix, which is what this app has always done. It is the
-// default because how finely a fleet is tracked is a decision for whoever runs
-// the fleet, not something a release should change under them.
 const val DEFAULT_MIN_MOVE_METRES = 0L
 
-// Past this a threshold stops filtering noise and starts dropping journeys: a
-// car covers it in a couple of seconds.
 const val MAX_MIN_MOVE_METRES = 500L
 
 const val DEFAULT_UPLOAD_WINDOW_SECONDS = 180L
@@ -129,27 +116,17 @@ sealed interface EnrollmentResult {
     data object CleartextRefused : EnrollmentResult
 }
 
-// Whether this build would refuse to send to the URL: http, to a host the
-// network security policy does not open. Asked per host, as OkHttp asks it, so a
-// host a network_security_config.xml permits is not refused here and then sent
-// to anyway, nor the reverse.
 fun refusesCleartext(value: String, cleartextPermitted: (host: String) -> Boolean): Boolean =
     value.trim().toHttpUrlOrNull()?.let { !it.isHttps && !cleartextPermitted(it.host) } ?: false
 
 fun isUsableBaseUrl(value: String): Boolean = value.trim().toHttpUrlOrNull() != null
 
-// The server a base URL names, spelled one way: scheme and host in lower case,
-// no default port, no trailing slash. "https://Odoo.example.com/" reaches the
-// endpoint "https://odoo.example.com" does, and a policy that respelled it held
-// the whole queue as another server's and forgot what the server had said.
 fun canonicalBaseUrl(value: String): String =
     value.trim().toHttpUrlOrNull()?.toString()?.trimEnd('/') ?: value.trim()
 
 fun isUsableIdentifier(value: String): Boolean =
     value.trim().let { it.isNotEmpty() && IDENTIFIER_PATTERN.matches(it) }
 
-// The characters an identifier may hold, one at a time: the form drops any
-// other as it is typed or pasted instead of refusing the whole value on Save.
 fun isIdentifierChar(c: Char): Boolean =
     c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c in IDENTIFIER_PUNCTUATION
 
@@ -160,8 +137,6 @@ private val IDENTIFIER_PATTERN = Regex("[A-Za-z0-9._~-]+")
 class DeviceConfig(
     private val store: DataStore<Preferences>,
     private val cleartextPermitted: (host: String) -> Boolean = { true },
-    // Told the enrolment a save or a policy is moving the handset off, before
-    // the move is stored: what the queue holds without a stamp is that one's.
     private val leaving: suspend (enrollment: String) -> Unit = {},
 ) {
     constructor(context: Context, leaving: suspend (enrollment: String) -> Unit = {}) :
@@ -191,10 +166,6 @@ class DeviceConfig(
 
     suspend fun current(): Settings = settings.first()
 
-    // For a reader in the background, where a throw is worse than an answer:
-    // out of a worker it is a failure that cancels the upload chained behind
-    // it, and out of the location service's coroutines it kills the process.
-    // A corrupt file is already replaced by storeFor; this is the disk itself.
     suspend fun currentOrNull(): Settings? = try {
         current()
     } catch (unreadable: IOException) {
@@ -202,12 +173,6 @@ class DeviceConfig(
         null
     }
 
-    // The form as one write: validated before anything is stored, and applied
-    // in a single edit so a refused enrolment leaves the switches alone too.
-    // A field the policy governs is skipped -- the stored value is the
-    // policy's, whatever the disabled view happened to show.
-    // Validated against the same snapshot it writes to: read before the edit,
-    // a policy withdrawn in between let a base URL nobody had checked through.
     suspend fun saveForm(form: FormValues): EnrollmentResult {
         var result: EnrollmentResult = EnrollmentResult.Saved
         store.edit { prefs ->
@@ -240,7 +205,6 @@ class DeviceConfig(
         return result
     }
 
-    // A null field is not the form's to validate: the policy governs it.
     private fun enrollmentProblem(baseUrl: String?, identifier: String?): EnrollmentResult? = when {
         baseUrl != null && !isUsableBaseUrl(baseUrl) -> EnrollmentResult.InvalidBaseUrl
 
@@ -253,18 +217,12 @@ class DeviceConfig(
         else -> null
     }
 
-    // Called inside the edit, so the queue's unstamped rows are claimed before
-    // the new enrolment is stored: should the process die between the two, the
-    // rows carry the enrolment still in force, which is where they belong.
     private suspend fun MutablePreferences.moveTo(baseUrl: String?, identifier: String?) {
         val before = toSettings().enrollment
         pointAt(baseUrl, identifier)
         if (before != null && before != toSettings().enrollment) leaving(before)
     }
 
-    // What was learned from a server belongs to what it was learned from:
-    // whether it names itself is a fact about the server, and its payload cap
-    // is a setting on the device record. A rotated token keeps both.
     private fun MutablePreferences.pointAt(baseUrl: String?, identifier: String?) {
         val newServer = baseUrl != null &&
             canonicalBaseUrl(this[BASE_URL].orEmpty()) != canonicalBaseUrl(baseUrl)
@@ -278,9 +236,6 @@ class DeviceConfig(
         identifier?.let { this[IDENTIFIER] = it }
     }
 
-    // A base URL this build cannot reach is refused here as the form refuses
-    // it, and like any other unusable managed value it leaves the stored one
-    // alone: the key stays governed, the enrolment stays working.
     suspend fun applyManaged(values: ManagedValues): Boolean {
         val baseUrl = values.baseUrl?.takeUnless { refusesCleartext(it, cleartextPermitted) }
         var changed = false
@@ -340,8 +295,6 @@ class DeviceConfig(
         }
     }
 
-    // Test seams: switches on a phone the form could not save them for, because
-    // it is not enrolled. Production writes go through saveForm or applyManaged.
     @VisibleForTesting
     internal suspend fun setFeature(callLog: Boolean? = null, recordings: Boolean? = null) {
         store.edit { prefs ->
@@ -390,24 +343,17 @@ class DeviceConfig(
 
     suspend fun callLogCursor(): Long = store.data.first()[CALL_LOG_CURSOR] ?: 0L
 
-    // Null until an id cursor has been written. The timestamp cursor's key is
-    // left alone rather than reinterpreted: its value is an epoch in the
-    // billions, and read as an id it would match no row ever again.
     suspend fun callLogIdCursor(): Long? = store.data.first()[CALL_LOG_ID_CURSOR]
 
     suspend fun setCallLogIdCursor(value: Long) {
         store.edit { prefs -> prefs[CALL_LOG_ID_CURSOR] = value }
     }
 
-    // Absent is not the same as zero here: absent is what a handset upgrading
-    // from a build that cursored on a timestamp looks like.
     @VisibleForTesting
     internal suspend fun clearCallLogIdCursor() {
         store.edit { prefs -> prefs.remove(CALL_LOG_ID_CURSOR) }
     }
 
-    // What a build that cursored on a timestamp left behind; only a test
-    // writes it now, to stand in for such a build.
     @VisibleForTesting
     internal suspend fun setCallLogCursor(value: Long) {
         store.edit { prefs -> prefs[CALL_LOG_CURSOR] = value }

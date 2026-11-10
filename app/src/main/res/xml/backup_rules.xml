@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pre-Android-12 equivalent of data_extraction_rules.xml: the token and the
-     unsent outbox stay on the device they belong to. -->
 <full-backup-content>
     <exclude domain="root" path="." />
     <exclude domain="database" path="." />

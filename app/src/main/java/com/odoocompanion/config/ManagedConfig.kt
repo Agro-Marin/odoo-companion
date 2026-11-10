@@ -16,9 +16,6 @@ data class ManagedValues(
     val uploadWindowSeconds: Long? = null,
     val minMoveMetres: Long? = null,
     val policyPresent: Boolean = false,
-    // The restriction keys the bundle actually carried, whatever their values
-    // turned out to be worth. A key that arrived unusable is still a key the
-    // administrator is managing; a key that never arrived is not.
     val presentKeys: Set<String> = emptySet(),
 )
 
@@ -93,7 +90,6 @@ object ManagedConfig {
         "false" to false, "0" to false, "no" to false, "off" to false, "n" to false,
     )
 
-    // A number, or a number in a string, clamped rather than refused.
     @Suppress("DEPRECATION")
     private fun Bundle.boundedOrNull(key: String, bounds: LongRange, unit: String): Long? {
         if (!containsKey(key)) return null

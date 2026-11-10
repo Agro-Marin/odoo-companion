@@ -63,7 +63,6 @@ class LocationQueueTest {
         }
     }
 
-    // A fix 1.11 m north of the last one: what a phone standing still produces.
     private fun nudged(metres: Double) = LocationFix(
         latitude = 19.4326 + metres / 111_320.0,
         longitude = -99.1332,
@@ -105,8 +104,6 @@ class LocationQueueTest {
         val queue = queue()
 
         queue.record(listOf(nudged(0.0)), windowSeconds = 0, minMoveMetres = 25)
-        // Three drifts of 10 m each: none alone clears the threshold, but they
-        // add up to 30 m from where the phone was last recorded.
         queue.record(listOf(nudged(10.0)), windowSeconds = 0, minMoveMetres = 25)
         queue.record(listOf(nudged(20.0)), windowSeconds = 0, minMoveMetres = 25)
         queue.record(listOf(nudged(30.0)), windowSeconds = 0, minMoveMetres = 25)
@@ -135,7 +132,6 @@ class LocationQueueTest {
 
     @Test
     fun `the distance is real metres, not degrees`() {
-        // One degree of latitude is about 111 km anywhere on Earth.
         val metres = LocationQueue.metresBetween(
             LocationFix(latitude = 19.0, longitude = -99.0, timestamp = 0),
             LocationFix(latitude = 20.0, longitude = -99.0, timestamp = 0),

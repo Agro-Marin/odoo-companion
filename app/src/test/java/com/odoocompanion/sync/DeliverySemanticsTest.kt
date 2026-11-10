@@ -293,7 +293,6 @@ class DeliverySemanticsTest {
 
         val report = drainer().drainAll()
 
-        // The raising row waits on its own retryAfter; the drain is done.
         assertEquals(OutboxDrainer.Outcome.DONE, report.outcome)
         val left = dao.take(OutboxKind.CALL_LOG, 100)
         assertEquals("only the row the server chokes on is still queued", 1, left.size)
@@ -301,9 +300,6 @@ class DeliverySemanticsTest {
         assertTrue("and it alone carries the server's verdict", left.single().serverFault)
     }
 
-    // Narrowing finds the row; it says nothing about how large a batch the
-    // server takes. Left at one, the ninety-nine good calls behind a poisoned
-    // head went one request each, and the batch budget ran out first.
     @Test
     fun `once the raising row is isolated the rest go at full batch size`() = runTest {
         server.dispatcher = object : Dispatcher() {
@@ -636,8 +632,6 @@ class DeliverySemanticsTest {
         assertFalse("the file should be gone", audio.exists())
     }
 
-    // device_mobile recognises a recording it already holds by its file and
-    // answers 200 with duplicates=1: a delivery, and counted as the 409 is.
     @Test
     fun `a recording the server already held is a duplicate, not a second acceptance`() = runTest {
         accept(
@@ -700,8 +694,6 @@ class DeliverySemanticsTest {
             files.forEach { it.delete() }
         }
 
-    // Documents and recordings are drained one after the other, and each began
-    // with a budget of its own: one pass could push twice the bound.
     @Test
     fun `documents and recordings share one size budget per pass`() = runTest {
         accept()
@@ -769,13 +761,8 @@ class DeliverySemanticsTest {
         refuse = false
     }
 
-    // With no harvest cursor, this table is the harvest's whole memory of what
-    // it has already handled: a delivered file that stays on disk must stay in
-    // the table too, or it comes straight back as a new recording.
     @Test
     fun `a delivered recording that will not delete is kept as dead, not forgotten`() = runTest {
-        // A folder of our own: /tmp itself is root's, and a chmod there is a
-        // silent no-op, which is exactly how this test once skipped itself.
         val locked = java.nio.file.Files.createTempDirectory("locked").toFile()
         val file = File(locked, "rec.m4a").apply { writeBytes(ByteArray(32)) }
         dao.insert(
@@ -916,8 +903,6 @@ class DeliverySemanticsTest {
         }
     }
 
-    // The chain that item four of the review rests on: a drain can both
-    // deliver and end with an error, and recordUpload is handed both.
     @Test
     fun `a drain that defers one row still reports the delivery beside the error`() = runTest {
         server.dispatcher = object : Dispatcher() {

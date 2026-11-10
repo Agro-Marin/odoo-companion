@@ -4,11 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// The drawing and the OCR need a handset; only the page geometry is tested here.
 class PageReaderTest {
     @Test
     fun `an ordinary page is drawn at the width OCR reads`() {
-        // A4 in points
         val (width, height) = PageReader.bitmapSize(595, 842)
 
         assertEquals(PageReader.TARGET_WIDTH, width)

@@ -9,9 +9,6 @@ import com.odoocompanion.system.Blocker
 import com.odoocompanion.system.HealthReport
 
 sealed interface StatusLine {
-    // Deliberately unannotated: every variant but Quantity holds a @StringRes,
-    // and Quantity holds a @PluralsRes. The annotation belongs on each of them,
-    // where a smart cast still gives lint the right resource type.
     val text: Int
 
     data class Say(@StringRes override val text: Int) : StatusLine
@@ -25,12 +22,9 @@ sealed interface StatusLine {
     data class Detail(@StringRes override val text: Int, val detail: String) : StatusLine
 }
 
-// What the status panel draws, grouped the way it is drawn: whether the phone
-// is enrolled, what needs a hand (alerts), what it last did, and its queues.
 data class StatusPanel(
     val enrolled: Boolean,
     val managed: Boolean,
-    // a permission or exemption is missing: what the grant button is for
     val blocked: Boolean,
     val alerts: List<StatusLine>,
     val lastUpload: StatusLine,
@@ -40,8 +34,6 @@ data class StatusPanel(
     val held: HeldQueue?,
 )
 
-// Rows collected for an enrolment the handset no longer has, and which one the
-// newest of them is for: never sent to this server unless someone says so.
 data class HeldQueue(val rows: Int, val enrollment: String, val collectedFor: String)
 
 object StatusScreen {
@@ -88,10 +80,6 @@ object StatusScreen {
         )
     }
 
-    // "odoo.example.com, phone-17": an enrolment as a person knows it. The base
-    // URL in it is already canonical, so what is left after the scheme -- a
-    // port that is not the default, a path -- is part of which server it was:
-    // the host alone named two Odoos on one machine alike.
     fun describe(enrollment: String): String {
         val server = enrollment.substringAfter('@').substringAfter("://")
         return "$server, ${enrollment.substringBefore('@')}"
@@ -110,10 +98,6 @@ object StatusScreen {
         Blocker.LOCAL_NETWORK_MISSING -> R.string.status_local_network_missing
     }
 
-    // The last delivery and the last error are two lines, not one: a drain can
-    // deliver every position and still defer the one recording the server
-    // raised on, and a single line either hid the error or called a working
-    // phone failed.
     private fun lastUpload(settings: Settings): StatusLine = if (settings.lastUploadAt > 0L) {
         StatusLine.Since(R.string.status_last_upload_ok, settings.lastUploadAt)
     } else {

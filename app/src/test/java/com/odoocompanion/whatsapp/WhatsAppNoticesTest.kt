@@ -132,7 +132,6 @@ class WhatsAppNoticesTest {
         val nbsp = "\u00A0"
         val lrm = "\u200E"
 
-        // The label a handset showed: "CSF PCA221013LF1 2026-09.pdf (3 páginas)".
         assertEquals(
             "CSF PCA221013LF1 2026-09.pdf",
             WhatsAppNotices.labelOf("$page CSF PCA221013LF1 2026-09.pdf$nbsp(3${nbsp}páginas)"),

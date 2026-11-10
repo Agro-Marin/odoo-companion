@@ -191,9 +191,6 @@ class StatusScreenPolicyTest {
         )
     }
 
-    // Measured on an emulator: moved from one Odoo on a host to another on the
-    // same host, the band named both "10.0.2.2", and could not say which
-    // server the held rows were for.
     @Test
     fun `a held enrolment is named by the server it was for, port and path included`() {
         assertEquals(
@@ -212,8 +209,6 @@ class StatusScreenPolicyTest {
         )
     }
 
-    // From Android 17 a LAN Odoo without the grant times out: the queue grew
-    // with only "timeout" as the last error.
     @Test
     fun `a local server without local network access says so`() {
         val blocker = StatusLine.Say(R.string.status_local_network_missing)

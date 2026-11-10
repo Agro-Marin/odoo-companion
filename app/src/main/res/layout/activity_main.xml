@@ -1,14 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The whole form is laid out to fit one screen: the scroll view underneath
-     only moves when the keyboard is up or the phone is unusually short. The
-     enrolment guide floats over the bottom of the form instead of pushing it
-     down, and lights the field it is about.
 
-     Every field is wrapped in a TextInputLayout rather than carrying a hint of
-     its own. A hint is only drawn while the field is empty, so the moment a
-     phone is enrolled the whole form turns into five unlabelled values, two of
-     them bare numbers whose unit lives only in the string the user can no
-     longer see. A floating label survives the field being filled in. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -29,7 +20,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- The name and, beside it, whether this phone is enrolled. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -92,9 +82,6 @@
                 android:text="@string/status_managed"
                 android:visibility="gone" />
 
-            <!-- What needs a hand, folded into one band: the first item and how
-                 many follow; a tap unfolds the rest. A shortcut to the
-                 permission request rides on it while a permission is missing. -->
             <LinearLayout
                 android:id="@+id/alerts"
                 android:layout_width="match_parent"
@@ -260,8 +247,6 @@
 
                     </LinearLayout>
 
-                    <!-- Rows collected for an enrolment the handset no longer
-                         has: held, never sent to this one unless asked. -->
                     <LinearLayout
                         android:id="@+id/heldBand"
                         android:layout_width="match_parent"
@@ -301,9 +286,6 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- The WhatsApp documents proposal: what the notices announced and
-                 whether the file was found, read on the handset before anything
-                 is uploaded. -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/whatsappPanel"
                 android:layout_width="match_parent"
@@ -495,10 +477,6 @@
         </LinearLayout>
     </ScrollView>
 
-    <!-- The actions, behind the gear: a scrim that closes the menu on any tap
-         outside it, and the menu itself under the gear. They are views of
-         this screen rather than a dialog, so a managed form still disables
-         Save in place. -->
     <View
         android:id="@+id/actionsScrim"
         android:layout_width="match_parent"
@@ -549,7 +527,6 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- The enrolment guide, docked over the bottom of the form. -->
     <FrameLayout
         android:id="@+id/guideDock"
         android:layout_width="match_parent"

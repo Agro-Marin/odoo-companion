@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-"""A stand-in phone system for checking the softphone without an Asterisk.
-
-It listens for SIP over TLS, answers REGISTER (and OPTIONS, SUBSCRIBE, PUBLISH,
-NOTIFY) with 200 without a challenge, and on SIGUSR1 rings the last handset that
-registered: an INVITE over that handset's own TLS connection, offering
-DTLS-SRTP as the softphone requires, an ACK to its answer and a BYE a few
-seconds later. Media does not flow -- nothing answers the DTLS handshake -- so it
-proves registration, ringing, answering and hanging up, not audio. Every message
-is printed.
-
-    tools/sip-stub.py --cert server.pem --key server.key [--host 10.0.2.2]
-    kill -USR1 <pid>    # ring
-
-README.md, "Testing the softphone against a lab phone system", makes the
-certificate and points an extension at it.
-"""
 
 import argparse
 import asyncio
@@ -44,8 +28,6 @@ def get(headers, *names):
     return [value for name, value in headers if name.lower() in wanted]
 
 
-# A name-addr (<sip:...>) or a bare addr-spec (sip:...;tag=x): Linphone sends the
-# second in To.
 def uri_of(value):
     match = re.search(r"<([^>]+)>", value)
     return match.group(1) if match else value.split(";", 1)[0].strip()
@@ -188,7 +170,9 @@ class Stub:
 
 
 async def main():
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser = argparse.ArgumentParser(
+        description="A stand-in phone system for checking the softphone without an Asterisk."
+    )
     parser.add_argument("--cert", required=True, help="server certificate (PEM)")
     parser.add_argument("--key", required=True, help="its private key (PEM)")
     parser.add_argument("--host", default="10.0.2.2", help="this host as the handset reaches it")

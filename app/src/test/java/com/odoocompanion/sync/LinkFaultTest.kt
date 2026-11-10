@@ -65,10 +65,6 @@ class LinkFaultTest {
         }
     }
 
-    // A 503, a 401 or a dead socket on the positions answers for the calls and
-    // the recordings too: they go to the same host with the same token. Sending
-    // them anyway charged each one an attempt per pass, and a recording streamed
-    // its whole body into a server that was not going to take it.
     @Test
     fun `a link fault on the positions sends nothing else in the same pass`() = runTest {
         answer(503, """{"error":"unavailable"}""")
@@ -131,9 +127,6 @@ class LinkFaultTest {
         }
     }
 
-    // A gateway timing out one slow request, or a worker killed by the memory
-    // limit while ingesting it, says nothing about the next request: the calls
-    // still go, as they did before a link fault ended the pass.
     @Test
     fun `a gateway timeout on the positions does not hold the calls back`() = runTest {
         answerByRoute(MockResponse(code = 504, body = "<html>Gateway Time-out</html>"))

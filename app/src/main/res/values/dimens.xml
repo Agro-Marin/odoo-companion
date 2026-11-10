@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The form's side margin: a phone uses the whole width, and a wider
-         screen keeps the fields at a readable line length. -->
     <dimen name="form_side_margin">16dp</dimen>
-    <!-- Vertical rhythm sized to fit the whole form on one screen; a taller
-         screen gets more air, and the spare height goes above the buttons. -->
     <dimen name="gap_section">12dp</dimen>
     <dimen name="gap_field">6dp</dimen>
     <dimen name="panel_padding">12dp</dimen>

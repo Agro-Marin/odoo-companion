@@ -21,9 +21,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// Reads WhatsApp's notices for the documents they announce. Every other app's
-// notification is dropped at the first line; what counts as a document is
-// WhatsAppNotices', so it can be tested without this service.
 class WhatsAppNotificationListener : NotificationListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -32,16 +29,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     @Volatile
     private var observer: FileObserver? = null
 
-    // A file finished in WhatsApp's folder; conflated, since a burst of them
-    // needs one look, not one per file.
     private val arrivals = Channel<Unit>(Channel.CONFLATED)
 
-    // WhatsApp posts nothing for a document sent into the chat on screen, so
-    // the folder is watched too, for as long as the system keeps this listener
-    // bound -- which it does for as long as notification access is on. A
-    // FileObserver says when a file lands; the slow poll is for what it misses,
-    // since Android/media sits behind FUSE from Android 11, and whether a write
-    // by another app reaches inotify there differs between handsets.
     override fun onListenerConnected() {
         connected = true
         val store = CompanionApp.from(this).whatsapp
@@ -56,7 +45,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 }
             }
             while (isActive) {
-                // WhatsApp makes its folder on its first download.
                 if (observer == null) observer = folderObserver()?.also { it.startWatching() }
                 adopt(store)
                 delay(FOLDER_POLL_MILLIS)
@@ -115,7 +103,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             }
             store.record(numbered)
             WhatsAppIntake.process(this@WhatsAppNotificationListener)
-            // An automatic download may land just after its notice.
             delay(RECHECK_MILLIS)
             store.rematch()
             WhatsAppIntake.process(this@WhatsAppNotificationListener)
@@ -166,7 +153,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     companion object {
         private const val TAG = "WhatsAppListener"
 
-        // What kind of key it is, never the key: a JID is a phone number.
         private fun shapeOf(key: String?): String = when {
             key == null -> "none"
             key.endsWith("@s.whatsapp.net") -> "jid"
@@ -175,23 +161,14 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             else -> "other"
         }
 
-        // Past SightingStore.RESEND_SETTLE_MILLIS, so the recheck can also
-        // settle a resend WhatsApp saved no new file for.
         private const val RECHECK_MILLIS = 75_000L
 
-        // The fallback for an arrival the observer did not hear, and for a
-        // WhatsApp folder created after the listener connected.
         private const val FOLDER_POLL_MILLIS = 5L * 60 * 1000
 
-        // Whether the system has this listener bound right now. Access being on
-        // is not enough: measured on a handset, after the app was updated over
-        // itself the listener stayed unbound with access still on, and nothing
-        // was watched while the card said everything was granted.
         @Volatile
         var connected = false
             private set
 
-        // Asks the system to bind the listener again; a no-op when it is bound.
         fun reconnect(context: Context) {
             if (!connected && isEnabled(context)) {
                 NotificationListenerService.requestRebind(component(context))

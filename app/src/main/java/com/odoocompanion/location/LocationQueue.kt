@@ -23,9 +23,6 @@ class LocationQueue(
 ) {
     private var askedAt: Long? = null
 
-    // The last fix actually written, which is what a new one is measured
-    // against. In memory only: a service restart queues one extra fix, which is
-    // cheaper than a column and self-correcting.
     private var lastQueued: LocationFix? = null
 
     suspend fun record(
@@ -69,11 +66,6 @@ class LocationQueue(
         return asked
     }
 
-    // A phone standing still still reports: at the default interval that is
-    // 1,440 fixes a day saying the same thing, and the row, the upload and the
-    // storage in Odoo are all paid for. What stops this from being a silent
-    // phone instead of a quiet one is the heartbeat -- a stationary device is
-    // still heard from, just not once a minute.
     private fun worthKeeping(fix: LocationFix, minMoveMetres: Long): Boolean {
         if (minMoveMetres <= 0) return true
         val last = lastQueued
@@ -86,8 +78,6 @@ class LocationQueue(
         return true
     }
 
-    // The depth is this enrolment's, which is what the cadence asks about; the
-    // trim keeps the newest fixes of any, so a previous enrolment's go first.
     private suspend fun trimToBound(enrollment: String?): QueueDepth {
         val depth = dao.depthOf(OutboxKind.LOCATION, enrollment = enrollment)
         if (depth.queued <= OutboxLimits.MAX_QUEUED_FIXES) return depth
@@ -96,16 +86,12 @@ class LocationQueue(
     }
 
     companion object {
-        // Long enough that a parked phone is quiet, short enough that one which
-        // died looks different from one which is merely still.
         const val HEARTBEAT_MILLIS = 10L * 60 * 1000
 
         private const val EARTH_RADIUS_METRES = 6_371_000.0
 
         private const val TAG = "LocationQueue"
 
-        // Haversine, written out rather than taken from android.location, so it
-        // is arithmetic a unit test can exercise without a framework under it.
         internal fun metresBetween(from: LocationFix, to: LocationFix): Double {
             val dLat = Math.toRadians(to.latitude - from.latitude)
             val dLon = Math.toRadians(to.longitude - from.longitude)

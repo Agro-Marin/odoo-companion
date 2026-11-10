@@ -117,7 +117,6 @@ class CompanionApp : Application() {
         pushRefreshes.trySend(Unit)
     }
 
-    /** Does what a wake-up from Odoo asks, as the periodic work would have later. */
     fun obey(command: PushCommand) {
         Log.i(TAG, "Odoo woke this handset: $command")
         when (command) {
@@ -132,7 +131,6 @@ class CompanionApp : Application() {
         }
     }
 
-    /** Hands Odoo the endpoint a distributor gave, or takes the handset off wake-ups. */
     fun reportPushEndpoint(registration: PushRegistration?) {
         scope.launch {
             val settings = config.currentOrNull()?.takeIf { it.isEnrolled } ?: return@launch
@@ -143,13 +141,6 @@ class CompanionApp : Application() {
         }
     }
 
-    // What Odoo says about the extension is asked outside the reconcile: it is a
-    // network round trip, and inside it every save, policy push and boot waited
-    // out OkHttp's timeouts -- on an emulator whose server accepted and stalled,
-    // BOOT_COMPLETED was held 60 s and the system declared the app not
-    // responding. The reconcile runs the line on the extension last stored
-    // meanwhile. Requests are conflated: any number made while a lookup is out
-    // become one more lookup after it.
     private val softphoneRefreshes = Channel<Unit>(Channel.CONFLATED)
 
     @Suppress("TooGenericExceptionCaught")
@@ -159,7 +150,6 @@ class CompanionApp : Application() {
         } catch (stopped: CancellationException) {
             throw stopped
         } catch (failure: Exception) {
-            // the loop serves every later request; one failed refresh must not end it
             Log.e(TAG, "Softphone refresh failed", failure)
         }
     }
@@ -174,8 +164,6 @@ class CompanionApp : Application() {
         }
         reconfiguring.withLock {
             val now = config.current()
-            // a reply about an enrolment that has since changed is not about this
-            // one; the change asked again, and that lookup answers for it
             if (now.endpoint() != asked.endpoint()) return@withLock
             applySoftphone(now.isEnrolled, lookup)
         }
@@ -183,9 +171,6 @@ class CompanionApp : Application() {
 
     private fun Settings.endpoint() = Triple(baseUrl, identifier, token)
 
-    // Wake-ups only shorten waits the periodic work already bounds, so this
-    // runs beside the reconcile like the softphone lookup: a round trip that
-    // must not hold a boot or a policy push.
     private val pushRefreshes = Channel<Unit>(Channel.CONFLATED)
 
     @Suppress("TooGenericExceptionCaught")
@@ -227,15 +212,11 @@ class CompanionApp : Application() {
         }
     }
 
-    // The company line rings here only on an enrolled handset whose user has an
-    // extension in Odoo; with Odoo out of reach, the last extension it named
-    // keeps ringing.
     private suspend fun applySoftphone(enrolled: Boolean, lookup: SoftphoneLookup) {
         when (val plan = SoftphonePlan.decide(enrolled, lookup, softphones.current())) {
             is SoftphonePlan.Run -> {
                 softphones.save(plan.settings)
                 if (!hasMicrophone()) {
-                    // a line that would answer in silence is worse than none
                     Log.w(TAG, "Softphone not running: microphone permission not granted")
                     SoftphoneService.stop(this)
                     SoftphoneRetry.schedule(this)
@@ -265,8 +246,6 @@ class CompanionApp : Application() {
 
     private val reconfiguring = Mutex()
 
-    // The enrolment the last reconcile applied, to tell a move from a repeat;
-    // read and written under reconfiguring.
     private var reconciledEnrollment: String? = null
 
     private fun installedVersion(): Long = runCatching {
