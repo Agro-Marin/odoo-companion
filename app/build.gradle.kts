@@ -38,8 +38,8 @@ android {
         applicationId = "com.odoocompanion"
         minSdk = 29
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.6.0"
+        versionCode = 8
+        versionName = "0.6.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ADMIN_PASSWORD_SALT", "\"$adminPasswordSalt\"")
         buildConfigField("String", "ADMIN_PASSWORD_SHA256", "\"$adminPasswordSha256\"")
