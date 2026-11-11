@@ -1,23 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The Xiuman symbol (brandbook v1.0, section 11), traced from the
-     construction grid of section 12 at its own proportions. Fértil and Noche
-     as drawn there; Noche turns Mineral on a dark canvas (section 08). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="21dp"
+    android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="761"
-    android:viewportHeight="884">
-    <group
-        android:translateX="-569.8"
-        android:translateY="-98.15">
-        <path
-            android:fillColor="@color/xiuman_fertil"
-            android:pathData="M1037.76,548.81 L952.07,680.9 L784.52,939.12 C767.21,965.77 737.57,981.85 705.87,981.85 L569.8,981.85 L858.57,536.78 L673.33,251.3 L793.78,251.3 C825.56,251.3 855.2,267.39 872.5,294.03 L944.26,404.69 Z" />
-        <path
-            android:fillColor="@color/logo_ink"
-            android:pathData="M1219.24,828.54 L1098.86,828.54 C1067.09,828.54 1037.45,812.38 1020.14,785.73 L952.07,680.9 L1037.76,548.81 Z" />
-        <path
-            android:fillColor="@color/logo_ink"
-            android:pathData="M1330.2,98.15 L1037.76,548.81 L944.26,404.69 L1115.41,140.96 C1132.71,114.31 1162.35,98.15 1194.13,98.15 Z" />
-    </group>
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path
+        android:fillColor="@color/xiuman_fertil"
+        android:fillType="evenOdd"
+        android:pathData="M0,50 A50,50 0 1,0 100,50 A50,50 0 1,0 0,50 Z M19.91,50 A30.09,30.09 0 1,0 80.09,50 A30.09,30.09 0 1,0 19.91,50 Z" />
 </vector>
