@@ -70,7 +70,7 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
         }
     }
 
-    private fun scan() {
+    fun scan() {
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(PAGE_LIMIT)

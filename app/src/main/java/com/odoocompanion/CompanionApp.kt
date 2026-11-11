@@ -24,6 +24,7 @@ import com.odoocompanion.push.PushKeyLookup
 import com.odoocompanion.push.PushPlan
 import com.odoocompanion.push.PushRegistration
 import com.odoocompanion.scan.ScanLog
+import com.odoocompanion.security.AdminGate
 import com.odoocompanion.softphone.SoftphoneLookup
 import com.odoocompanion.softphone.SoftphonePlan
 import com.odoocompanion.softphone.SoftphoneRetry
@@ -66,6 +67,8 @@ class CompanionApp : Application() {
     }
 
     val scans: ScanLog by lazy { ScanLog(File(filesDir, "scans.json")) }
+
+    var adminGate = AdminGate()
 
     val client: OdooClient by lazy {
         OdooClient(onServerNamedItself = { config.learnServerNamesItself() })

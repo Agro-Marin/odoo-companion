@@ -26,13 +26,17 @@ class UpdateReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_SUCCESS -> Log.i(TAG, "Update installed")
 
             // The person said no to Android's confirmation: Home offers it again.
-            PackageInstaller.STATUS_FAILURE_ABORTED -> Log.i(TAG, "Update declined")
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                Log.i(TAG, "Update declined")
+                Updater.settled()
+            }
 
             // A key that is not the installed build's lands here, as
             // STATUS_FAILURE_CONFLICT or _INCOMPATIBLE: say it, since nothing
             // else on the phone would.
             else -> {
                 Log.w(TAG, "Update not installed: status $status, $message")
+                Updater.settled()
                 Toast.makeText(context, R.string.update_install_failed, Toast.LENGTH_LONG).show()
             }
         }

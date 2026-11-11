@@ -30,6 +30,7 @@ import com.odoocompanion.net.LocationFix
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.debug
 import com.odoocompanion.ui.MainActivity
+import com.odoocompanion.ui.ScanShortcut
 import kotlinx.coroutines.launch
 
 class LocationForegroundService : LifecycleService() {
@@ -143,6 +144,12 @@ class LocationForegroundService : LifecycleService() {
             .setSmallIcon(R.drawable.ic_launcher)
             .setOngoing(true)
             .setContentIntent(open)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .addAction(
+                R.drawable.ic_scan_on_accent,
+                getString(R.string.action_scan),
+                ScanShortcut.pendingIntent(this),
+            )
             .build()
     }
 

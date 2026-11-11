@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -17,13 +18,17 @@ import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.databinding.ActivityMainBinding
+import com.odoocompanion.databinding.DialogAdminPasswordBinding
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.update.InstallStart
 import com.odoocompanion.update.UpdateCheck
 import com.odoocompanion.update.UpdateManifest
+import com.odoocompanion.update.UpdateRelaunch
+import com.odoocompanion.update.UpdateStep
 import com.odoocompanion.update.Updater
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +53,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var updater: Updater
 
     private var offered: UpdateManifest? = null
+
+    private lateinit var scanCard: ScanCard
 
     // The alert band says how long ago things happened, as Settings does.
     private val minutes = flow {
@@ -74,7 +81,8 @@ class MainActivity : AppCompatActivity() {
         updater = Updater(this)
         alerts = AlertBand(binding.alerts) { grants.requestAll() }
         setUpActions()
-        ScanCard(this, binding).start()
+        scanCard = ScanCard(this, binding).also { it.start() }
+        binding.appVersion.text = versionText()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -102,11 +110,67 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.updateInstall.setOnClickListener { offered?.let(::install) }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                updater.progress.collect(::showUpdateStep)
+            }
+        }
+        if (savedInstanceState == null) {
+            WhatsNewDialog(this, installedVersionCode()).showIfDue()
+            handle(intent)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handle(intent)
+    }
+
+    private fun handle(intent: Intent?) {
+        if (intent?.action != ScanShortcut.ACTION_SCAN) return
+        intent.action = null
+        scanCard.scan()
+    }
+
+    private fun installedVersionCode(): Long =
+        PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0))
+
+    private fun versionText(): String = getString(
+        R.string.app_version,
+        packageManager.getPackageInfo(packageName, 0).versionName.orEmpty(),
+        installedVersionCode().toInt(),
+    )
+
+    private fun showUpdateStep(step: UpdateStep?) {
+        val manifest = offered ?: return
+        binding.updateProgress.isVisible = step != null
+        when (step) {
+            is UpdateStep.Downloading -> {
+                binding.updateProgress.isIndeterminate = false
+                binding.updateProgress.setProgressCompat(step.percent, true)
+                binding.updateText.text =
+                    getString(R.string.update_progress, manifest.versionName, step.percent)
+            }
+
+            UpdateStep.Verifying -> {
+                binding.updateProgress.isIndeterminate = true
+                binding.updateText.setText(R.string.update_verifying)
+            }
+
+            UpdateStep.Installing -> {
+                binding.updateProgress.isIndeterminate = true
+                binding.updateText.setText(R.string.update_installing)
+            }
+
+            null -> offer(manifest)
+        }
     }
 
     override fun onResume() {
         super.onResume()
         healthChecks.value++
+        UpdateRelaunch.dismiss(this)
         offer(updater.known())
         if (updater.dueForCheck()) checkForUpdate(quiet = true)
     }
@@ -142,7 +206,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openSettings() = startActivity(Intent(this, SettingsActivity::class.java))
+    private fun openSettings() {
+        val gate = CompanionApp.from(this).adminGate
+        if (gate.isOpen()) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        val form = DialogAdminPasswordBinding.inflate(layoutInflater)
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.admin_password_title)
+            .setMessage(R.string.admin_password_message)
+            .setView(form.root)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.admin_password_enter, null)
+            .create()
+        val submit = {
+            if (gate.unlock(form.adminPassword.text?.toString().orEmpty())) {
+                dialog.dismiss()
+                startActivity(Intent(this, SettingsActivity::class.java))
+            } else {
+                form.adminPasswordLayout.error = getString(R.string.admin_password_wrong)
+            }
+        }
+        form.adminPassword.setOnEditorActionListener { _, _, _ ->
+            submit()
+            true
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                submit()
+            }
+            form.adminPassword.requestFocus()
+        }
+        dialog.show()
+    }
 
     private fun showActions(open: Boolean) {
         binding.actionsMenu.isVisible = open
@@ -168,9 +265,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun offer(manifest: UpdateManifest?) {
+        if (updater.progress.value != null && manifest != null) return
         offered = manifest
         binding.updateBanner.isVisible = manifest != null
         binding.updateInstall.isEnabled = true
+        binding.updateProgress.isVisible = false
         if (manifest != null) {
             binding.updateText.text = getString(R.string.update_available, manifest.versionName)
         }
@@ -226,6 +325,8 @@ class MainActivity : AppCompatActivity() {
         // to whatever is currently set would grow a little further each time.
         val menuOffset =
             (binding.actionsMenu.layoutParams as ViewGroup.MarginLayoutParams).topMargin
+        val versionOffset =
+            (binding.appVersion.layoutParams as ViewGroup.MarginLayoutParams).bottomMargin
         val base = listOf(
             scroll.paddingLeft,
             scroll.paddingTop,
@@ -242,6 +343,9 @@ class MainActivity : AppCompatActivity() {
             )
             binding.actionsMenu.updateLayoutParams<ViewGroup.MarginLayoutParams> {
                 topMargin = bars.top + menuOffset
+            }
+            binding.appVersion.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = bars.bottom + versionOffset
             }
             insets
         }

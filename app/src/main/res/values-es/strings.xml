@@ -185,4 +185,31 @@
         <item quantity="many">%1$d documentos subidos a Documentos</item>
         <item quantity="other">%1$d documentos subidos a Documentos</item>
     </plurals>
+    <string name="admin_password_title">Contraseña de administrador</string>
+    <string name="admin_password_message">La configuración es solo para el administrador. Escribe la contraseña para continuar.</string>
+    <string name="admin_password_hint">Contraseña</string>
+    <string name="admin_password_enter">Entrar</string>
+    <string name="admin_password_wrong">Contraseña incorrecta</string>
+    <string name="update_progress">Descargando la versión %1$s… %2$d%%</string>
+    <string name="update_verifying">Revisando la descarga…</string>
+    <string name="update_installing">Instalando… la app se vuelve a abrir al terminar</string>
+    <string name="update_installed_title">Companion se actualizó a la %1$s</string>
+    <string name="update_installed_text">Toca para abrirla y ver lo nuevo</string>
+    <string name="notification_channel_updates">Actualizaciones</string>
+    <string name="widget_scan_label">Escanear documento</string>
+    <string name="widget_scan_description">Abre el escáner de documentos con un toque</string>
+    <string name="whats_new_skip">Saltar</string>
+    <string name="whats_new_next">Siguiente</string>
+    <string name="whats_new_done">Entendido</string>
+    <string name="whats_new_step">Novedad · %1$d de %2$d</string>
+    <string name="new_icon_title">Ícono nuevo</string>
+    <string name="new_icon_body">Companion ahora trae el anillo de Odoo con los colores de Xiuman. Búscalo en tu pantalla de inicio.</string>
+    <string name="new_scan_title">Envía documentos a Odoo</string>
+    <string name="new_scan_body">Escanea con la cámara o sube un PDF o una foto: llega a Documentos de Odoo a tu nombre.</string>
+    <string name="new_widget_title">Escanea desde donde sea</string>
+    <string name="new_widget_body">Mantén presionada tu pantalla de inicio, elige Widgets y agrega el botón Escanear de Companion. La notificación de la pantalla de bloqueo también trae el botón Escanear.</string>
+    <string name="new_update_title">Se actualiza sola</string>
+    <string name="new_update_body">Cuando hay versión nueva, Inicio te la muestra con su avance, y la app se vuelve a abrir cuando termina de instalarse.</string>
+    <string name="new_admin_title">Configuración protegida</string>
+    <string name="new_admin_body">La configuración del engrane ahora pide la contraseña de administrador. Tu versión aparece abajo en Inicio.</string>
 </resources>

@@ -184,4 +184,31 @@
         <item quantity="one">%1$d document uploaded to Documents</item>
         <item quantity="other">%1$d documents uploaded to Documents</item>
     </plurals>
+    <string name="admin_password_title">Administrator password</string>
+    <string name="admin_password_message">Settings are for the administrator. Enter the password to continue.</string>
+    <string name="admin_password_hint">Password</string>
+    <string name="admin_password_enter">Enter</string>
+    <string name="admin_password_wrong">Wrong password</string>
+    <string name="update_progress">Downloading version %1$s… %2$d%%</string>
+    <string name="update_verifying">Checking the download…</string>
+    <string name="update_installing">Installing… the app reopens when it is done</string>
+    <string name="update_installed_title">Companion updated to %1$s</string>
+    <string name="update_installed_text">Tap to open it and see what is new</string>
+    <string name="notification_channel_updates">Updates</string>
+    <string name="widget_scan_label">Scan a document</string>
+    <string name="widget_scan_description">Opens the document scanner in one tap</string>
+    <string name="whats_new_skip">Skip</string>
+    <string name="whats_new_next">Next</string>
+    <string name="whats_new_done">Got it</string>
+    <string name="whats_new_step">New · %1$d of %2$d</string>
+    <string name="new_icon_title">A new icon</string>
+    <string name="new_icon_body">Companion now carries the Odoo ring in Xiuman colours. Look for it on your home screen.</string>
+    <string name="new_scan_title">Send documents to Odoo</string>
+    <string name="new_scan_body">Scan with the camera or upload a PDF or a photo: it reaches Odoo\'s Documents in your name.</string>
+    <string name="new_widget_title">Scan from anywhere</string>
+    <string name="new_widget_body">Touch and hold your home screen, choose Widgets and add Companion\'s Scan button. The notification on the lock screen has a Scan button too.</string>
+    <string name="new_update_title">Updates by themselves</string>
+    <string name="new_update_body">When there is a new version, Home shows it with its progress, and the app reopens once it is installed.</string>
+    <string name="new_admin_title">Protected settings</string>
+    <string name="new_admin_body">The gear\'s Settings now ask for the administrator password. The version you have is at the bottom of Home.</string>
 </resources>

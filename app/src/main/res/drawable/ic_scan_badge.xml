@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/xiuman_fertil" />
+            <size
+                android:width="48dp"
+                android:height="48dp" />
+        </shape>
+    </item>
+    <item
+        android:bottom="11dp"
+        android:drawable="@drawable/ic_scan_on_accent"
+        android:left="11dp"
+        android:right="11dp"
+        android:top="11dp" />
+</layer-list>

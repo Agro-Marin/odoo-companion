@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.odoocompanion.CompanionApp
+import com.odoocompanion.update.UpdateRelaunch
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +15,9 @@ import kotlinx.coroutines.launch
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in HANDLED_ACTIONS) return
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            UpdateRelaunch.afterReplace(context)
+        }
         val pending = goAsync()
 
         val scope = CoroutineScope(

@@ -9,6 +9,7 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.ManagedValues
+import com.odoocompanion.security.AdminGate
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -22,6 +23,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 class ActionsMenuTest {
@@ -37,6 +39,7 @@ class ActionsMenuTest {
         app.startup.join()
         app.config.clearEnrollment()
         app.config.applyManaged(ManagedValues())
+        app.adminGate = AdminGate(expectedSha256 = "", salt = "")
     }
 
     @After
@@ -108,6 +111,32 @@ class ActionsMenuTest {
         assertEquals(SettingsActivity::class.java.name, started.component?.className)
         assertFalse(screen.menuShown())
     }
+
+    @Test
+    fun `Settings asks for the administrator password first`() {
+        app.adminGate = AdminGate(expectedSha256 = sha256("salt:secret"), salt = "salt")
+        val screen = open()
+        screen.tap(R.id.actionsToggle)
+
+        screen.tap(R.id.openSettings)
+
+        assertNull(Shadows.shadowOf(screen).nextStartedActivity)
+        val dialog = ShadowDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
+        dialog.findViewById<android.widget.EditText>(R.id.adminPassword)!!.setText("wrong")
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        Shadows.shadowOf(Looper.getMainLooper()).idle()
+        assertNull(Shadows.shadowOf(screen).nextStartedActivity)
+
+        dialog.findViewById<android.widget.EditText>(R.id.adminPassword)!!.setText("secret")
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        Shadows.shadowOf(Looper.getMainLooper()).idle()
+        val started = Shadows.shadowOf(screen).nextStartedActivity
+        assertEquals(SettingsActivity::class.java.name, started.component?.className)
+    }
+
+    private fun sha256(text: String) = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(text.toByteArray())
+        .joinToString("") { "%02x".format(it) }
 
     // Home sends documents and nothing else: no field of the form is on it.
     @Test

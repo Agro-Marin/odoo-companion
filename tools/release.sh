@@ -37,6 +37,11 @@ if [[ ! -f keystore.properties ]]; then
     exit 1
 fi
 
+if ! grep -qE '^adminPassword=.+' fleet.properties 2>/dev/null; then
+    echo "fleet.properties has no adminPassword: a release would leave Settings open" >&2
+    exit 1
+fi
+
 if [[ -n "$(git status --porcelain)" ]]; then
     echo "the working tree has uncommitted changes: release a commit" >&2
     exit 1

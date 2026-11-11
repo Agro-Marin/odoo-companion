@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -12,6 +13,22 @@ val signingProperties = Properties().apply {
     if (file.exists()) file.inputStream().use(::load)
 }
 
+val fleetProperties = Properties().apply {
+    val file = rootProject.file("fleet.properties")
+    if (file.exists()) file.inputStream().use(::load)
+}
+
+val adminPasswordSalt = "odoo-companion-settings"
+
+val adminPasswordSha256 = fleetProperties.getProperty("adminPassword")
+    ?.takeIf { it.isNotEmpty() }
+    ?.let { password ->
+        MessageDigest.getInstance("SHA-256")
+            .digest("$adminPasswordSalt:$password".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+    .orEmpty()
+
 android {
     namespace = "com.odoocompanion"
     compileSdk = 37
@@ -24,6 +41,8 @@ android {
         versionCode = 7
         versionName = "0.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "ADMIN_PASSWORD_SALT", "\"$adminPasswordSalt\"")
+        buildConfigField("String", "ADMIN_PASSWORD_SHA256", "\"$adminPasswordSha256\"")
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -62,6 +81,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     androidResources {
