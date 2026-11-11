@@ -25,7 +25,7 @@ import org.robolectric.android.controller.ActivityController
 @RunWith(RobolectricTestRunner::class)
 class GuidedEnrollmentTest {
     private val app: CompanionApp get() = ApplicationProvider.getApplicationContext()
-    private var controller: ActivityController<MainActivity>? = null
+    private var controller: ActivityController<SettingsActivity>? = null
 
     @Before
     fun setUp() = runTest {
@@ -44,8 +44,8 @@ class GuidedEnrollmentTest {
         controller = null
     }
 
-    private fun open(): MainActivity {
-        controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+    private fun open(): SettingsActivity {
+        controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
         settle()
         return controller!!.get()
     }
@@ -57,11 +57,11 @@ class GuidedEnrollmentTest {
         }
     }
 
-    private fun MainActivity.shown(): List<Int> =
+    private fun SettingsActivity.shown(): List<Int> =
         listOf(R.id.guideBaseUrl, R.id.guideIdentifier, R.id.guideToken)
             .filter { findViewById<View>(it).visibility == View.VISIBLE }
 
-    private fun MainActivity.type(id: Int, text: String) {
+    private fun SettingsActivity.type(id: Int, text: String) {
         findViewById<EditText>(id).setText(text)
         settle()
     }

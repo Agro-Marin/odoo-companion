@@ -23,12 +23,14 @@ import com.odoocompanion.push.PushCommand
 import com.odoocompanion.push.PushKeyLookup
 import com.odoocompanion.push.PushPlan
 import com.odoocompanion.push.PushRegistration
+import com.odoocompanion.scan.ScanLog
 import com.odoocompanion.softphone.SoftphoneLookup
 import com.odoocompanion.softphone.SoftphonePlan
 import com.odoocompanion.softphone.SoftphoneRetry
 import com.odoocompanion.softphone.SoftphoneService
 import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.ui.Appearance
 import com.odoocompanion.whatsapp.SightingStore
 import com.odoocompanion.whatsapp.WhatsAppDocuments
 import kotlinx.coroutines.CancellationException
@@ -61,6 +63,8 @@ class CompanionApp : Application() {
         }
     }
 
+    val scans: ScanLog by lazy { ScanLog(File(filesDir, "scans.json")) }
+
     val client: OdooClient by lazy {
         OdooClient(onServerNamedItself = { config.learnServerNamesItself() })
     }
@@ -79,6 +83,7 @@ class CompanionApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Appearance.apply(this)
         ContextCompat.registerReceiver(
             this,
             restrictionsChanged,

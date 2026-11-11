@@ -1,12 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_primary">#2EE6A0</color>
-    <color name="brand_on_primary">#03140D</color>
-    <color name="ink">#E8EDF2</color>
-    <color name="ink_muted">#8A94A3</color>
-    <color name="canvas">#0B0E12</color>
-    <color name="panel">#12161C</color>
-    <color name="hairline">#252B33</color>
+    <!-- Night is Noche deepened: the brand's dark ground, Mineral as ink and
+         Rocío for what is secondary; Fértil stays the accent and also fills
+         the primary action, which keeps Noche on top. -->
+    <color name="brand_primary">#2EB769</color>
+    <color name="brand_on_primary">#023E4C</color>
+    <color name="brand_accent">#2EB769</color>
+    <color name="brand_on_accent">#023E4C</color>
+    <color name="ink">#FCF8F2</color>
+    <color name="ink_muted">#B4D5D6</color>
+    <color name="canvas">#011F27</color>
+    <color name="panel">#032C36</color>
+    <color name="tile">#05394A</color>
+    <color name="hairline">#11495A</color>
+    <color name="logo_ink">#FCF8F2</color>
     <color name="alert_bg">#2A2110</color>
     <color name="alert_ink">#F5C26B</color>
 </resources>

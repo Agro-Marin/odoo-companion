@@ -20,7 +20,11 @@ object OutboxKind {
     // A document the handset received, in a file it does not own: WhatsApp's.
     const val DOCUMENT = "document"
 
-    val IRREPLACEABLE = setOf(CALL_LOG, RECORDING, DOCUMENT)
+    // A document someone scanned or picked on the handset, in a copy the app
+    // made for it: the outbox's to delete once delivered, like a recording.
+    const val SCAN = "scan"
+
+    val IRREPLACEABLE = setOf(CALL_LOG, RECORDING, DOCUMENT, SCAN)
 }
 
 @Entity(
@@ -215,7 +219,7 @@ interface OutboxDao {
         """
         SELECT id, filePath FROM outbox
         WHERE deadAt IS NOT NULL AND deadAt < :before AND filePath IS NOT NULL
-          AND kind = '${OutboxKind.RECORDING}'
+          AND kind IN ('${OutboxKind.RECORDING}', '${OutboxKind.SCAN}')
         """,
     )
     suspend fun deadFilesBefore(before: Long): List<QueuedFile>

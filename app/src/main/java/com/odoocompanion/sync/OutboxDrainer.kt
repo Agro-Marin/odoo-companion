@@ -43,6 +43,10 @@ data class DrainReport(
     val purged: Int = 0,
     val revived: Int = 0,
     val delivered: Boolean = false,
+    // The WhatsApp documents Odoo took for the first time this pass, for the
+    // notice that says what reached Documents. A duplicate is not one: Odoo
+    // already had it, and its notice went the first time.
+    val deliveredDocuments: List<DocumentMetadata> = emptyList(),
     val deferred: Boolean = false,
     val moreWorkPending: Boolean = false,
 )
@@ -55,6 +59,8 @@ private class DrainTally {
     var lastError: String? = null
 
     var delivered = false
+
+    val deliveredDocuments = mutableListOf<DocumentMetadata>()
 
     var attempted = false
     var deadLettered = 0
@@ -87,6 +93,7 @@ private class DrainTally {
         purged = purged,
         revived = revived,
         delivered = delivered,
+        deliveredDocuments = deliveredDocuments.toList(),
         moreWorkPending = moreWork,
     )
 }
@@ -142,6 +149,7 @@ class OutboxDrainer(
             { drainBatch(LOCATIONS, settings, tally) },
             { drainBatch(CALLS, settings, tally) },
             { drainFiles(DOCUMENTS, settings, tally) },
+            { drainFiles(SCANS, settings, tally) },
             { drainFiles(RECORDINGS, settings, tally) },
         )
         var outcome = Outcome.DONE
@@ -469,6 +477,11 @@ class OutboxDrainer(
                             tally.note(tally.duplicates, files.kind, 1)
                         } else {
                             tally.note(tally.accepted, files.kind, 1)
+                            if (files.kind == OutboxKind.DOCUMENT) {
+                                attempt {
+                                    WireJson.decodeFromString<DocumentMetadata>(entry.payload)
+                                }.getOrNull()?.let(tally.deliveredDocuments::add)
+                            }
                         }
                         // A document's file is WhatsApp's: delivered, only the
                         // row goes, and the file stays where WhatsApp keeps it.
@@ -679,6 +692,19 @@ class OutboxDrainer(
             "document",
             RecordingBody.FILE_KEY,
             ownsFile = false,
+        ) {
+            WireJson.encodeToJsonElement(WireJson.decodeFromString<DocumentMetadata>(it))
+                .jsonObject
+        }
+
+        // A scan travels the document's route, but in the app's own copy:
+        // delivered, the copy goes with the row.
+        private val SCANS = FileKind(
+            OutboxKind.SCAN,
+            "document",
+            "scan",
+            RecordingBody.FILE_KEY,
+            ownsFile = true,
         ) {
             WireJson.encodeToJsonElement(WireJson.decodeFromString<DocumentMetadata>(it))
                 .jsonObject

@@ -1,14 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The whole form is laid out to fit one screen: the scroll view underneath
-     only moves when the keyboard is up or the phone is unusually short. The
-     enrolment guide floats over the bottom of the form instead of pushing it
-     down, and lights the field it is about.
-
-     Every field is wrapped in a TextInputLayout rather than carrying a hint of
-     its own. A hint is only drawn while the field is empty, so the moment a
-     phone is enrolled the whole form turns into five unlabelled values, two of
-     them bare numbers whose unit lives only in the string the user can no
-     longer see. A floating label survives the field being filled in. -->
+<!-- Home: what the person holding the phone came to do, send a document,
+     and nothing else. Whether the phone is enrolled stays in the header, an
+     alert that needs a hand keeps its band, and everything that configures
+     the phone lives behind the gear, in Settings. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -23,56 +17,42 @@
         android:paddingStart="@dimen/form_side_margin"
         android:paddingTop="12dp"
         android:paddingEnd="@dimen/form_side_margin"
-        android:paddingBottom="12dp">
+        android:paddingBottom="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- The name and, beside it, whether this phone is enrolled. -->
+            <!-- The symbol and the name, whether this phone is enrolled, and
+                 the gear. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
+                <ImageView
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:adjustViewBounds="true"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_brand_symbol" />
+
                 <TextView
+                    style="@style/Text.Companion.Title"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="@string/app_name"
-                    android:textColor="@color/ink"
-                    android:textSize="22sp"
-                    android:textStyle="bold" />
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/home_title"
+                    android:textSize="18sp" />
 
-                <LinearLayout
+                <include
                     android:id="@+id/statePill"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/bg_chip"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:paddingStart="10dp"
-                    android:paddingTop="4dp"
-                    android:paddingEnd="12dp"
-                    android:paddingBottom="4dp">
-
-                    <ImageView
-                        android:id="@+id/stateDot"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
-                        android:layout_marginEnd="8dp"
-                        android:importantForAccessibility="no"
-                        android:src="@drawable/dot" />
-
-                    <TextView
-                        android:id="@+id/stateText"
-                        style="@style/Text.Companion.Mono"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textColor="@color/ink" />
-                </LinearLayout>
+                    layout="@layout/state_pill" />
 
                 <ImageButton
                     android:id="@+id/actionsToggle"
@@ -84,60 +64,63 @@
                     android:src="@drawable/ic_settings" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/managedBadge"
-                style="@style/Text.Companion.Mono"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/status_managed"
-                android:visibility="gone" />
-
-            <!-- What needs a hand, folded into one band: the first item and how
-                 many follow; a tap unfolds the rest. A shortcut to the
-                 permission request rides on it while a permission is missing. -->
-            <LinearLayout
+            <include
                 android:id="@+id/alerts"
+                layout="@layout/alert_band" />
+
+            <!-- A newer build published on GitHub, offered once it is known. -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/updateBanner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/gap_section"
-                android:background="@drawable/bg_alert"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="12dp"
-                android:paddingTop="6dp"
-                android:paddingEnd="4dp"
-                android:paddingBottom="6dp"
+                android:visibility="gone"
+                app:cardBackgroundColor="@color/tile"
+                app:strokeWidth="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="@dimen/panel_padding">
+
+                    <ImageView
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/ic_update" />
+
+                    <TextView
+                        android:id="@+id/updateText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:textColor="@color/ink"
+                        android:textSize="15sp" />
+
+                    <Button
+                        android:id="@+id/updateInstall"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:text="@string/update_install"
+                        android:textColor="@color/ink"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- A phone that is not enrolled sends nothing: the way to fix that
+                 comes first. -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/enrollPrompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/gap_section"
                 android:visibility="gone">
 
-                <TextView
-                    android:id="@+id/alertText"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:drawablePadding="10dp"
-                    android:gravity="center_vertical"
-                    android:textColor="@color/alert_ink"
-                    android:textSize="13sp"
-                    android:drawableStart="@drawable/ic_alert" />
-
-                <Button
-                    android:id="@+id/alertGrant"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minWidth="0dp"
-                    android:text="@string/action_grant_short"
-                    android:textColor="@color/alert_ink"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/statusPanel"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/gap_field">
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -145,303 +128,148 @@
                     android:padding="@dimen/panel_padding">
 
                     <TextView
-                        android:id="@+id/lastUpload"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:text="@string/home_enroll_prompt"
                         android:textColor="@color/ink"
-                        android:textSize="14sp" />
+                        android:textSize="15sp" />
 
-                    <TextView
-                        android:id="@+id/lastAttempt"
-                        style="@style/Text.Companion.Mono"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textSize="12sp"
-                        android:visibility="gone" />
-
-                    <TextView
-                        android:id="@+id/lastError"
-                        style="@style/Text.Companion.Mono"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:maxLines="2"
-                        android:ellipsize="end"
-                        android:textColor="@color/alert_ink"
-                        android:textSize="12sp"
-                        android:visibility="gone" />
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginTop="10dp"
-                        android:layout_marginBottom="10dp"
-                        android:background="@color/hairline" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:baselineAligned="false"
-                        android:orientation="horizontal">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:id="@+id/queuePositions"
-                            style="@style/Text.Companion.Figure"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <TextView
-                            style="@style/Text.Companion.Label"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/figure_positions" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:id="@+id/queueCalls"
-                            style="@style/Text.Companion.Figure"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <TextView
-                            style="@style/Text.Companion.Label"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/figure_calls" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:id="@+id/queueRecordings"
-                            style="@style/Text.Companion.Figure"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <TextView
-                            style="@style/Text.Companion.Label"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/figure_recordings" />
-                    </LinearLayout>
-
-                    </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- The WhatsApp documents proposal: what the notices announced and
-                 whether the file was found, read on the handset before anything
-                 is uploaded. -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/whatsappPanel"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/gap_field">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="@dimen/panel_padding">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            style="@style/Text.Companion.Label"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/section_whatsapp" />
-
-                        <Button
-                            android:id="@+id/whatsappEnable"
-                            style="@style/Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:minWidth="0dp"
-                            android:text="@string/action_whatsapp_enable"
-                            android:visibility="gone" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/whatsappState"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="@color/ink"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/whatsappSightings"
-                        style="@style/Text.Companion.Mono"
-                        android:layout_width="match_parent"
+                    <Button
+                        android:id="@+id/enrollOpenSettings"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:lineSpacingExtra="2dp"
-                        android:textSize="12sp" />
+                        android:text="@string/action_settings" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-        <TextView
-            style="@style/Text.Companion.Label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/gap_section"
-            android:layout_marginBottom="6dp"
-            android:text="@string/section_connection" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/baseUrlLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/gap_field"
-            android:hint="@string/config_server">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/baseUrl"
+            <TextView
+                style="@style/Text.Companion.Title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:autofillHints="url"
-                android:inputType="textUri" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:layout_marginTop="32dp"
+                android:text="@string/home_headline"
+                android:textSize="22sp" />
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/identifierLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/gap_field"
-            android:hint="@string/config_identifier">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/identifier"
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:autofillHints="username"
-                android:inputType="text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:layout_marginTop="6dp"
+                android:text="@string/home_subline"
+                android:textColor="@color/ink_muted"
+                android:textSize="15sp" />
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/tokenLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/gap_field"
-            android:hint="@string/config_token"
-            app:endIconMode="password_toggle">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/token"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:autofillHints="password"
-                android:inputType="textPassword" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <TextView
-            style="@style/Text.Companion.Label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="6dp"
-            android:text="@string/section_reporting" />
-
+            <!-- The two ways in: scan a page, or pick a file already on the
+                 phone. Big icons, one word each. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
                 android:baselineAligned="false"
                 android:orientation="horizontal">
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/locationIntervalLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp"
-            android:layout_marginBottom="@dimen/gap_field"
-            android:hint="@string/config_location_interval_short">
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/scanDocument"
+                    style="@style/Widget.Companion.Tile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="12dp"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/action_scan"
+                    app:cardBackgroundColor="@color/brand_accent">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/locationInterval"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:autofillHints=""
-                android:inputType="number" />
-        </com.google.android.material.textfield.TextInputLayout>
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="18dp">
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/uploadWindowLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginBottom="@dimen/gap_field"
-            android:hint="@string/config_upload_window_short">
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_scan_on_accent" />
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/uploadWindow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:autofillHints=""
-                android:inputType="number" />
-        </com.google.android.material.textfield.TextInputLayout>
+                        <TextView
+                            style="@style/Text.Companion.Title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="28dp"
+                            android:text="@string/action_scan"
+                            android:textColor="@color/brand_on_accent"
+                            android:textSize="15sp" />
 
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/home_scan_hint"
+                            android:textColor="@color/brand_on_accent"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/pickDocument"
+                    style="@style/Widget.Companion.Tile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/action_pick_file">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="18dp">
+
+                        <ImageView
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_upload" />
+
+                        <TextView
+                            style="@style/Text.Companion.Title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="28dp"
+                            android:text="@string/action_pick_file_short"
+                            android:textSize="15sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/home_pick_hint"
+                            android:textColor="@color/ink_muted"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
 
-        <TextView
-            style="@style/Text.Companion.Label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="6dp"
-            android:text="@string/section_sending" />
+            <TextView
+                android:id="@+id/scanState"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="32dp"
+                android:textColor="@color/ink_muted"
+                android:textSize="14sp" />
 
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/callLogEnabled"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="40dp"
-            android:text="@string/restriction_call_log_title"
-            android:textSize="14sp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/recordingsEnabled"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="40dp"
-            android:text="@string/restriction_recordings_title"
-            android:textSize="14sp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/wifiOnly"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="40dp"
-            android:text="@string/restriction_wifi_only_title"
-            android:textSize="14sp" />
-
+            <TextView
+                android:id="@+id/scanRecent"
+                style="@style/Text.Companion.Mono"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:lineSpacingExtra="2dp"
+                android:textSize="12sp"
+                android:visibility="gone" />
         </LinearLayout>
     </ScrollView>
 
     <!-- The actions, behind the gear: a scrim that closes the menu on any tap
-         outside it, and the menu itself under the gear. They are views of
-         this screen rather than a dialog, so a managed form still disables
-         Save in place. -->
+         outside it, and the menu itself under the gear. -->
     <View
         android:id="@+id/actionsScrim"
         android:layout_width="match_parent"
@@ -466,52 +294,39 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="12dp">
+            android:padding="8dp">
 
             <Button
-                android:id="@+id/save"
+                android:id="@+id/openSettings"
+                style="@style/Widget.Companion.Button.Menu"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/action_save" />
+                android:text="@string/action_settings"
+                app:icon="@drawable/ic_settings" />
 
             <Button
                 android:id="@+id/syncNow"
-                style="@style/Widget.Companion.Button.Secondary"
+                style="@style/Widget.Companion.Button.Menu"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/action_sync_now" />
+                android:text="@string/action_sync_now"
+                app:icon="@drawable/ic_sync" />
 
             <Button
                 android:id="@+id/grantPermissions"
-                style="@style/Widget.Companion.Button.Secondary"
+                style="@style/Widget.Companion.Button.Menu"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/action_grant" />
+                android:text="@string/action_grant"
+                app:icon="@drawable/ic_permissions" />
+
+            <Button
+                android:id="@+id/checkUpdate"
+                style="@style/Widget.Companion.Button.Menu"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/action_check_update"
+                app:icon="@drawable/ic_update" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
-
-    <!-- The enrolment guide, docked over the bottom of the form. -->
-    <FrameLayout
-        android:id="@+id/guideDock"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:paddingStart="@dimen/form_side_margin"
-        android:paddingEnd="@dimen/form_side_margin">
-
-        <include
-            android:id="@+id/guideBaseUrl"
-            layout="@layout/guide_card" />
-
-        <include
-            android:id="@+id/guideIdentifier"
-            layout="@layout/guide_card" />
-
-        <include
-            android:id="@+id/guideToken"
-            layout="@layout/guide_card" />
-
-    </FrameLayout>
 </FrameLayout>

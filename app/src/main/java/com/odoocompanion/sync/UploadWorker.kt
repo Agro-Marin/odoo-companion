@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.odoocompanion.CompanionApp
+import com.odoocompanion.whatsapp.UploadedNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -24,6 +25,7 @@ class UploadWorker(context: Context, params: WorkerParameters) :
         val report = drainer.drainAll()
         if (report.deferred) return@withContext Result.success()
         app.config.recordUpload(System.currentTimeMillis(), report.delivered, report.lastError)
+        UploadedNotice.post(applicationContext, report.deliveredDocuments)
 
         if (report.deadLettered > 0 ||
             report.skipped.isNotEmpty() ||

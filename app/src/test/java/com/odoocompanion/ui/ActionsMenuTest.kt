@@ -11,7 +11,9 @@ import com.odoocompanion.R
 import com.odoocompanion.config.ManagedValues
 import kotlinx.coroutines.test.runTest
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -58,13 +60,15 @@ class ActionsMenuTest {
     }
 
     @Test
-    fun `the gear opens the three actions and a tap outside closes them`() {
+    fun `the gear opens the four actions and a tap outside closes them`() {
         val screen = open()
         assertFalse(screen.menuShown())
 
         screen.tap(R.id.actionsToggle)
         assertTrue(screen.menuShown())
-        for (action in listOf(R.id.save, R.id.syncNow, R.id.grantPermissions)) {
+        val actions =
+            listOf(R.id.openSettings, R.id.syncNow, R.id.grantPermissions, R.id.checkUpdate)
+        for (action in actions) {
             assertTrue(screen.findViewById<View>(action).isShown)
         }
 
@@ -91,5 +95,36 @@ class ActionsMenuTest {
         screen.tap(R.id.syncNow)
 
         assertFalse(screen.menuShown())
+    }
+
+    @Test
+    fun `Settings opens the screen that holds the whole form`() {
+        val screen = open()
+        screen.tap(R.id.actionsToggle)
+
+        screen.tap(R.id.openSettings)
+
+        val started = Shadows.shadowOf(screen).nextStartedActivity
+        assertEquals(SettingsActivity::class.java.name, started.component?.className)
+        assertFalse(screen.menuShown())
+    }
+
+    // Home sends documents and nothing else: no field of the form is on it.
+    @Test
+    fun `home carries the two ways to send a document and none of the form`() {
+        val screen = open()
+
+        assertTrue(screen.findViewById<View>(R.id.scanDocument).isShown)
+        assertTrue(screen.findViewById<View>(R.id.pickDocument).isShown)
+        for (field in listOf(R.id.baseUrl, R.id.identifier, R.id.token, R.id.save)) {
+            assertNull(screen.findViewById<View>(field))
+        }
+    }
+
+    @Test
+    fun `an unenrolled phone is pointed at Settings`() {
+        val screen = open()
+
+        assertTrue(screen.findViewById<View>(R.id.enrollPrompt).isShown)
     }
 }

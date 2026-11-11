@@ -214,12 +214,29 @@ back at the end of the same one. It also held the upload worker at `RETRY`, whic
 WorkManager's backoff out to five hours and delays every position and call log on the
 handset.
 
+## Screens
+
+Two screens, drawn with the Xiuman brandbook (v1.0): its palette (Noche, Fértil, Mineral,
+Rocío), Special Gothic Expanded for titles, Archivo Narrow for text, and two-tone line
+icons. Both fonts are OFL, in `third_party/fonts/`.
+
+- **Home** (`MainActivity`) is for sending a document: the *Scan* and *Upload* tiles,
+  the documents sent from this phone, whether it is enrolled, and the alert band when
+  something needs a hand. A newer release is offered here (see *Updates*). The gear opens
+  *Settings*, *Sync now*, *Grant permissions* and *Check for updates*.
+- **Settings** (`SettingsActivity`) holds everything else: the status panel and its
+  alerts, the connection, the reporting cadence, what is sent, the appearance and the
+  WhatsApp documents report, with *Save* in its bar. The enrolment guide lives here.
+- **Appearance** is *System*, *Light* or *Dark*, chosen in Settings and applied at once.
+  It is kept in the app's own preferences (`Appearance`), never managed by an MDM and
+  never sent to Odoo.
+
 ## WhatsApp documents
 
 The goal is that a Constancia de Situación Fiscal, an INE or a passport that a customer
 sends to a company handset by WhatsApp reaches Odoo by itself. The handset finds the
-document, reads what it is, and uploads only those three. A card on the main screen shows
-each document and where it stands.
+document, reads what it is, and uploads only those three. A card in Settings shows
+each document and where it stands, and a notification says when one reached Odoo.
 
 - **Where the document comes from.** `WhatsAppNotificationListener` is a
   `NotificationListenerService`. It reads only `com.whatsapp` and `com.whatsapp.w4b`. A
@@ -261,7 +278,7 @@ each document and where it stands.
 - **What it keeps.** `SightingStore` keeps the last 50 sightings in
   `files/whatsapp_sightings.json` in the app's private storage, which is excluded from
   backup. It is a window for testing on a real handset, not a queue.
-- **Turning it on.** On the main screen, the WhatsApp card's *Turn on* button opens the
+- **Turning it on.** In Settings, the WhatsApp card's *Turn on* button opens the
   notification access switch, then all-files access. On Android 13 and later, an APK
   installed outside a store must first be allowed restricted settings: App info → ⋮ →
   *Allow restricted settings*.
@@ -275,6 +292,35 @@ each document and where it stands.
   holder. From there the company's upload sort, and `l10n_mx_partner_import`'s offer to
   create the contact, take over. A file another row already read takes that verdict and
   is not read by OCR again.
+- **Saying it went.** Once Odoo takes a document for the first time, `UploadedNotice`
+  posts a notification on the *Documents sent to Odoo* channel: what the handset read it
+  as (CSF, INE, passport), the RFC when it has one, the file name and the chat it came
+  from. Several in one upload come grouped under one summary. A duplicate (Odoo already
+  had the file) posts nothing, since its notice went the first time, and neither does a
+  scan, which the person sent by hand on this phone. Without the notification permission
+  nothing is posted.
+
+## Scanned documents
+
+Home's two tiles send a document by hand: **Scan** opens the system's document scanner
+(ML Kit, `play-services-mlkit-document-scanner`, one PDF of up to 20 pages per scan,
+gallery import allowed) and **Upload** picks a PDF or a photo.
+
+- **Where the file comes from.** `ScanIntake` copies what was scanned or picked into
+  `files/scans/` in the app's private storage before anything else: the picker's grant
+  on a file can lapse and the scanner's output is a cache the system may clear.
+- **Where it goes.** The copy is queued as a `scan` row and sent to the same
+  `/remote/mobile/<id>/document` route a WhatsApp document takes, under `file_b64`, with
+  `file_name`, `mimetype`, `source` (`Scanner` or `File`) and `received_at`. On the server
+  `device_mobile_document` files it in Documents as uploaded by the phone's holder, and
+  the company's upload sort takes over. Unlike a WhatsApp document the file is the app's
+  own: **delivered, the copy is deleted with its row**, and a set-aside one is deleted by
+  the 90-day purge.
+- **What Home shows.** `ScanLog` keeps the last ten scans in `files/scans.json`. A
+  scan whose file the outbox no longer holds was delivered, so its state is read off the
+  queue, as for a WhatsApp document. Where Odoo filed it is not shown: the server has no
+  route that answers that yet.
+- A scan follows the phone's *Wi-Fi only* setting like every other upload.
 
 ## Wake-ups
 
@@ -362,6 +408,33 @@ cannot. Losing it means no future build can update an installed app: Android ref
 an update signed by a different key, and the only way out is uninstalling every
 handset in the fleet, which takes the queued call log on each one with it.
 
+### Updates from GitHub releases
+
+A handset updates itself from this repository's releases, without an MDM.
+
+- **Publishing.** `tools/release.sh [--notes "…"] [--draft]` builds the signed release,
+  runs `check-release-wire.sh`, and creates the release `v<versionName>` on the commit it
+  was built from, with two assets: `odoo-companion-<versionCode>.apk` and `update.json`
+  (`version_code`, `version_name`, `apk`, `sha256`, `size`). It refuses an unsigned
+  build, a dirty or unpushed tree, an existing tag, and a `versionCode` that is not above
+  the published one. Raise `versionCode` and `versionName` in `app/build.gradle.kts`
+  first.
+- **Finding it.** Home reads
+  `releases/latest/download/update.json` when it opens, at most every 6 hours, and on
+  *Check for updates*. GitHub points `latest` at the newest release that is neither a
+  draft nor a pre-release, so `--draft` keeps a build away from the fleet until it is
+  published. Only a higher `versionCode` is offered.
+- **Installing it.** *Update* downloads the APK into the app's cache, checks its size and
+  SHA-256 against the manifest, and hands it to `PackageInstaller`. The first time,
+  Android asks to allow this app to install apps (*Install unknown apps*), then shows its
+  own confirmation. On Android 12 and later, once this app is the installer of record,
+  later updates may go through without asking.
+- **The key.** Android installs an update only if it is signed with the same key as the
+  installed build. Every release must be signed with the fleet's keystore (*Signing a
+  release*). A handset that carries a build signed with another key, a debug build
+  included, has to be uninstalled once and reinstalled from a release; from then on it
+  updates itself. `UpdateReceiver` shows a toast when Android refuses an update.
+
 ## Configuration
 
 ### Provisioning by MDM (how a fleet should do it)
@@ -396,15 +469,16 @@ one second of `PRIORITY_HIGH_ACCURACY` flattens a handset in an afternoon.
 
 ### Manual entry (a handful of phones, or testing)
 
-Open the app and fill in base URL, identifier and token. Three switches control
+Open Settings from the gear on Home and fill in base URL, identifier and token, then
+tap *Save* in its bar. Three switches control
 behavior: call-log sync, recording upload (off by default), and Wi-Fi-only uploads.
 The position interval and the upload window are on the form too, so a deployment
 with no EMM — or someone testing, who wants to see an upload the moment a fix is
 taken — can set them without one; the interval was previously reachable only
 through a managed configuration. Both are clamped to the same bounds an MDM push
 is, and the form shows the stored value back rather than what was typed. Leaving
-either blank keeps whatever is stored. "Sync now" collects from every producer
-and then uploads.
+either blank keeps whatever is stored. "Sync now", behind Home's gear, collects from
+every producer and then uploads.
 
 ## A phone that is standing still
 
@@ -645,7 +719,7 @@ re-derives them.
   app-private storage, so numbers, contact names, coordinates and the Bearer token
   rest behind the OS sandbox rather than behind a key. On a non-rooted managed
   handset with backups off that is the normal bar; SQLCipher and a Keystore-wrapped
-  token are the higher one, and neither is free. `MainActivity` sets no
+  token are the higher one, and neither is free. `SettingsActivity` sets no
   `FLAG_SECURE`, so the enrollment screen can appear in a recents thumbnail — the
   token field is `textPassword`, so what shows is the base URL and identifier.
   Decide these deliberately rather than discovering them.

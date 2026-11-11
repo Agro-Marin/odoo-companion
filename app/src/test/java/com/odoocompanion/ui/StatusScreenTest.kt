@@ -35,7 +35,7 @@ import org.robolectric.android.controller.ActivityController
 @RunWith(RobolectricTestRunner::class)
 class StatusScreenTest {
     private val app: CompanionApp get() = ApplicationProvider.getApplicationContext()
-    private var controller: ActivityController<MainActivity>? = null
+    private var controller: ActivityController<SettingsActivity>? = null
 
     @Before
     fun setUp() = runTest {
@@ -63,13 +63,13 @@ class StatusScreenTest {
         Shadows.shadowOf(power).setIgnoringBatteryOptimizations(app.packageName, granted)
     }
 
-    private fun open(): MainActivity {
-        controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+    private fun open(): SettingsActivity {
+        controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
         return controller!!.get()
     }
 
-    // Everything the status panel says, in reading order: the state, the
-    // alert bands, the activity card -- each figure read as it is spoken.
+    // Everything the status section says, in reading order: the alert band,
+    // then the status card with the state -- each figure read as it is spoken.
     private fun status(): String {
         val activity = open()
         var last = ""
@@ -83,9 +83,8 @@ class StatusScreenTest {
         return last
     }
 
-    private fun panelOf(activity: MainActivity): String =
-        listOf(R.id.statePill, R.id.managedBadge, R.id.alerts, R.id.statusPanel)
-            .joinToString("\n") { said(activity.findViewById(it)) }
+    private fun panelOf(activity: SettingsActivity): String = listOf(R.id.alerts, R.id.statusPanel)
+        .joinToString("\n") { said(activity.findViewById(it)) }
 
     private fun said(view: View): String = when {
         view.visibility != View.VISIBLE -> ""
@@ -232,8 +231,6 @@ class StatusScreenTest {
         assertFalse(activity.findViewById<View>(R.id.save).isEnabled)
         assertFalse(activity.findViewById<View>(R.id.locationInterval).isEnabled)
         assertFalse(activity.findViewById<View>(R.id.uploadWindow).isEnabled)
-
-        assertTrue(activity.findViewById<View>(R.id.syncNow).isEnabled)
     }
 
     // Save is the form's button, not any one field's: while a single field the
@@ -321,7 +318,7 @@ class StatusScreenTest {
         Thread.sleep(20)
     }
 
-    private fun MainActivity.type(id: Int, value: String) =
+    private fun SettingsActivity.type(id: Int, value: String) =
         findViewById<android.widget.EditText>(id).setText(value)
 
     // The case a partial policy exists for: the console publishes the switches
@@ -494,10 +491,12 @@ class StatusScreenTest {
 
     // Android 12 lets the person choose approximate. Only a precise grant used
     // to lead on to the all-the-time prompt, so an approximate one stopped at
-    // "while using the app" -- the grant that goes quiet after a reboot.
+    // "while using the app" -- the grant that goes quiet after a reboot. The
+    // request starts from Home's gear, which shares the grants with Settings.
     @Test
     fun `an approximate grant still leads on to the all-the-time prompt`() = runTest {
-        val activity = open()
+        val home = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = home.get()
         settle()
         activity.findViewById<View>(R.id.grantPermissions).performClick()
         settle()
@@ -523,5 +522,6 @@ class StatusScreenTest {
             shadow.lastRequestedPermission.requestedPermissions.toList() ==
                 listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
         )
+        home.destroy()
     }
 }

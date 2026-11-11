@@ -125,4 +125,51 @@
     <string name="whatsapp_upload_queued">⏳ queued for Odoo</string>
     <string name="whatsapp_upload_done">✅ in Odoo</string>
     <string name="whatsapp_upload_failed">⚠️ Odoo did not take it</string>
+    <string name="action_scan">Scan</string>
+    <string name="action_pick_file">Upload file</string>
+    <string name="scan_none_yet">Scan a document or pick a PDF or a photo: it goes to Odoo\'s Documents as uploaded by whoever holds this phone.</string>
+    <string name="scan_recent">Sent from this phone</string>
+    <string name="scan_item">📄 %1$s\n%2$s · %3$s</string>
+    <string name="scan_queued">Document queued for Odoo</string>
+    <string name="scan_unreadable">The document could not be read</string>
+    <string name="scan_unavailable">The document scanner is not available on this phone</string>
+    <string name="scan_file_name">Scan %1$s.pdf</string>
+    <string name="scan_file_fallback">Document</string>
+    <!-- Home and Settings -->
+    <string name="home_title" translatable="false">Companion</string>
+    <string name="home_headline">Send a document</string>
+    <string name="home_subline">It reaches Odoo\'s Documents in your name.</string>
+    <string name="home_scan_hint">With the camera</string>
+    <string name="home_pick_hint">PDF or photo</string>
+    <string name="home_enroll_prompt">This phone is not connected to Odoo yet: enter its connection in Settings.</string>
+    <string name="action_pick_file_short">Upload</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_back">Back</string>
+    <string name="settings_title">Settings</string>
+    <string name="section_status">Status</string>
+    <string name="section_appearance">Appearance</string>
+    <string name="appearance_system">System</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+    <string name="app_version">Version %1$s (%2$d)</string>
+    <!-- Updates published as GitHub releases -->
+    <string name="action_check_update">Check for updates</string>
+    <string name="update_install">Update</string>
+    <string name="update_available">Version %1$s is available</string>
+    <string name="update_downloading">Downloading version %1$s…</string>
+    <string name="update_none">This is the latest version</string>
+    <string name="update_check_failed">Could not check for updates</string>
+    <string name="update_download_failed">The update could not be downloaded</string>
+    <string name="update_install_failed">Android did not install the update</string>
+    <string name="update_allow_installs">Allow this app to install updates, then tap Update again</string>
+    <!-- A WhatsApp document that reached Odoo -->
+    <string name="notification_channel_documents">Documents sent to Odoo</string>
+    <string name="notification_document_title">%1$s uploaded to Documents</string>
+    <string name="notification_document_from">%1$s · from %2$s</string>
+    <string name="notification_document_rfc">RFC %1$s</string>
+    <string name="notification_kind_document">Document</string>
+    <plurals name="notification_documents_summary">
+        <item quantity="one">%1$d document uploaded to Documents</item>
+        <item quantity="other">%1$d documents uploaded to Documents</item>
+    </plurals>
 </resources>

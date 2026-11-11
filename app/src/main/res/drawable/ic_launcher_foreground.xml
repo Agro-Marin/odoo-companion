@@ -1,18 +1,26 @@
-<!-- The launcher pin, drawn in the 108dp space an adaptive foreground uses.
-     The mark is scaled to 60dp and centred, which keeps it inside the 72dp
-     safe zone every launcher mask is guaranteed to leave visible. -->
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher mark: the Xiuman symbol in Fértil and Mineral on Noche, as
+     the brandbook draws it on a dark ground (section 08). Drawn in the 108dp
+     space an adaptive foreground uses, 56dp tall and centred, inside the
+     72dp safe zone every launcher mask is guaranteed to leave visible. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="2.5"
-        android:scaleY="2.5"
-        android:translateX="24"
-        android:translateY="24">
+        android:scaleX="0.06335"
+        android:scaleY="0.06335"
+        android:translateX="-6.200"
+        android:translateY="19.782">
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7,-7.75 7,-13C19,5.13 15.87,2 12,2zM12,11.5c-1.38,0 -2.5,-1.12 -2.5,-2.5s1.12,-2.5 2.5,-2.5 2.5,1.12 2.5,2.5 -1.12,2.5 -2.5,2.5z" />
+            android:fillColor="@color/xiuman_fertil"
+            android:pathData="M1037.76,548.81 L952.07,680.9 L784.52,939.12 C767.21,965.77 737.57,981.85 705.87,981.85 L569.8,981.85 L858.57,536.78 L673.33,251.3 L793.78,251.3 C825.56,251.3 855.2,267.39 872.5,294.03 L944.26,404.69 Z" />
+        <path
+            android:fillColor="@color/xiuman_mineral"
+            android:pathData="M1219.24,828.54 L1098.86,828.54 C1067.09,828.54 1037.45,812.38 1020.14,785.73 L952.07,680.9 L1037.76,548.81 Z" />
+        <path
+            android:fillColor="@color/xiuman_mineral"
+            android:pathData="M1330.2,98.15 L1037.76,548.81 L944.26,404.69 L1115.41,140.96 C1132.71,114.31 1162.35,98.15 1194.13,98.15 Z" />
     </group>
 </vector>
