@@ -36,7 +36,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 class StatusScreenTest {
     private val app: CompanionApp get() = ApplicationProvider.getApplicationContext()
-    private var controller: ActivityController<MainActivity>? = null
+    private var controller: ActivityController<SettingsActivity>? = null
 
     @Before
     fun setUp() = runTest {
@@ -64,8 +64,8 @@ class StatusScreenTest {
         Shadows.shadowOf(power).setIgnoringBatteryOptimizations(app.packageName, granted)
     }
 
-    private fun open(): MainActivity {
-        controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+    private fun open(): SettingsActivity {
+        controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
         return controller!!.get()
     }
 
@@ -82,9 +82,8 @@ class StatusScreenTest {
         return last
     }
 
-    private fun panelOf(activity: MainActivity): String =
-        listOf(R.id.statePill, R.id.managedBadge, R.id.alerts, R.id.statusPanel)
-            .joinToString("\n") { said(activity.findViewById(it)) }
+    private fun panelOf(activity: SettingsActivity): String = listOf(R.id.alerts, R.id.statusPanel)
+        .joinToString("\n") { said(activity.findViewById(it)) }
 
     private fun said(view: View): String = when {
         view.visibility != View.VISIBLE -> ""
@@ -229,8 +228,6 @@ class StatusScreenTest {
         assertFalse(activity.findViewById<View>(R.id.save).isEnabled)
         assertFalse(activity.findViewById<View>(R.id.locationInterval).isEnabled)
         assertFalse(activity.findViewById<View>(R.id.uploadWindow).isEnabled)
-
-        assertTrue(activity.findViewById<View>(R.id.syncNow).isEnabled)
     }
 
     @Test
@@ -305,7 +302,7 @@ class StatusScreenTest {
         Thread.sleep(20)
     }
 
-    private fun MainActivity.type(id: Int, value: String) =
+    private fun SettingsActivity.type(id: Int, value: String) =
         findViewById<android.widget.EditText>(id).setText(value)
 
     @Test
@@ -459,7 +456,8 @@ class StatusScreenTest {
     @Test
     @Config(sdk = [36])
     fun `an approximate grant still leads on to the all-the-time prompt`() = runTest {
-        val activity = open()
+        val home = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = home.get()
         settle()
         activity.findViewById<View>(R.id.grantPermissions).performClick()
         settle()
@@ -485,5 +483,6 @@ class StatusScreenTest {
             shadow.lastRequestedPermission.requestedPermissions.toList() ==
                 listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
         )
+        home.destroy()
     }
 }

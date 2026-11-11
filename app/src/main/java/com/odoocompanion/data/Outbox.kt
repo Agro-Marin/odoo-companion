@@ -20,7 +20,11 @@ object OutboxKind {
 
     const val DOCUMENT = "document"
 
-    val IRREPLACEABLE = setOf(CALL_LOG, RECORDING, DOCUMENT)
+    // A document someone scanned or picked on the handset, in a copy the app
+    // made for it: the outbox's to delete once delivered, like a recording.
+    const val SCAN = "scan"
+
+    val IRREPLACEABLE = setOf(CALL_LOG, RECORDING, DOCUMENT, SCAN)
 }
 
 @Entity(
@@ -132,8 +136,13 @@ interface OutboxDao {
                 AS calls,
             COALESCE(SUM(deadAt IS NULL AND $OWNED AND kind = '${OutboxKind.RECORDING}'), 0)
                 AS recordings,
-            COALESCE(SUM(deadAt IS NULL AND $OWNED AND kind = '${OutboxKind.DOCUMENT}'), 0)
-                AS documents,
+            COALESCE(
+                SUM(
+                    deadAt IS NULL AND $OWNED
+                        AND kind IN ('${OutboxKind.DOCUMENT}', '${OutboxKind.SCAN}')
+                ),
+                0
+            ) AS documents,
             COALESCE(
                 SUM(deadAt IS NOT NULL AND $OWNED AND deadReason NOT IN $NOT_ACTIONABLE),
                 0
@@ -275,7 +284,7 @@ interface OutboxDao {
         """
         SELECT id, filePath FROM outbox
         WHERE deadAt IS NOT NULL AND deadAt < :before AND filePath IS NOT NULL
-          AND kind = '${OutboxKind.RECORDING}'
+          AND kind IN ('${OutboxKind.RECORDING}', '${OutboxKind.SCAN}')
         """,
     )
     suspend fun deadFilesBefore(before: Long): List<QueuedFile>

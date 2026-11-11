@@ -116,6 +116,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.play.services.location)
+    implementation(libs.mlkit.document.scanner)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.okhttp)

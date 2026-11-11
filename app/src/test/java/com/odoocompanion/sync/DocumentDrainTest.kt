@@ -111,6 +111,10 @@ class DocumentDrainTest {
             assertTrue(report.delivered)
             assertEquals(0, dao.countOf(OutboxKind.DOCUMENT))
             assertTrue("WhatsApp's file is not the outbox's to delete", pdf.exists())
+            // what the notice will say reached Documents
+            val noticed = report.deliveredDocuments.single()
+            assertEquals("CSF PCA221013LF1.pdf", noticed.fileName)
+            assertEquals("Yop", noticed.chat)
         }
 
     @Test
@@ -125,6 +129,10 @@ class DocumentDrainTest {
 
         assertEquals(mapOf(OutboxKind.DOCUMENT to 1), report.duplicates)
         assertTrue(pdf.exists())
+        assertTrue(
+            "Odoo already had it: its notice went the first time",
+            report.deliveredDocuments.isEmpty()
+        )
     }
 
     @Test
@@ -133,8 +141,9 @@ class DocumentDrainTest {
             respond(422, """{"error":"bad_document","message":"Invalid document payload"}""")
             val pdf = queueDocument()
 
-            drainer().drainAll()
+            val report = drainer().drainAll()
             assertEquals(1, dao.countDead())
+            assertTrue(report.deliveredDocuments.isEmpty())
 
             val later = 1_000L + OutboxLimits.DEAD_RETENTION_MILLIS + 1
             drainer(now = { later }).drainAll()

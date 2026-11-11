@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What needs a hand, folded into one band: the first item and how many
+     follow; a tap unfolds the rest. A shortcut to the permission request
+     rides on it while a permission is missing. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="@dimen/gap_section"
+    android:background="@drawable/bg_alert"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="12dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="4dp"
+    android:paddingBottom="6dp"
+    android:visibility="gone">
+
+    <TextView
+        android:id="@+id/alertText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:drawablePadding="10dp"
+        android:gravity="center_vertical"
+        android:textColor="@color/alert_ink"
+        android:textSize="13sp"
+        android:drawableStart="@drawable/ic_alert" />
+
+    <Button
+        android:id="@+id/alertGrant"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="0dp"
+        android:text="@string/action_grant_short"
+        android:textColor="@color/alert_ink"
+        android:textStyle="bold" />
+</LinearLayout>

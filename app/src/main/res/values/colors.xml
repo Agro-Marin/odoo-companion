@@ -1,12 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_primary">#0A7D55</color>
-    <color name="brand_on_primary">#FFFFFF</color>
-    <color name="ink">#11161C</color>
-    <color name="ink_muted">#5B6573</color>
-    <color name="canvas">#F6F7F9</color>
+    <color name="xiuman_fertil">#2EB769</color>
+    <color name="xiuman_mineral">#FCF8F2</color>
+    <color name="xiuman_noche">#023E4C</color>
+
+    <color name="brand_primary">#023E4C</color>
+    <color name="brand_on_primary">#FCF8F2</color>
+    <color name="brand_accent">#2EB769</color>
+    <color name="brand_on_accent">#023E4C</color>
+    <color name="ink">#023E4C</color>
+    <color name="ink_muted">#4A6970</color>
+    <color name="canvas">#FCF8F2</color>
     <color name="panel">#FFFFFF</color>
-    <color name="hairline">#DDE2E8</color>
+    <color name="tile">#EAF4F1</color>
+    <color name="hairline">#D3E3E2</color>
+    <color name="logo_ink">#023E4C</color>
     <color name="alert_bg">#FFF4DB</color>
     <color name="alert_ink">#6E4A00</color>
 </resources>

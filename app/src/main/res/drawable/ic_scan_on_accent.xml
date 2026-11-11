@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The scan icon, drawn for the Fértil tile it sits on: Noche for the
+     frame and the page, Mineral for the scan line. The frame is the scanner
+     finding the page; the line is the scan (brandbook section 14 style: one
+     stroke weight, rounded ends). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M4,8 V5.5 A1.5,1.5 0 0,1 5.5,4 H8 M16,4 H18.5 A1.5,1.5 0 0,1 20,5.5 V8 M20,16 V18.5 A1.5,1.5 0 0,1 18.5,20 H16 M8,20 H5.5 A1.5,1.5 0 0,1 4,18.5 V16"
+        android:strokeWidth="1.6"
+        android:strokeColor="@color/brand_on_accent"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M8.5,7.5 H15.5 V16.5 H8.5 Z"
+        android:strokeWidth="1.4"
+        android:strokeColor="@color/brand_on_accent"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M3,12 H21"
+        android:strokeWidth="1.6"
+        android:strokeColor="@color/xiuman_mineral"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

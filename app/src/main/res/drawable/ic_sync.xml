@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A line icon in the brandbook style (section 14): one stroke weight, rounded ends, Noche for the form and Fértil for the part that acts. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M19,11 A7,7 0 0,0 6.2,7.6 M5,13 A7,7 0 0,0 17.8,16.4"
+        android:strokeWidth="1.6"
+        android:strokeColor="@color/ink"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M6,3.8 V7.8 H10 M18,20.2 V16.2 H14"
+        android:strokeWidth="1.6"
+        android:strokeColor="@color/brand_accent"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

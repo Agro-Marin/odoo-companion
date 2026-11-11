@@ -4,4 +4,6 @@
     <dimen name="gap_section">12dp</dimen>
     <dimen name="gap_field">6dp</dimen>
     <dimen name="panel_padding">12dp</dimen>
+    <!-- Between the blocks of a long form, wider than within one. -->
+    <dimen name="gap_block">20dp</dimen>
 </resources>
