@@ -37,6 +37,13 @@ object WhatsNew {
             WhatsNewPage(R.drawable.ic_update, R.string.new_update_title, R.string.new_update_body),
             WhatsNewPage(R.drawable.ic_settings, R.string.new_admin_title, R.string.new_admin_body),
         ),
+        9L to listOf(
+            WhatsNewPage(
+                R.drawable.ic_scan_badge,
+                R.string.new_lock_widget_title,
+                R.string.new_lock_widget_body,
+            ),
+        ),
     )
 
     fun pagesSince(seen: Long, installed: Long): List<WhatsNewPage> = RELEASES

@@ -32,6 +32,7 @@ import com.odoocompanion.softphone.SoftphoneService
 import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.ui.Appearance
+import com.odoocompanion.ui.ScanWidget
 import com.odoocompanion.whatsapp.SightingStore
 import com.odoocompanion.whatsapp.WhatsAppDocuments
 import kotlinx.coroutines.CancellationException
@@ -89,6 +90,7 @@ class CompanionApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Appearance.apply(this)
+        ScanWidget.refresh(this)
         ContextCompat.registerReceiver(
             this,
             restrictionsChanged,

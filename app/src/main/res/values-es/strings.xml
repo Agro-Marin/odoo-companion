@@ -212,4 +212,6 @@
     <string name="new_update_body">Cuando hay versión nueva, Inicio te la muestra con su avance, y la app se vuelve a abrir cuando termina de instalarse.</string>
     <string name="new_admin_title">Configuración protegida</string>
     <string name="new_admin_body">La configuración del engrane ahora pide la contraseña de administrador. Tu versión aparece abajo en Inicio.</string>
+    <string name="new_lock_widget_title">Escanea desde la pantalla de bloqueo</string>
+    <string name="new_lock_widget_body">El widget Escanear ya funciona en la pantalla de inicio y se puede poner en la de bloqueo: mantén presionada la pantalla de bloqueo, elige Widgets y agrega Companion. Al tocarlo te pide desbloquear y abre el escáner.</string>
 </resources>

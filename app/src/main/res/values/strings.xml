@@ -211,4 +211,6 @@
     <string name="new_update_body">When there is a new version, Home shows it with its progress, and the app reopens once it is installed.</string>
     <string name="new_admin_title">Protected settings</string>
     <string name="new_admin_body">The gear\'s Settings now ask for the administrator password. The version you have is at the bottom of Home.</string>
+    <string name="new_lock_widget_title">Scan from the lock screen</string>
+    <string name="new_lock_widget_body">The Scan widget now works on the home screen and can go on the lock screen: touch and hold the lock screen, choose Widgets and add Companion. Tapping it asks you to unlock and opens the scanner.</string>
 </resources>
