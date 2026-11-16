@@ -21,16 +21,21 @@ class UploadedNoticePostTest {
         get() = Shadows.shadowOf(app.getSystemService(NotificationManager::class.java))
             .allNotifications
 
-    private val csf = DocumentMetadata(
-        fileName = "CSF PCA221013LF1.pdf",
-        mimetype = "application/pdf",
-        kind = "csf",
+    private val csf = QueuedDocument(
+        DocumentMetadata(
+            fileName = "CSF PCA221013LF1.pdf",
+            mimetype = "application/pdf",
+            kind = "csf",
+            chat = "Yop",
+            receivedAt = 1L,
+        ),
         rfc = "PCA221013LF1",
-        chat = "Yop",
-        receivedAt = 1L,
     )
 
-    private val ine = csf.copy(fileName = "INE.pdf", kind = "ine", rfc = null, receivedAt = 2L)
+    private val ine = QueuedDocument(
+        csf.metadata.copy(fileName = "INE.pdf", kind = "ine", receivedAt = 2L),
+        rfc = null,
+    )
 
     private fun Notification.title() = extras.getCharSequence(Notification.EXTRA_TITLE).toString()
 

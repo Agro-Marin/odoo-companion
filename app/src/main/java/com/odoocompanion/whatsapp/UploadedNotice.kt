@@ -11,7 +11,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.odoocompanion.R
-import com.odoocompanion.net.DocumentMetadata
 import com.odoocompanion.ui.MainActivity
 import com.odoocompanion.ui.SettingsActivity
 
@@ -32,21 +31,21 @@ object UploadedNotice {
     private const val GROUP = "documents_uploaded"
     private const val SUMMARY_ID = 0x0D0C
 
-    fun of(metadata: DocumentMetadata): UploadedDocument = UploadedDocument(
+    fun of(document: QueuedDocument): UploadedDocument = UploadedDocument(
         kind = DocumentKind.entries.firstOrNull {
-            it.name.equals(metadata.kind, ignoreCase = true)
+            it.name.equals(document.metadata.kind, ignoreCase = true)
         },
-        fileName = metadata.fileName,
-        rfc = metadata.rfc,
-        chat = metadata.chat,
+        fileName = document.metadata.fileName,
+        rfc = document.rfc,
+        chat = document.metadata.chat,
     )
 
     // One id per document, the same however often it is computed, so a
     // notice is replaced rather than stacked if the same one comes again.
-    fun idOf(metadata: DocumentMetadata): Int =
-        (metadata.fileName + metadata.receivedAt).hashCode() and Int.MAX_VALUE
+    fun idOf(document: QueuedDocument): Int =
+        (document.metadata.fileName + document.metadata.receivedAt).hashCode() and Int.MAX_VALUE
 
-    fun post(context: Context, delivered: List<DocumentMetadata>) {
+    fun post(context: Context, delivered: List<QueuedDocument>) {
         if (delivered.isEmpty() || !allowed(context)) return
         ensureChannel(context)
         val manager = NotificationManagerCompat.from(context)

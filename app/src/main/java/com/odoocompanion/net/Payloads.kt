@@ -41,7 +41,6 @@ data class DocumentMetadata(
     @SerialName("file_name") val fileName: String,
     val mimetype: String,
     val kind: String? = null,
-    val rfc: String? = null,
     val source: String? = null,
     val chat: String? = null,
     @SerialName("sender_phone") val senderPhone: String? = null,

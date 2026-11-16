@@ -8,12 +8,10 @@ import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.net.DocumentMetadata
-import com.odoocompanion.net.WireJson
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.debug
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.encodeToString
 
 class DocumentQueue(
     private val store: SightingStore,
@@ -38,12 +36,11 @@ class DocumentQueue(
         val read = sighting.classification
         return OutboxEntry(
             kind = OutboxKind.DOCUMENT,
-            payload = WireJson.encodeToString(
-                DocumentMetadata(
+            payload = QueuedDocument(
+                metadata = DocumentMetadata(
                     fileName = path.substringAfterLast('/'),
                     mimetype = PDF,
                     kind = read?.kind?.name?.lowercase(),
-                    rfc = read?.rfc,
                     source = if (sighting.app == WhatsAppNotices.WHATSAPP_BUSINESS) {
                         "WhatsApp Business"
                     } else {
@@ -53,7 +50,8 @@ class DocumentQueue(
                     senderPhone = sighting.phone,
                     receivedAt = sighting.at,
                 ),
-            ),
+                rfc = read?.rfc,
+            ).encode(),
             filePath = path,
             createdAt = now(),
             enrollment = enrollment,

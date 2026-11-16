@@ -26,6 +26,7 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -107,14 +108,15 @@ class DocumentDrainTest {
                     .toList(),
             )
             assertEquals("csf", sent.getValue("kind").jsonPrimitive.content)
-            assertEquals("PCA221013LF1", sent.getValue("rfc").jsonPrimitive.content)
+            assertFalse("what the handset read stays on the handset", "rfc" in sent)
             assertTrue(report.delivered)
             assertEquals(0, dao.countOf(OutboxKind.DOCUMENT))
             assertTrue("WhatsApp's file is not the outbox's to delete", pdf.exists())
             // what the notice will say reached Documents
             val noticed = report.deliveredDocuments.single()
-            assertEquals("CSF PCA221013LF1.pdf", noticed.fileName)
-            assertEquals("Yop", noticed.chat)
+            assertEquals("CSF PCA221013LF1.pdf", noticed.metadata.fileName)
+            assertEquals("Yop", noticed.metadata.chat)
+            assertEquals("PCA221013LF1", noticed.rfc)
         }
 
     @Test

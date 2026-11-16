@@ -8,13 +8,15 @@ import org.junit.Test
 
 class UploadedNoticeTest {
     private fun metadata(kind: String?, fileName: String = "CSF PCA221013LF1.pdf", at: Long = 1L) =
-        DocumentMetadata(
-            fileName = fileName,
-            mimetype = "application/pdf",
-            kind = kind,
+        QueuedDocument(
+            DocumentMetadata(
+                fileName = fileName,
+                mimetype = "application/pdf",
+                kind = kind,
+                chat = "Yop",
+                receivedAt = at,
+            ),
             rfc = "PCA221013LF1",
-            chat = "Yop",
-            receivedAt = at,
         )
 
     @Test

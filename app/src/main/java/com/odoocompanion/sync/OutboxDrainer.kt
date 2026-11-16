@@ -19,6 +19,7 @@ import com.odoocompanion.net.RecordingMetadata
 import com.odoocompanion.net.UploadOutcome
 import com.odoocompanion.net.WireJson
 import com.odoocompanion.system.debug
+import com.odoocompanion.whatsapp.QueuedDocument
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.KSerializer
@@ -46,7 +47,7 @@ data class DrainReport(
     // The WhatsApp documents Odoo took for the first time this pass, for the
     // notice that says what reached Documents. A duplicate is not one: Odoo
     // already had it, and its notice went the first time.
-    val deliveredDocuments: List<DocumentMetadata> = emptyList(),
+    val deliveredDocuments: List<QueuedDocument> = emptyList(),
     val deferred: Boolean = false,
     val moreWorkPending: Boolean = false,
 )
@@ -60,7 +61,7 @@ private class DrainTally {
 
     var delivered = false
 
-    val deliveredDocuments = mutableListOf<DocumentMetadata>()
+    val deliveredDocuments = mutableListOf<QueuedDocument>()
 
     var attempted = false
     var deadLettered = 0
@@ -480,9 +481,8 @@ class OutboxDrainer(
                         } else {
                             tally.note(tally.accepted, files.kind, 1)
                             if (files.kind == OutboxKind.DOCUMENT) {
-                                attempt {
-                                    WireJson.decodeFromString<DocumentMetadata>(entry.payload)
-                                }.getOrNull()?.let(tally.deliveredDocuments::add)
+                                attempt { QueuedDocument.decode(entry.payload) }
+                                    .getOrNull()?.let(tally.deliveredDocuments::add)
                             }
                         }
                         if (!files.ownsFile || deleteAudio(file)) {
