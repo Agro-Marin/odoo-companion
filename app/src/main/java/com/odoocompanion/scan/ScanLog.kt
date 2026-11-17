@@ -16,7 +16,13 @@ import java.io.IOException
 // Whether it reached Odoo is the outbox's to say: a delivered scan's row is
 // gone, so this is the only memory of it the Documents card has.
 @Serializable
-data class Scan(val filePath: String, val fileName: String, val source: String, val at: Long,)
+data class Scan(
+    val filePath: String,
+    val fileName: String,
+    val source: String,
+    val at: Long,
+    val previewPath: String? = null,
+)
 
 // The last few scans, newest first, kept in the app's private storage: a window
 // onto what was sent from this handset, not a record of it.
@@ -32,9 +38,12 @@ class ScanLog(private val file: File) {
     }
 
     suspend fun add(scan: Scan) = lock.withLock {
-        val kept = (listOf(scan) + (state.value ?: read())).take(KEPT)
+        val all = listOf(scan) + (state.value ?: read())
+        val kept = all.take(KEPT)
         write(kept)
         state.value = kept
+        // A preview outlives its scan only as long as the list shows it.
+        all.drop(KEPT).mapNotNull { it.previewPath }.forEach { File(it).delete() }
     }
 
     private fun read(): List<Scan> {

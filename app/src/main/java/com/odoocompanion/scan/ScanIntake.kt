@@ -34,6 +34,7 @@ class ScanIntake(
         mimetype: String,
         source: String,
         enrollment: String? = null,
+        previewPath: String? = null,
     ): Scan {
         val at = now()
         dao.insert(
@@ -52,7 +53,7 @@ class ScanIntake(
                 enrollment = enrollment,
             ),
         )
-        return Scan(file.absolutePath, fileName, source, at).also { log.add(it) }
+        return Scan(file.absolutePath, fileName, source, at, previewPath).also { log.add(it) }
     }
 
     companion object {

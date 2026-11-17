@@ -144,7 +144,6 @@
     <string name="action_pick_file">Upload file</string>
     <string name="scan_none_yet">Scan a document or pick a PDF or a photo: it goes to Odoo\'s Documents as uploaded by whoever holds this phone.</string>
     <string name="scan_recent">Sent from this phone</string>
-    <string name="scan_item">📄 %1$s\n%2$s · %3$s</string>
     <string name="scan_queued">Document queued for Odoo</string>
     <string name="scan_unreadable">The document could not be read</string>
     <string name="scan_unavailable">The document scanner is not available on this phone</string>
@@ -220,4 +219,9 @@
         <item quantity="one">Document queued for Odoo</item>
         <item quantity="other">%d documents queued for Odoo</item>
     </plurals>
+    <string name="scan_preview_description">Preview of the sent document</string>
+    <string name="scan_item_meta" translatable="false">%1$s · %2$s</string>
+    <string name="scan_no_preview">There is no preview of this document</string>
+    <string name="new_preview_title">See what you sent</string>
+    <string name="new_preview_body">Documents sent from this phone now show a thumbnail; tap one to see it larger. Whatever Companion uploads can be seen and edited by everyone in Odoo.</string>
 </resources>

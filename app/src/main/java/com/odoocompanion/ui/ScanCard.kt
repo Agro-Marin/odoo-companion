@@ -1,9 +1,13 @@
 package com.odoocompanion.ui
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.text.format.DateUtils
 import android.util.Log
+import android.view.LayoutInflater
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +17,7 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -20,7 +25,10 @@ import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.databinding.ActivityMainBinding
+import com.odoocompanion.databinding.DialogScanPreviewBinding
+import com.odoocompanion.databinding.ItemScanBinding
 import com.odoocompanion.scan.ScanIntake
+import com.odoocompanion.scan.ScanPreview
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.whatsapp.UploadState
 import kotlinx.coroutines.Dispatchers
@@ -99,8 +107,17 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
                     val file = input.use {
                         intake().copy(it, ScanIntake.extensionFor(mimetype, fileName))
                     }
+                    val preview = ScanPreview(File(activity.filesDir, ScanPreview.FOLDER))
+                        .render(file, mimetype)
                     val enrollment = app.config.currentOrNull()?.enrollment
-                    intake().queue(file, fileName, mimetype, source, enrollment)
+                    intake().queue(
+                        file,
+                        fileName,
+                        mimetype,
+                        source,
+                        enrollment,
+                        preview?.absolutePath,
+                    )
                 }
             }
             if (queued.isFailure) {
@@ -126,23 +143,68 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
             if (items.isEmpty()) R.string.scan_none_yet else R.string.scan_recent,
         )
         binding.scanRecent.isVisible = items.isNotEmpty()
-        binding.scanRecent.text = items.joinToString("\n\n") { item ->
-            activity.getString(
-                R.string.scan_item,
-                item.scan.fileName,
-                DateUtils.getRelativeTimeSpanString(
-                    minOf(item.scan.at, System.currentTimeMillis()),
-                ),
-                activity.getString(
-                    when (item.state) {
-                        UploadState.QUEUED, UploadState.WAITING -> R.string.whatsapp_upload_queued
-                        UploadState.DELIVERED -> R.string.whatsapp_upload_done
-                        UploadState.SET_ASIDE -> R.string.whatsapp_upload_failed
-                        UploadState.GONE -> R.string.whatsapp_upload_gone
-                        UploadState.WITHDRAWN -> R.string.whatsapp_upload_withdrawn
-                    },
-                ),
-            )
+        binding.scanRecent.removeAllViews()
+        val inflater = LayoutInflater.from(activity)
+        items.forEach { item ->
+            val row = ItemScanBinding.inflate(inflater, binding.scanRecent, true)
+            row.scanName.text = item.scan.fileName
+            row.scanMeta.text = meta(item)
+            row.scanThumb.setImageResource(R.drawable.ic_file_placeholder)
+            row.scanThumb.scaleType = ImageView.ScaleType.CENTER_INSIDE
+            val preview = item.scan.previewPath?.let(::File)
+            row.root.setOnClickListener { openPreview(item, preview) }
+            if (preview != null) thumbnail(row.scanThumb, preview)
+        }
+    }
+
+    private fun meta(item: ScanItem): String = activity.getString(
+        R.string.scan_item_meta,
+        DateUtils.getRelativeTimeSpanString(minOf(item.scan.at, System.currentTimeMillis())),
+        activity.getString(
+            when (item.state) {
+                UploadState.QUEUED, UploadState.WAITING -> R.string.whatsapp_upload_queued
+                UploadState.DELIVERED -> R.string.whatsapp_upload_done
+                UploadState.SET_ASIDE -> R.string.whatsapp_upload_failed
+                UploadState.GONE -> R.string.whatsapp_upload_gone
+                UploadState.WITHDRAWN -> R.string.whatsapp_upload_withdrawn
+            },
+        ),
+    )
+
+    // Decoded off the main thread at the thumbnail's own size, and kept, so
+    // the list redrawing on every outbox change does not decode them again.
+    private fun thumbnail(view: ImageView, preview: File) {
+        thumbnails[preview.path]?.let { return show(view, it) }
+        val size = view.layoutParams.width
+        activity.lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) { decode(preview, size) } ?: return@launch
+            thumbnails[preview.path] = bitmap
+            show(view, bitmap)
+        }
+    }
+
+    private fun show(view: ImageView, bitmap: Bitmap) {
+        view.scaleType = ImageView.ScaleType.CENTER_CROP
+        view.setImageBitmap(bitmap)
+    }
+
+    private fun openPreview(item: ScanItem, preview: File?) {
+        if (preview == null || !preview.exists()) {
+            toast(R.string.scan_no_preview)
+            return
+        }
+        activity.lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                decode(preview, ScanPreview.LONGEST_SIDE)
+            } ?: return@launch toast(R.string.scan_no_preview)
+            val dialog = DialogScanPreviewBinding.inflate(LayoutInflater.from(activity))
+            dialog.previewName.text = item.scan.fileName
+            dialog.previewMeta.text = meta(item)
+            dialog.previewImage.setImageBitmap(bitmap)
+            MaterialAlertDialogBuilder(activity)
+                .setView(dialog.root)
+                .setPositiveButton(R.string.whats_new_done, null)
+                .show()
         }
     }
 
@@ -162,8 +224,24 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
     private fun toast(@StringRes message: Int) =
         Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
 
+    private val thumbnails = mutableMapOf<String, Bitmap>()
+
     private companion object {
         const val TAG = "ScanCard"
+
+        // Sampled down by powers of two until the longest side is within [size].
+        fun decode(file: File, size: Int): Bitmap? {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.path, bounds)
+            val longest = maxOf(bounds.outWidth, bounds.outHeight)
+            if (longest <= 0) return null
+            var sample = 1
+            while (longest / (sample * 2) >= size) sample *= 2
+            return BitmapFactory.decodeFile(
+                file.path,
+                BitmapFactory.Options().apply { inSampleSize = sample },
+            )
+        }
 
         const val PDF = ScanIntake.PDF
 

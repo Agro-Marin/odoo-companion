@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.scan.ScanIntake
+import com.odoocompanion.scan.ScanPreview
 import com.odoocompanion.sync.SyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,8 +59,16 @@ class ShareActivity : ComponentActivity() {
             "nothing to read at the shared item"
         }
         val file = input.use { intake.copy(it, ScanIntake.extensionFor(mimetype, fileName)) }
+        val preview = ScanPreview(File(filesDir, ScanPreview.FOLDER)).render(file, mimetype)
         val enrollment = app.config.currentOrNull()?.enrollment
-        intake.queue(file, fileName, mimetype, ScanIntake.SOURCE_SHARE, enrollment)
+        intake.queue(
+            file,
+            fileName,
+            mimetype,
+            ScanIntake.SOURCE_SHARE,
+            enrollment,
+            preview?.absolutePath,
+        )
     }.onFailure { Log.w(TAG, "Could not queue a shared item", it) }.isSuccess
 
     private fun message(queued: Int, shared: Int): String = when {

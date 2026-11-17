@@ -51,6 +51,13 @@ object WhatsNew {
                 R.string.new_share_body,
             ),
         ),
+        12L to listOf(
+            WhatsNewPage(
+                R.drawable.ic_scan_badge,
+                R.string.new_preview_title,
+                R.string.new_preview_body,
+            ),
+        ),
     )
 
     fun pagesSince(seen: Long, installed: Long): List<WhatsNewPage> = RELEASES

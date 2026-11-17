@@ -145,7 +145,6 @@
     <string name="action_pick_file">Subir archivo</string>
     <string name="scan_none_yet">Escanea un documento o elige un PDF o una foto: llega a Documentos de Odoo como subido por quien tiene este teléfono.</string>
     <string name="scan_recent">Enviados desde este teléfono</string>
-    <string name="scan_item">📄 %1$s\n%2$s · %3$s</string>
     <string name="scan_queued">Documento en cola para Odoo</string>
     <string name="scan_unreadable">No se pudo leer el documento</string>
     <string name="scan_unavailable">El escáner de documentos no está disponible en este teléfono</string>
@@ -222,4 +221,8 @@
         <item quantity="many">%d documentos en cola para Odoo</item>
         <item quantity="other">%d documentos en cola para Odoo</item>
     </plurals>
+    <string name="scan_preview_description">Vista previa del documento enviado</string>
+    <string name="scan_no_preview">No hay vista previa de este documento</string>
+    <string name="new_preview_title">Mira lo que enviaste</string>
+    <string name="new_preview_body">Los documentos enviados desde este teléfono ya muestran su miniatura; toca uno para verlo en grande. Lo que sube Companion lo puede ver y editar todo el equipo en Odoo.</string>
 </resources>
