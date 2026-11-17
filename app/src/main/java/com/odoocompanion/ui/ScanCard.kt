@@ -96,7 +96,9 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
                     val input = requireNotNull(activity.contentResolver.openInputStream(uri)) {
                         "nothing to read at the chosen document"
                     }
-                    val file = input.use { intake().copy(it, extensionOf(mimetype)) }
+                    val file = input.use {
+                        intake().copy(it, ScanIntake.extensionFor(mimetype, fileName))
+                    }
                     val enrollment = app.config.currentOrNull()?.enrollment
                     intake().queue(file, fileName, mimetype, source, enrollment)
                 }
@@ -163,18 +165,10 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
     private companion object {
         const val TAG = "ScanCard"
 
-        const val PDF = "application/pdf"
+        const val PDF = ScanIntake.PDF
 
         const val PAGE_LIMIT = 20
 
         val PICKABLE = arrayOf(PDF, "image/*")
-
-        fun extensionOf(mimetype: String): String = when (mimetype) {
-            PDF -> "pdf"
-            "image/png" -> "png"
-            "image/webp" -> "webp"
-            "image/heic", "image/heif" -> "heic"
-            else -> if (mimetype.startsWith("image/")) "jpg" else "bin"
-        }
     }
 }

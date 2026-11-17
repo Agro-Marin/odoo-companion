@@ -101,4 +101,17 @@ class ScanIntakeTest {
 
         assertEquals(emptyList<Scan>(), log.scans.value)
     }
+
+    @Test
+    fun `a stored copy keeps the shared name's extension`() {
+        assertEquals("docx", ScanIntake.extensionFor("application/octet-stream", "Contrato.DOCX"))
+        assertEquals("pdf", ScanIntake.extensionFor(ScanIntake.PDF, "Escaneo 2026-11-17 10.30.pdf"))
+    }
+
+    @Test
+    fun `without a usable name the extension comes from the type`() {
+        assertEquals("jpg", ScanIntake.extensionFor("image/jpeg", "Documento"))
+        assertEquals("png", ScanIntake.extensionFor("image/png", null))
+        assertEquals("bin", ScanIntake.extensionFor("application/zip", "raro.a b"))
+    }
 }

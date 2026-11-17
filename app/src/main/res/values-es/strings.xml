@@ -214,4 +214,12 @@
     <string name="new_admin_body">La configuración del engrane ahora pide la contraseña de administrador. Tu versión aparece abajo en Inicio.</string>
     <string name="new_lock_widget_title">Escanea desde la pantalla de bloqueo</string>
     <string name="new_lock_widget_body">El widget Escanear ya funciona en la pantalla de inicio y se puede poner en la de bloqueo: mantén presionada la pantalla de bloqueo, elige Widgets y agrega Companion. Al tocarlo te pide desbloquear y abre el escáner.</string>
+    <string name="share_partly_queued">%1$d de %2$d en cola para Odoo; los demás no se pudieron leer</string>
+    <string name="new_share_title">Comparte a Odoo</string>
+    <string name="new_share_body">Ya puedes mandar fotos y archivos desde cualquier app: toca Compartir y elige Odoo Companion. Llegan a Documentos de Odoo a tu nombre.</string>
+    <plurals name="share_queued">
+        <item quantity="one">Documento en cola para Odoo</item>
+        <item quantity="many">%d documentos en cola para Odoo</item>
+        <item quantity="other">%d documentos en cola para Odoo</item>
+    </plurals>
 </resources>

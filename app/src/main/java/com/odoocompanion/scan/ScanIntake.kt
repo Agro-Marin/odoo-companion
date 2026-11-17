@@ -61,5 +61,30 @@ class ScanIntake(
         // What the note on the document in Odoo says it came through.
         const val SOURCE_SCAN = "Scanner"
         const val SOURCE_FILE = "File"
+        const val SOURCE_SHARE = "Shared"
+
+        const val PDF = "application/pdf"
+
+        /**
+         * The extension the stored copy gets: the shared name's own when it has
+         * one, else one read from [mimetype].
+         */
+        fun extensionFor(mimetype: String, fileName: String? = null): String {
+            val named = fileName?.substringAfterLast('.', "")?.lowercase()
+            if (!named.isNullOrEmpty() && named.length <= MAX_EXTENSION &&
+                named.all { it.isLetterOrDigit() }
+            ) {
+                return named
+            }
+            return when (mimetype) {
+                PDF -> "pdf"
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                "image/heic", "image/heif" -> "heic"
+                else -> if (mimetype.startsWith("image/")) "jpg" else "bin"
+            }
+        }
+
+        private const val MAX_EXTENSION = 8
     }
 }
