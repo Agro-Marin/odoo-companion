@@ -77,7 +77,15 @@ class DocumentDrainTest {
         client: OdooClient = OdooClient(),
         outbox: OutboxDao = dao,
         now: () -> Long = { 1_000L },
-    ) = OutboxDrainer(outbox, client, now, documentReader = reader) {
+        credentialsCurrent: () -> Boolean = { true },
+    ) = OutboxDrainer(outbox, client, now, documentReader = reader, withCurrentCredentials = {
+            _,
+            action
+        ->
+        val current = credentialsCurrent()
+        if (current) action()
+        current
+    }) {
         Settings(
             baseUrl = server.url("/").toString().trimEnd('/'),
             identifier = "phone-01",
@@ -89,12 +97,15 @@ class DocumentDrainTest {
         server.enqueue(MockResponse.Builder().code(code).body(body).build())
     }
 
-    private suspend fun queueDocument(legacy: Boolean = false): File {
-        val pdf = folder.newFile("CSF PCA221013LF1.pdf").apply { writeBytes(PDF) }
+    private suspend fun queueDocument(
+        legacy: Boolean = false,
+        name: String = "CSF PCA221013LF1.pdf"
+    ): File {
+        val pdf = folder.newFile(name).apply { writeBytes(PDF) }
         dao.insert(
             OutboxEntry(
                 kind = OutboxKind.DOCUMENT,
-                payload = """{"file_name":"CSF PCA221013LF1.pdf","mimetype":"application/pdf",""" +
+                payload = """{"file_name":"$name","mimetype":"application/pdf",""" +
                     """"kind":"csf","rfc":"PCA221013LF1","chat":"Yop"}""",
                 filePath = pdf.absolutePath,
                 createdAt = pdf.lastModified(),
@@ -109,6 +120,88 @@ class DocumentDrainTest {
         )
         return pdf
     }
+
+    @Test
+    fun `changing credentials after the first file leaves the next selected file untouched`() =
+        runTest {
+            queueDocument(name = "first.pdf")
+            queueDocument(name = "second.pdf")
+            var current = true
+            val client = OdooClient(onServerNamedItself = { current = false })
+            repeat(2) {
+                respond(200, """{"service":"remote_mobile","status":"success","document_id":1}""")
+            }
+
+            val report = drainer(client = client, credentialsCurrent = { current }).drainAll()
+
+            assertEquals(1, server.requestCount)
+            assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+            assertEquals(1, report.deliveredDocuments.size)
+            val pending = dao.take(OutboxKind.DOCUMENT, 2).single()
+            assertEquals("second.pdf", File(requireNotNull(pending.filePath)).name)
+            assertEquals(0, pending.attempts)
+        }
+
+    @Test
+    fun `a credential change during legacy verification prevents the first request`() = runTest {
+        queueDocument(legacy = true)
+        var current = true
+        val reader = DocumentReader(folder.root) {
+            current = false
+            Classification(DocumentKind.CSF, "PCA221013LF1")
+        }
+        respond(200, """{"status":"success","document_id":1}""")
+
+        val report = drainer(reader, credentialsCurrent = { current }).drainAll()
+
+        assertEquals(0, server.requestCount)
+        assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        assertEquals(0, report.lost)
+        assertEquals(0, dao.take(OutboxKind.DOCUMENT, 1).single().attempts)
+
+        val next = drainer(
+            DocumentReader(folder.root) {
+                error("The digest was already pinned")
+            }
+        ).drainAll()
+        assertTrue(next.delivered)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `a queued document attributed to the other app uploads without its contact details`() =
+        runTest {
+            val dir = File(folder.root, "WhatsApp Business/Media/WhatsApp Business Documents")
+            assertTrue(dir.mkdirs())
+            val pdf = File(dir, "document.pdf").apply { writeBytes(PDF) }
+            val source = requireNotNull(FileStamp.read(pdf))
+            dao.insert(
+                OutboxEntry(
+                    kind = OutboxKind.DOCUMENT,
+                    payload =
+                    """{"file_name":"document.pdf","mimetype":"application/pdf","kind":"csf",""" +
+                        """"chat":"personal contact","sender_phone":"123","source":"WhatsApp","received_at":123}""",
+                    filePath = pdf.path,
+                    createdAt = source.modifiedAt,
+                    source = source.copy(sha256 = DocumentSnapshot.digest(pdf, source.size)),
+                )
+            )
+            respond(200, """{"service":"remote_mobile","status":"success","document_id":9}""")
+
+            val report = drainer().drainAll()
+            assertTrue(report.delivered)
+            val body = Json.parseToJsonElement(server.takeRequest().body!!.utf8()).jsonObject
+            assertEquals("WhatsApp Business", body.getValue("source").jsonPrimitive.content)
+            assertEquals(
+                source.modifiedAt.toString(),
+                body.getValue("received_at").jsonPrimitive.content
+            )
+            assertFalse("chat" in body || "sender_phone" in body)
+            val metadata = report.deliveredDocuments.single().metadata
+            assertEquals("WhatsApp Business", metadata.source)
+            assertEquals(null, metadata.chat)
+            assertEquals(null, metadata.senderPhone)
+        }
 
     @Test
     fun `a document goes to document under file_b64 with its metadata, and its file stays`() =

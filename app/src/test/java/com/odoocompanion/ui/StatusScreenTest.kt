@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.os.Bundle
 import android.os.PowerManager
+import android.util.Log
 import android.view.View
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
@@ -15,8 +16,15 @@ import com.odoocompanion.config.enrol
 import com.odoocompanion.config.form
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
+import com.odoocompanion.net.CallRecord
+import com.odoocompanion.net.OdooClient
+import com.odoocompanion.net.WireJson
+import com.odoocompanion.sync.OutboxDrainer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
@@ -25,6 +33,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,6 +47,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowDialog
+import org.robolectric.shadows.ShadowLog
+import org.robolectric.shadows.ShadowToast
 
 @RunWith(RobolectricTestRunner::class)
 class StatusScreenTest {
@@ -402,6 +415,119 @@ class StatusScreenTest {
         val shown = status()
 
         assertFalse(shown, text(R.string.status_undeliverable_hint) in shown)
+    }
+
+    private suspend fun confirmHeldSend(changeDestination: Boolean): String {
+        ShadowLog.setLoggable("SettingsActivity", Log.DEBUG)
+        val base = "https://odoo.example.com"
+        val prior = "phone-a@$base"
+        app.config.enrol(base, "phone-b", "token")
+        app.database.outbox().insert(
+            OutboxEntry(
+                kind = OutboxKind.CALL_LOG,
+                payload = "{}",
+                createdAt = System.currentTimeMillis(),
+                enrollment = prior,
+            )
+        )
+        clickHeldSend(base, changeDestination)
+        return prior
+    }
+
+    private suspend fun clickHeldSend(base: String, changeDestination: Boolean) {
+        val activity = open()
+        settle()
+        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.heldBand).visibility)
+        activity.findViewById<View>(R.id.heldSend).performClick()
+        val dialog = ShadowDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
+        val message = dialog.findViewById<TextView>(android.R.id.message)!!.text.toString()
+        assertTrue(message, "phone-a" in message && "phone-b" in message)
+
+        if (changeDestination) app.config.enrol(base, "phone-c", "token")
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        settle()
+    }
+
+    @Test
+    fun `send here cannot redirect held calls if enrolment changes during confirmation`() =
+        runTest {
+            val prior = confirmHeldSend(changeDestination = true)
+            assertEquals(text(R.string.held_action_retry), ShadowToast.getTextOfLatestToast())
+
+            val counts = app.database.outbox().counts(app.config.current().enrollment).first()
+            assertEquals(1, counts.held)
+            assertEquals(prior, counts.heldFor)
+            assertEquals(0, counts.calls)
+        }
+
+    @Test
+    fun `confirming the displayed destination adopts the held call`() = runTest {
+        confirmHeldSend(changeDestination = false)
+
+        val counts = app.database.outbox().counts(app.config.current().enrollment).first()
+        assertEquals(0, counts.held)
+        assertEquals(1, counts.calls)
+    }
+
+    @Test
+    fun `a held decision waits for an earlier upload to record its answer`() = runBlocking {
+        ShadowLog.setLoggable("OutboxDrainer", Log.DEBUG)
+        ShadowLog.setLoggable("SettingsActivity", Log.DEBUG)
+        MockWebServer().use { server ->
+            server.start()
+            val base = server.url("/").toString().trimEnd('/')
+            app.config.enrol(base, "phone-a", "token")
+            val old = app.config.current()
+            val dao = app.database.outbox()
+            dao.insert(
+                OutboxEntry(
+                    kind = OutboxKind.CALL_LOG,
+                    payload = WireJson.encodeToString(CallRecord("123", "incoming", 1, 9)),
+                    createdAt = System.currentTimeMillis(),
+                    enrollment = old.enrollment,
+                ),
+            )
+            server.enqueue(
+                MockResponse(
+                    body = """{"service":"remote_mobile","status":"success","accepted":1}"""
+                )
+            )
+            val received = CompletableDeferred<Unit>()
+            val finish = CompletableDeferred<Unit>()
+            val client = OdooClient(onServerNamedItself = {
+                received.complete(Unit)
+                finish.await()
+            })
+            val upload = async(Dispatchers.IO) {
+                OutboxDrainer(
+                    dao,
+                    client,
+                    withCurrentCredentials = app.config::withCurrentCredentials
+                ) {
+                    old
+                }.drainAll()
+            }
+            try {
+                withTimeout(10_000) { received.await() }
+                app.config.enrol(base, "phone-b", "token")
+                clickHeldSend(base, changeDestination = false)
+                assertEquals(1, dao.counts(app.config.current().enrollment).first().held)
+            } finally {
+                finish.complete(Unit)
+            }
+            withTimeout(10_000) {
+                while (!upload.isCompleted) {
+                    Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                    delay(10)
+                }
+            }
+            assertTrue(upload.await().delivered)
+            settle()
+            val counts = dao.counts(app.config.current().enrollment).first()
+            assertEquals(0, counts.held)
+            assertEquals(0, counts.calls)
+            assertEquals(1, server.requestCount)
+        }
     }
 
     @Test

@@ -5,6 +5,7 @@ import android.util.Log
 import com.odoocompanion.data.OutboxLimits
 import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.data.UploadState
+import com.odoocompanion.data.rowFor
 import com.odoocompanion.data.writeHistory
 import com.odoocompanion.system.debug
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +38,8 @@ data class Sighting(
     val readFailures: Int = 0,
     val missing: Boolean = false,
     val outcome: UploadState? = null,
+    val receiptsAwaitingClassification: List<QueuedFileState> = emptyList(),
+    val hasMessageTime: Boolean = false,
 ) {
     val found: Boolean
         get() = filePath != null
@@ -46,17 +49,66 @@ data class Sighting(
 
     val fileVersion get() = filePath to classification?.source
 
-    fun queueRow(rowsByPath: Map<String, List<QueuedFileState>>): QueuedFileState? {
-        val candidates = rowsByPath[filePath] ?: return null
-        val source = classification?.source
-        return candidates.lastOrNull { it.source == source } ?: candidates.lastOrNull {
-            it.source == null && source != null && source.matchesQueuedMetadata(null, it.createdAt)
+    internal val awaitingUpload: Boolean
+        get() = found && !queued && outcome == null && classification?.kind?.uploads == true
+
+    fun queueRow(rowsByPath: Map<String, List<QueuedFileState>>): QueuedFileState? =
+        rowsByPath[filePath]?.rowFor(classification?.source)
+
+    internal fun uploadState(row: QueuedFileState?): UploadState =
+        if (outcome == UploadState.DELIVERED && classification?.source?.sha256 != null &&
+            row?.deadReason != null
+        ) {
+            UploadState.DELIVERED
+        } else {
+            UploadState.forFile(row, outcome)
         }
+
+    internal fun withReceipts(receipts: List<QueuedFileState>): Sighting {
+        val candidates = if (receiptsAwaitingClassification.isEmpty()) {
+            receipts
+        } else {
+            (receiptsAwaitingClassification + receipts).distinct()
+        }
+        if (candidates.isEmpty()) return this
+        // Cleanup can run before OCR, including while shared storage is unavailable.
+        // Keep the receipt until we can compare it with the classified bytes.
+        val source = classification?.source
+        val deferred = if (source?.sha256 == null) {
+            candidates.filter { it.source?.sha256 != null || it.recheckedSha256 != null }
+        } else {
+            emptyList()
+        }
+        val row = if (classification == null &&
+            deferred.isNotEmpty()
+        ) {
+            null
+        } else {
+            candidates.rowFor(source)
+        }
+        return copy(
+            queued = queued || row != null,
+            outcome = if (row == null) outcome else uploadState(row),
+            receiptsAwaitingClassification = deferred,
+        )
+    }
+
+    internal fun sameAttachmentAs(notice: DocumentNotice): Boolean {
+        if (app != notice.app || chat != notice.chat || label != notice.label ||
+            isGroup != notice.isGroup
+        ) {
+            return false
+        }
+        if (phone != null && notice.phone != null) return phone == notice.phone
+        return !isGroup || (phone == notice.phone && sender == notice.sender)
     }
 
     fun sameDocumentAs(notice: DocumentNotice): Boolean =
-        app == notice.app && chat == notice.chat && label == notice.label &&
+        !loose && sameAttachmentAs(notice) && if (hasMessageTime && notice.hasMessageTime) {
+            at == notice.at
+        } else {
             kotlin.math.abs(at - notice.at) <= SAME_MESSAGE_MILLIS
+        }
 
     companion object {
         const val SAME_MESSAGE_MILLIS = 2L * 60 * 1000
@@ -93,16 +145,29 @@ class SightingStore(
 
     suspend fun record(notices: List<DocumentNotice>): Int = lock.withLock {
         val known = load() ?: return@withLock 0
-        val fresh = mutableListOf<Sighting>()
+        val rows = known.toMutableList()
+        var added = 0
         for (notice in notices) {
-            if (known.none { it.sameDocumentAs(notice) } &&
-                fresh.none { it.sameDocumentAs(notice) }
-            ) {
-                fresh += sightingOf(notice)
+            val index = rows.indexOfFirst { it.sameDocumentAs(notice) }
+            if (index < 0) {
+                rows.add(added, sightingOf(notice))
+                added++
+            } else {
+                val prior = rows[index]
+                // A replay can supply the message clock that an earlier notification omitted.
+                // Keep that clock so the fallback window cannot absorb the next real message.
+                val timed = notice.hasMessageTime && !prior.hasMessageTime
+                if (timed || (prior.phone == null && notice.phone != null)) {
+                    rows[index] = prior.copy(
+                        at = if (timed) notice.at else prior.at,
+                        hasMessageTime = prior.hasMessageTime || notice.hasMessageTime,
+                        phone = prior.phone ?: notice.phone,
+                    )
+                }
             }
         }
-        save(matched(fresh + known, scan))
-        fresh.size
+        save(matched(rows, scan))
+        added
     }
 
     suspend fun rematch() = lock.withLock {
@@ -126,12 +191,12 @@ class SightingStore(
 
     suspend fun fillNumbers(numberOf: (String) -> String?) = lock.withLock {
         val known = load() ?: return@withLock
-        val asked = mutableMapOf<String, String?>()
+        val lookup = ContactNumbers.cachedLookup(numberOf)
         val filled = known.map { sighting ->
             if (sighting.phone != null || sighting.loose || sighting.sender.isBlank()) {
                 return@map sighting
             }
-            val phone = asked.getOrPut(sighting.sender) { numberOf(sighting.sender) }
+            val phone = lookup(sighting.sender)
             if (phone == null) sighting else sighting.copy(phone = phone)
         }
         if (filled != known) save(filled)
@@ -139,8 +204,8 @@ class SightingStore(
 
     suspend fun classifyPending(read: (File) -> Classification?): Int = reading.withLock classify@{
         val all = lock.withLock { load() } ?: return@classify 0
-        val pending = all.filter { it.classification == null && !it.unreadable }
-            .mapNotNullTo(HashSet()) { it.filePath }
+        val pending = all.filter { it.found && it.classification == null && !it.unreadable }
+            .groupBy { it.filePath }
         if (pending.isEmpty()) return@classify 0
         val onDisk = scan().filter { it.path in pending }.associateBy { it.path }
         val verdicts = all.mapNotNull { sighting ->
@@ -160,60 +225,47 @@ class SightingStore(
             val known = requireNotNull(state.value)
             val classified = known.map { sighting ->
                 val path = sighting.filePath
+                // OCR runs outside the history lock. A later notice may now refer to
+                // different bytes at this path, even with the same size and timestamp.
+                val notice = noticeOf(sighting)
+                val observed = pending[path]?.any {
+                    it.at == sighting.at && it.loose == sighting.loose &&
+                        it.sameAttachmentAs(notice)
+                } == true
                 val verdict = verdicts[path]
                 when {
-                    sighting.classification != null -> sighting
-
+                    !observed || sighting.classification != null -> sighting
                     verdict != null -> sighting.copy(classification = verdict, missing = false)
-
-                    path in pending && path !in onDisk -> sighting.copy(missing = true)
-
-                    path in pending -> sighting.copy(
-                        readFailures = sighting.readFailures + 1,
-                        missing = false,
-                    )
-
-                    else -> sighting
+                    path !in onDisk -> sighting.copy(missing = true)
+                    else -> sighting.copy(readFailures = sighting.readFailures + 1, missing = false)
                 }
             }
-            if (classified != known) save(classified)
+            if (classified != known) save(reconcileVerifiedFiles(classified))
         }
         reads
     }
 
-    suspend fun toUpload(): List<Sighting> = lock.withLock {
-        load().orEmpty().filter {
-            it.found && !it.queued && it.outcome == null && it.classification?.kind?.uploads == true
-        }
-    }
-
-    suspend fun markQueued(ready: List<Sighting>) = lock.withLock {
-        val known = load() ?: return@withLock
-        val versions = ready.mapTo(HashSet()) { it.fileVersion }
-        save(
-            known.map {
-                if (!it.queued &&
-                    it.fileVersion in versions
-                ) {
-                    it.copy(queued = true)
-                } else {
-                    it
-                }
+    // Cleanup records its receipt under this same lock before removing the Room
+    // row. Keep eligibility, enqueue and the history marker in that order.
+    internal suspend fun enqueuePending(enqueue: suspend (List<Sighting>) -> Int): Int =
+        lock.withLock {
+            val known = load() ?: return@withLock 0
+            val ready = known.filter { it.awaitingUpload }
+            if (ready.isEmpty()) {
+                if (writePending) save(known)
+                return@withLock 0
             }
-        )
-    }
+            val count = enqueue(ready)
+            save(known.map { if (it.awaitingUpload) it.copy(queued = true) else it })
+            count
+        }
 
     suspend fun remember(receipts: List<QueuedFileState>) = lock.withLock {
         val known = load() ?: throw IOException("Document history unavailable")
         val byPath = receipts.groupBy { it.filePath }
         save(
             known.map { sighting ->
-                sighting.queueRow(byPath)?.let {
-                    sighting.copy(
-                        queued = true,
-                        outcome = UploadState.fromDeadReason(it.deadReason)
-                    )
-                } ?: sighting
+                byPath[sighting.filePath]?.let(sighting::withReceipts) ?: sighting
             }
         )
         if (writePending) throw IOException("Document history is waiting for storage")
@@ -229,66 +281,87 @@ class SightingStore(
         val files = scan()
         val claimed = sightings.mapNotNullTo(HashSet()) { it.filePath }
         val classified = sightings.filter { it.classification != null }.groupBy { it.filePath }
-        val loosePaths = sightings.filter { it.loose }.mapNotNullTo(HashSet()) { it.filePath }
-        val adopted = mutableSetOf<String>()
+        val named = sightings.filterNot { it.loose }.mapNotNullTo(HashSet()) { it.filePath }
+        val loosePaths = (claimed - named).toMutableSet()
+        val adopted = mutableMapOf<String, DocumentFile>()
         val result = mutableListOf<Sighting>()
-        for (sighting in sightings.sortedBy { it.at }) {
-            if (sighting.loose && sighting.filePath in adopted) continue
-            if (sighting.found) {
-                result += sighting
-                continue
+        for (simultaneous in sightings.groupBy { it.at }.toSortedMap().values) {
+            val (found, pending) = simultaneous.partition { it.found }
+            result += found
+            // Score notices with the same timestamp before any of them claims a file.
+            val choices = pending.map { sighting ->
+                val notice = noticeOf(sighting)
+                val candidates = DocumentMatcher.closest(notice, files, claimed)
+                    .ifEmpty { looseCandidates(notice, files, loosePaths) }
+                    .ifEmpty { listOfNotNull(resentFile(notice, result, files)) }
+                sighting to candidates
             }
-            val notice = noticeOf(sighting)
-            val file = DocumentMatcher.match(notice, files, claimed)?.also { claimed += it.path }
-                ?: adoptedFile(notice, files, loosePaths - adopted)
-                    ?.also { file ->
-                        adopted += file.path
-                        result.removeAll { it.loose && it.filePath == file.path }
-                    }
-                ?: resentFile(sighting, result, files)
-            result += file?.let { found ->
-                val prior = classified[found.path]?.firstOrNull {
-                    found.matches(it.classification?.source)
+            val claims = choices.flatMap { it.second }.groupingBy { it.path }.eachCount()
+            for ((sighting, candidates) in choices) {
+                val file = candidates.singleOrNull()?.takeIf { claims[it.path] == 1 }
+                if (file == null) {
+                    result += sighting
+                    continue
                 }
-                sighting.copy(
-                    filePath = found.path,
-                    fileSize = found.size,
+                claimed += file.path
+                if (loosePaths.remove(file.path)) adopted[file.path] = file
+                val prior = classified[file.path]?.firstOrNull {
+                    file.matches(it.classification?.source)
+                }
+                result += sighting.copy(
+                    filePath = file.path,
+                    fileSize = file.size,
                     classification = prior?.classification,
                     queued = prior?.queued == true,
                     outcome = prior?.outcome,
                 )
-            } ?: sighting
+            }
         }
-        debug(TAG) { "${result.count { it.found }} of ${result.size} sighting(s) matched" }
-        return result
+        val matched = result.filterNot { sighting ->
+            val current = adopted[sighting.filePath]
+            sighting.loose && current != null && sighting.canHandOver(current)
+        }
+        debug(TAG) { "${matched.count { it.found }} of ${matched.size} sighting(s) matched" }
+        return matched
     }
 
-    private fun adoptedFile(
+    private fun Sighting.canHandOver(current: DocumentFile): Boolean {
+        val source = classification?.source
+        return if (source?.sha256 != null) {
+            current.matches(source)
+        } else {
+            !queued && outcome == null && receiptsAwaitingClassification.isEmpty()
+        }
+    }
+
+    private fun looseCandidates(
         notice: DocumentNotice,
         files: List<DocumentFile>,
         loosePaths: Set<String>,
-    ): DocumentFile? {
-        if (loosePaths.isEmpty()) return null
-        return DocumentMatcher.match(notice, files.filter { it.path in loosePaths }, emptySet())
+    ): List<DocumentFile> {
+        if (loosePaths.isEmpty()) return emptyList()
+        return DocumentMatcher.closest(notice, files.filter { it.path in loosePaths }, emptySet())
     }
 
     private fun resentFile(
-        sighting: Sighting,
+        notice: DocumentNotice,
         earlier: List<Sighting>,
         files: List<DocumentFile>,
     ): DocumentFile? {
-        if (now() - sighting.at < RESEND_SETTLE_MILLIS) return null
-        val first = earlier.firstOrNull {
-            it.found && it.app == sighting.app && it.chat == sighting.chat &&
-                it.label == sighting.label
-        } ?: return null
-        val file = files.firstOrNull { it.path == first.filePath } ?: return null
-        return file.takeIf { cameWithItsNotice(it, first) || cameWithItsNotice(it, sighting) }
+        if (now() - notice.at < RESEND_SETTLE_MILLIS) return null
+        val prior = earlier.filter { it.found && !it.loose && it.sameAttachmentAs(notice) }
+            .groupBy { it.filePath }
+        val candidates = files.filter { file ->
+            val previous = prior[file.path]
+            file.app == notice.app && previous != null &&
+                (cameWithNotice(file, notice.at) || previous.any { cameWithNotice(file, it.at) })
+        }
+        val rewritten = candidates.filter { cameWithNotice(it, notice.at) }
+        return rewritten.ifEmpty { candidates }.singleOrNull()
     }
 
-    private fun cameWithItsNotice(file: DocumentFile, sighting: Sighting): Boolean =
-        file.modifiedAt - sighting.at in
-            -DocumentMatcher.BEFORE_NOTICE_MILLIS..RESEND_SETTLE_MILLIS
+    private fun cameWithNotice(file: DocumentFile, at: Long): Boolean =
+        file.modifiedAt - at in -DocumentMatcher.BEFORE_NOTICE_MILLIS..RESEND_SETTLE_MILLIS
 
     private fun load(): List<Sighting>? {
         state.value?.let { return it }
@@ -311,7 +384,8 @@ class SightingStore(
         }
         watchingSince = read?.watchingSince ?: now()
         retired = read?.retired.orEmpty()
-        val sightings = read?.sightings.orEmpty().map { sighting ->
+        val stored = read?.sightings.orEmpty()
+        val sightings = stored.flatMap(::restoreInbox).map { sighting ->
             val verdict = sighting.classification
             if (!sighting.queued && sighting.outcome == null &&
                 verdict?.kind?.uploads == true && verdict.source?.sha256 == null &&
@@ -323,8 +397,80 @@ class SightingStore(
                 sighting
             }
         }
-        if (read == null) save(sightings) else state.value = sightings
-        return sightings
+        val reconciled = reconcileVerifiedFiles(sightings)
+        if (read == null || reconciled != stored) save(reconciled) else state.value = stored
+        return state.value
+    }
+
+    private fun reconcileVerifiedFiles(sightings: List<Sighting>): List<Sighting> {
+        val deferred = sightings.flatMap {
+            it.receiptsAwaitingClassification
+        }.groupBy { it.filePath }
+        val resolved = if (deferred.isEmpty()) {
+            sightings
+        } else {
+            sightings.map { sighting ->
+                val receipts = deferred[sighting.filePath]
+                if (sighting.classification?.source?.sha256 != null && receipts != null) {
+                    sighting.withReceipts(receipts)
+                } else {
+                    sighting
+                }
+            }
+        }
+        val aliases = resolved.filter { it.found && it.classification?.source?.sha256 != null }
+            .groupBy { it.fileVersion }.filterValues { it.size > 1 }
+        if (aliases.isEmpty()) return resolved
+        val receipts = aliases.mapValues { (_, rows) ->
+            rows.firstOrNull { it.outcome == UploadState.DELIVERED }
+                ?: rows.firstOrNull { it.outcome != null } ?: rows.firstOrNull { it.queued }
+        }
+        // Keep every notice. A loose download stands in only while no notice owns its version.
+        val represented = aliases.filterValues { rows ->
+            rows.any { !it.loose }
+        }.keys.toMutableSet()
+        return resolved.mapNotNull { sighting ->
+            val version = sighting.fileVersion
+            if (sighting.loose && version in aliases && !represented.add(version)) {
+                return@mapNotNull null
+            }
+            val receipt = receipts[version] ?: return@mapNotNull sighting
+            sighting.copy(queued = true, outcome = receipt.outcome)
+        }
+    }
+
+    private fun restoreInbox(sighting: Sighting): List<Sighting> {
+        val path = sighting.filePath
+        val owner = path?.let(WhatsAppInbox::containing)
+        if (owner == null || owner.app == sighting.app) return listOf(sighting)
+        if (sighting.loose) return listOf(sighting.copy(app = owner.app))
+
+        // Let the original notice find its own download. A queued file keeps its receipt
+        // and provenance even when the notification that first claimed it was unrelated.
+        val notice = sightingOf(noticeOf(sighting))
+        val modifiedAt = sighting.classification?.source?.modifiedAt
+        if (!sighting.queued && sighting.outcome == null &&
+            sighting.receiptsAwaitingClassification.isEmpty() &&
+            (modifiedAt == null || modifiedAt < watchingSince)
+        ) {
+            return listOf(notice)
+        }
+        val file = DocumentFile(
+            path,
+            File(path).name,
+            modifiedAt ?: sighting.at,
+            sighting.fileSize,
+            owner.app,
+        )
+        return listOf(
+            notice,
+            looseSightingOf(file).copy(
+                classification = sighting.classification,
+                queued = sighting.queued,
+                outcome = sighting.outcome,
+                receiptsAwaitingClassification = sighting.receiptsAwaitingClassification,
+            ),
+        )
     }
 
     private fun save(sightings: List<Sighting>) {
@@ -352,10 +498,11 @@ class SightingStore(
         label = notice.label,
         at = notice.at,
         isGroup = notice.isGroup,
+        hasMessageTime = notice.hasMessageTime,
     )
 
     private fun looseSightingOf(file: DocumentFile) = Sighting(
-        app = WhatsAppDocuments.appOf(file.path),
+        app = file.app,
         chat = "",
         sender = "",
         label = file.name,
@@ -373,6 +520,7 @@ class SightingStore(
         label = sighting.label,
         at = sighting.at,
         isGroup = sighting.isGroup,
+        hasMessageTime = sighting.hasMessageTime,
     )
 
     companion object {

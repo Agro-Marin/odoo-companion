@@ -28,10 +28,8 @@ data class DocumentNotice(
     val label: String,
     val at: Long,
     val isGroup: Boolean,
-) {
-    val key: String
-        get() = "$app|$chat|$label|$at"
-}
+    val hasMessageTime: Boolean = false,
+)
 
 object WhatsAppNotices {
     const val WHATSAPP = "com.whatsapp"
@@ -67,19 +65,20 @@ object WhatsAppNotices {
                     label = label,
                     at = message.time.takeIf { it > 0 } ?: fields.postedAt,
                     isGroup = fields.isGroup,
+                    hasMessageTime = message.time > 0,
                 )
             }
-            .distinctBy { it.key }
+            .distinct()
     }
 
     fun withNumbers(
         notices: List<DocumentNotice>,
         numberOf: (String) -> String?,
     ): List<DocumentNotice> {
-        val asked = mutableMapOf<String, String?>()
+        val lookup = ContactNumbers.cachedLookup(numberOf)
         return notices.map { notice ->
             if (notice.phone != null) return@map notice
-            notice.copy(phone = asked.getOrPut(notice.sender) { numberOf(notice.sender) })
+            lookup(notice.sender)?.let { notice.copy(phone = it) } ?: notice
         }
     }
 

@@ -10,9 +10,6 @@ import com.odoocompanion.data.UploadState
 import com.odoocompanion.net.DocumentMetadata
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.debug
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class DocumentQueue(
     private val store: SightingStore,
@@ -20,40 +17,32 @@ class DocumentQueue(
     private val enrollment: String? = null,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun queueClassified(): Int = queueing.withLock {
-        val ready = store.toUpload()
-        if (ready.isEmpty()) return@withLock 0
-        val queued = dao.fileStates(OutboxKind.DOCUMENT).first().groupBy { it.filePath }
-        val fresh = ready.distinctBy { it.fileVersion }.filter { it.queueRow(queued) == null }
-            .map { entryOf(it, requireNotNull(it.filePath)) }
-        if (fresh.isNotEmpty()) dao.insertAll(fresh)
-        store.markQueued(ready)
-        debug(TAG) { "${ready.size} document(s) ready, ${fresh.size} queued" }
-        fresh.size
+    suspend fun queueClassified(): Int = store.enqueuePending { ready ->
+        val inserted = dao.insertMissingDocuments(ready.map(::entryOf))
+        debug(TAG) { "${ready.size} document(s) ready, $inserted queued" }
+        inserted
     }
 
-    private fun entryOf(sighting: Sighting, path: String): OutboxEntry {
-        val read = sighting.classification
+    private fun entryOf(sighting: Sighting): OutboxEntry {
+        val path = requireNotNull(sighting.filePath)
+        val read = requireNotNull(sighting.classification)
         return OutboxEntry(
             kind = OutboxKind.DOCUMENT,
             payload = QueuedDocument(
                 metadata = DocumentMetadata(
                     fileName = path.substringAfterLast('/'),
                     mimetype = PDF,
-                    kind = read?.kind?.name?.lowercase(),
-                    source = if (sighting.app == WhatsAppNotices.WHATSAPP_BUSINESS) {
-                        "WhatsApp Business"
-                    } else {
-                        "WhatsApp"
-                    },
+                    kind = read.kind.name.lowercase(),
+                    source = WhatsAppInbox.entries.firstOrNull { it.app == sighting.app }?.source
+                        ?: WhatsAppInbox.PERSONAL.source,
                     chat = sighting.chat.ifBlank { null },
                     senderPhone = sighting.phone,
                     receivedAt = sighting.at,
                 ),
-                rfc = read?.rfc,
+                rfc = read.rfc,
             ).encode(),
             filePath = path,
-            source = read?.source,
+            source = read.source,
             createdAt = now(),
             enrollment = enrollment,
         )
@@ -61,8 +50,6 @@ class DocumentQueue(
 
     private companion object {
         const val TAG = "DocumentQueue"
-
-        val queueing = Mutex()
 
         const val PDF = "application/pdf"
     }
@@ -83,6 +70,6 @@ object WhatsAppIntake {
         if (sighting.classification?.kind?.uploads != true) return null
         val row = sighting.queueRow(queue)
         if (row == null && sighting.outcome == null && !sighting.queued) return UploadState.WAITING
-        return UploadState.forFile(row, sighting.outcome)
+        return sighting.uploadState(row)
     }
 }

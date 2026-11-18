@@ -19,6 +19,21 @@ data class QueuedDocument(val metadata: DocumentMetadata, val rfc: String?) {
         (metadata.kind == null || metadata.kind == verdict.kind.name.lowercase()) &&
         (rfc == null || rfc == verdict.rfc)
 
+    // A row queued by an older matcher may name a chat from the other app.
+    // Such a file has the same provenance as a download seen without a notice.
+    fun fromInbox(path: String, modifiedAt: Long): QueuedDocument {
+        val inbox = WhatsAppInbox.containing(path) ?: return this
+        if (metadata.source == inbox.source) return this
+        return copy(
+            metadata = metadata.copy(
+                source = inbox.source,
+                chat = null,
+                senderPhone = null,
+                receivedAt = modifiedAt
+            )
+        )
+    }
+
     fun encode(): String {
         val sent = WireJson.encodeToJsonElement(metadata).jsonObject
         return JsonObject(if (rfc == null) sent else sent + (RFC to JsonPrimitive(rfc))).toString()

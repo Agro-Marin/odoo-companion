@@ -4,9 +4,14 @@ import android.app.Application
 import com.odoocompanion.config.Settings
 import com.odoocompanion.push.PushKeyLookup
 import com.odoocompanion.softphone.SoftphoneLookup
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -17,6 +22,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -51,6 +58,32 @@ class OdooClientTest {
         assertEquals("Bearer secret-token", request.headers["Authorization"])
         assertTrue(outcome is UploadOutcome.Success)
         assertEquals(2, (outcome as UploadOutcome.Success).accepted)
+    }
+
+    @Test
+    fun `cancelling an upload while reading the reply cancels its network call`() = runBlocking {
+        val reading = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        lateinit var active: Call
+        val http = OkHttpClient.Builder().eventListener(object : EventListener() {
+            override fun responseBodyStart(call: Call) {
+                active = call
+                reading.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+        }).build()
+        server.enqueue(MockResponse(body = """{"accepted":1}"""))
+        val job = async(Dispatchers.IO) {
+            OdooClient(http).uploads(settings()).post("calllog", "{}")
+        }
+        try {
+            assertTrue(reading.await(5, TimeUnit.SECONDS))
+            job.cancel()
+            assertTrue(active.isCanceled())
+        } finally {
+            release.countDown()
+        }
+        job.join()
     }
 
     @Test

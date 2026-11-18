@@ -64,6 +64,20 @@ class WhatsAppDocumentsTest {
         DocumentFile("/w/$name", name, modifiedAt, 16)
 
     @Test
+    fun `notices take named and captioned files only from the posting app`() {
+        val regular = saved("$inbox/2026/CSF.pdf", at + 30_000)
+        val business = saved("WhatsApp Business/Media/WhatsApp Business Documents/CSF.pdf", at)
+        val files = WhatsAppDocuments(folder.root).scan()
+        for (label in listOf("CSF.pdf", "My document")) {
+            val personal = notice(label)
+            val work = personal.copy(app = WhatsAppNotices.WHATSAPP_BUSINESS)
+            assertEquals(regular.path, DocumentMatcher.match(personal, files, emptySet())?.path)
+            assertEquals(business.path, DocumentMatcher.match(work, files, emptySet())?.path)
+            assertNull(DocumentMatcher.match(work, files, setOf(business.path)))
+        }
+    }
+
+    @Test
     fun `a notice takes the file of its name, or its numbered twin`() {
         val files = listOf(file("Otro.pdf", at), file("CSF (1).pdf", at + 5_000))
 
@@ -71,6 +85,13 @@ class WhatsAppDocumentsTest {
             "CSF (1).pdf",
             DocumentMatcher.match(notice("CSF.pdf"), files, emptySet())?.name,
         )
+    }
+
+    @Test
+    fun `the scan order cannot break a tie between equally close downloads`() {
+        val files = listOf(file("CSF.pdf", at - 10), file("CSF (1).pdf", at + 10))
+        assertNull(DocumentMatcher.match(notice("CSF.pdf"), files, emptySet()))
+        assertNull(DocumentMatcher.match(notice("CSF.pdf"), files.reversed(), emptySet()))
     }
 
     @Test

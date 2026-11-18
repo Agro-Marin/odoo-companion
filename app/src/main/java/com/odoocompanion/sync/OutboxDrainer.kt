@@ -26,7 +26,12 @@ import com.odoocompanion.system.debug
 import com.odoocompanion.whatsapp.DocumentReader
 import com.odoocompanion.whatsapp.QueuedDocument
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -78,7 +83,7 @@ private class DrainTally(val readyAt: Long) {
     var purged = 0
     var revived = 0
     var moreWork = false
-    var linkDown = false
+    var stopAfterKind = false
 
     var payloadLimit = 0L
     var persistedLimit: Long? = null
@@ -115,7 +120,12 @@ class OutboxDrainer(
     private val learnPayloadLimit: suspend (bytes: Long, at: Long) -> Unit = { _, _ -> },
     rememberFiles: suspend (String, List<QueuedFile>) -> Unit = { _, _ -> },
     private val documentReader: DocumentReader =
-        DocumentReader(File(System.getProperty("java.io.tmpdir"))),
+        DocumentReader(File(requireNotNull(System.getProperty("java.io.tmpdir")))),
+    private val withCurrentCredentials: suspend (Settings, suspend () -> Unit) -> Boolean =
+        { _, action ->
+            action()
+            true
+        },
     private val settingsProvider: suspend () -> Settings,
 ) {
     private val cleanup = FileCleanup(dao, rememberFiles)
@@ -145,7 +155,14 @@ class OutboxDrainer(
             return reportUnreadableSettings(tally, cause)
         }
         tally.payloadLimit = settings.payloadLimit(now())
-        withdrawLongHeld(settings, tally)
+        val enrollment = settings.enrollment
+        if (enrollment != null &&
+            !withCurrentCredentials(settings) { withdrawLongHeld(enrollment, tally) }
+        ) {
+            tally.lastError = "could not confirm the current enrolment"
+            debug(TAG) { "Stopping before retention and upload: ${tally.lastError}" }
+            return tally.report(Outcome.RETRY)
+        }
         val outcome = drainUntilTheLinkFails(settings, tally)
         reviveWhatOnlyRanOutOfRetries(settings, tally, outcome)
 
@@ -170,9 +187,9 @@ class OutboxDrainer(
         )
         var outcome = Outcome.DONE
         for (drainKind in kinds) {
-            if (drainKind() != Outcome.RETRY) continue
+            if (withQueueOwnership { drainKind() } != Outcome.RETRY) continue
             outcome = Outcome.RETRY
-            if (tally.linkDown) break
+            if (tally.stopAfterKind) break
         }
         return outcome
     }
@@ -190,11 +207,10 @@ class OutboxDrainer(
         )
     }
 
-    private suspend fun withdrawLongHeld(settings: Settings, tally: DrainTally) {
-        val enrollment = settings.enrollment ?: return
-        val before = now() - OutboxLimits.DEAD_RETENTION_MILLIS
-        val positions = dao.deleteHeldPositions(enrollment, before = before)
-        val withdrawn = dao.withdrawHeld(enrollment, from = null, now = now(), before = before)
+    private suspend fun withdrawLongHeld(enrollment: String, tally: DrainTally) {
+        val at = now()
+        val before = at - OutboxLimits.DEAD_RETENTION_MILLIS
+        val (positions, withdrawn) = dao.discardHeld(enrollment, from = null, at, before)
         tally.discarded += positions
         if (positions + withdrawn > 0) {
             Log.i(
@@ -298,8 +314,47 @@ class OutboxDrainer(
         val suffix: String,
         val noun: String,
         val fileKey: String,
-        val decode: (String) -> FilePayload,
+        val decode: (String, File, FileStamp) -> FilePayload,
     )
+
+    private suspend fun take(
+        kind: String,
+        limit: Int,
+        settings: Settings,
+        tally: DrainTally,
+    ): List<OutboxEntry>? {
+        lateinit var rows: List<OutboxEntry>
+        val confirmed = withCurrentCredentials(settings) {
+            rows = dao.take(kind, limit, tally.readyAt, settings.enrollment)
+        }
+        if (confirmed) return rows
+
+        credentialsUnavailable(tally)
+        return null
+    }
+
+    private fun credentialsUnavailable(tally: DrainTally): Outcome {
+        tally.lastError = "could not confirm the current enrolment"
+        tally.stopAfterKind = true
+        debug(TAG) { "Stopping this upload pass: ${tally.lastError}" }
+        return Outcome.RETRY
+    }
+
+    private suspend fun post(
+        settings: Settings,
+        tally: DrainTally,
+        send: suspend () -> UploadOutcome,
+    ): UploadOutcome = coroutineScope {
+        lateinit var request: Deferred<UploadOutcome>
+        val confirmed = withCurrentCredentials(settings) {
+            // post enqueues its OkHttp call before its first suspension. Release the
+            // settings transaction before waiting for the reply or recording capabilities.
+            request = async(start = CoroutineStart.UNDISPATCHED) { send() }
+        }
+        if (!confirmed) return@coroutineScope UploadOutcome.CredentialsUnavailable
+        tally.attempted = true
+        request.await()
+    }
 
     private suspend fun <T> drainBatch(
         wire: Wire<T>,
@@ -313,7 +368,7 @@ class OutboxDrainer(
                 tally.moreWork = true
                 return Outcome.DONE
             }
-            val entries = dao.take(wire.kind, size, tally.readyAt, uploads.enrollment)
+            val entries = take(wire.kind, size, uploads.settings, tally) ?: return Outcome.RETRY
             debug(TAG) {
                 "${wire.kind}: took ${entries.size} at batch size $size, " +
                     "$budget batch(es) left"
@@ -342,14 +397,16 @@ class OutboxDrainer(
             if (items.isEmpty()) continue
 
             val sent = entries.map { it.id } - unreadable.map { it.id }.toSet()
-            tally.attempted = true
             val outcome = attempt {
-                uploads.post(wire.suffix, wire.encodeBatch(items))
+                val body = wire.encodeBatch(items)
+                post(uploads.settings, tally) { uploads.post(wire.suffix, body) }
             }.getOrElse { return failBatch(tally, sent, it) }
             debug(TAG) {
                 "${wire.suffix} with ${sent.size} row(s) answered ${outcome.diagnostic()}"
             }
             when (outcome) {
+                UploadOutcome.CredentialsUnavailable -> return credentialsUnavailable(tally)
+
                 is UploadOutcome.Success -> {
                     learn(tally, outcome.limitBytes)
                     if (outcome.accepted > 0) tally.note(tally.accepted, kind, outcome.accepted)
@@ -453,7 +510,8 @@ class OutboxDrainer(
         tally: DrainTally,
     ): Outcome {
         while (true) {
-            val entries = dao.take(files.kind, FILE_BATCH, tally.readyAt, uploads.enrollment)
+            val entries =
+                take(files.kind, FILE_BATCH, uploads.settings, tally) ?: return Outcome.RETRY
             if (entries.isEmpty()) return Outcome.DONE
             for (entry in entries) {
                 val file = entry.filePath?.let(::File)
@@ -489,8 +547,11 @@ class OutboxDrainer(
                     continue
                 }
                 val size = source.size
-                if (entry.kind == OutboxKind.RECORDING && entry.source == null) {
-                    dao.stampLegacyRecording(entry.id, size, source.modifiedAt)
+                if (entry.kind == OutboxKind.RECORDING && entry.source == null &&
+                    dao.stampLegacyRecording(entry.id, size, source.modifiedAt) == 0
+                ) {
+                    debug(TAG) { "Legacy recording row ${entry.id} changed before upload" }
+                    continue
                 }
                 if (size > OutboxLimits.MAX_FILE_BYTES) {
                     deferRuledOn(
@@ -507,7 +568,7 @@ class OutboxDrainer(
                 }
 
                 val payload = attempt {
-                    files.decode(entry.payload)
+                    files.decode(entry.payload, file, source)
                 }.getOrElse {
                     abandon(
                         tally,
@@ -536,11 +597,11 @@ class OutboxDrainer(
                     )
                     continue
                 }
-                suspend fun send(verifiedBody: FileBody): UploadOutcome {
-                    tally.bytesLeft -= wireSize
-                    tally.attempted = true
-                    return uploads.post(files.suffix, verifiedBody)
-                }
+                suspend fun send(verifiedBody: FileBody): UploadOutcome =
+                    post(uploads.settings, tally) {
+                        tally.bytesLeft -= wireSize
+                        uploads.post(files.suffix, verifiedBody)
+                    }
 
                 val outcome = attempt {
                     val document = payload.document
@@ -586,6 +647,8 @@ class OutboxDrainer(
                     "${files.noun} row ${entry.id} answered ${outcome.diagnostic()}"
                 }
                 when (outcome) {
+                    UploadOutcome.CredentialsUnavailable -> return credentialsUnavailable(tally)
+
                     is UploadOutcome.Success, is UploadOutcome.Duplicate -> {
                         val success = outcome as? UploadOutcome.Success
                         learn(tally, success?.limitBytes)
@@ -607,7 +670,7 @@ class OutboxDrainer(
                             tally.note(tally.accepted, files.kind, 1)
                             payload.document?.let(tally.deliveredDocuments::add)
                         }
-                        cleanup.acknowledge(entry, source, now())
+                        cleanup.acknowledge(entry.id, now())
                     }
 
                     is UploadOutcome.Rejected -> abandon(
@@ -723,7 +786,7 @@ class OutboxDrainer(
     ): Outcome {
         dao.markFailed(ids, reason)
         tally.lastError = reason
-        tally.linkDown = linkDown
+        tally.stopAfterKind = linkDown
         return Outcome.RETRY
     }
 
@@ -768,10 +831,10 @@ class OutboxDrainer(
             "recording",
             "recording",
             FileBody.AUDIO_KEY,
-        ) {
+        ) { payload, _, _ ->
             FilePayload(
                 WireJson.encodeToJsonElement(
-                    WireJson.decodeFromString<RecordingMetadata>(it)
+                    WireJson.decodeFromString<RecordingMetadata>(payload)
                 ).jsonObject
             )
         }
@@ -781,8 +844,8 @@ class OutboxDrainer(
             "document",
             "document",
             FileBody.FILE_KEY,
-        ) {
-            val document = QueuedDocument.decode(it)
+        ) { payload, file, stamp ->
+            val document = QueuedDocument.decode(payload).fromInbox(file.path, stamp.modifiedAt)
             FilePayload(WireJson.encodeToJsonElement(document.metadata).jsonObject, document)
         }
 
@@ -791,14 +854,20 @@ class OutboxDrainer(
             "document",
             "scan",
             FileBody.FILE_KEY,
-        ) {
+        ) { payload, _, _ ->
             FilePayload(
                 WireJson.encodeToJsonElement(
-                    WireJson.decodeFromString<DocumentMetadata>(it)
+                    WireJson.decodeFromString<DocumentMetadata>(payload)
                 ).jsonObject
             )
         }
 
         private val drainLock = Mutex()
+
+        // A held-row decision must observe the outcome of requests already using those rows.
+        private val ownershipLock = Mutex()
+
+        internal suspend fun <T> withQueueOwnership(action: suspend () -> T): T =
+            ownershipLock.withLock { action() }
     }
 }

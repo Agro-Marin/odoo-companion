@@ -181,6 +181,33 @@ class DeviceConfig(
         null
     }
 
+    // Serialize the outbox decision with form saves and managed enrolment changes.
+    // The action only touches Room. Scheduling the upload happens after this edit.
+    suspend fun withCurrentEnrollment(expected: String, action: suspend () -> Unit): Settings? =
+        withCurrentSettings({ it.enrollment == expected }, action)
+
+    suspend fun withCurrentCredentials(expected: Settings, action: suspend () -> Unit): Boolean =
+        withCurrentSettings(expected::sameCredentialsAs, action) != null
+
+    private suspend fun withCurrentSettings(
+        matches: (Settings) -> Boolean,
+        action: suspend () -> Unit,
+    ): Settings? = try {
+        var owner: Settings? = null
+        store.updateData { prefs ->
+            val current = prefs.toSettings()
+            if (matches(current)) {
+                action()
+                owner = current
+            }
+            prefs
+        }
+        owner
+    } catch (unreadable: IOException) {
+        Log.w(TAG, "Cannot confirm the current enrolment", unreadable)
+        null
+    }
+
     suspend fun saveForm(form: FormValues): EnrollmentResult {
         var result: EnrollmentResult = EnrollmentResult.Saved
         store.edit { prefs ->

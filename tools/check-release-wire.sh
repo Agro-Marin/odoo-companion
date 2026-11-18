@@ -20,28 +20,17 @@ unzip -qo "$apk" -d "$work" 'classes*.dex'
 
 status=0
 
-serializable=$(grep -rl '^@Serializable' "$SRC" \
-    | xargs -r grep -hE '^(private |internal )?data class' \
-    | sed -E 's/^(private |internal )?data class ([A-Za-z0-9_]*).*/\2/' | sort -u)
-[ -n "$serializable" ] || { echo "found no @Serializable classes -- check the source layout" >&2; exit 1; }
-
-for cls in $serializable; do
-    if grep -qE "^com\.odoocompanion\.[a-z.]+\.$cls\\\$\\\$serializer ->" "$MAPPING"; then
-        echo "  ok    $cls\$\$serializer kept"
-    else
-        echo "  FAIL  $cls\$\$serializer was dropped by R8" >&2
-        status=1
-    fi
-done
-
-wire=$(python3 - "$SRC" "$work" <<'PYEOF'
+python3 - "$SRC" "$work" "$MAPPING" <<'PYEOF' || status=1
 import pathlib, re, sys
-src, work = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+src, work, mapping = map(pathlib.Path, sys.argv[1:])
 dex = b"".join(p.read_bytes() for p in sorted(work.glob("classes*.dex")))
+serializers = set()
 keys = set()
 for path in src.rglob("*.kt"):
     text = path.read_text()
-    for cls in re.finditer(r"@Serializable\s+(?:private |internal )?data class \w+\(", text):
+    for cls in re.finditer(r"^@Serializable\s+(?:private |internal )?data class (\w+)\(", text, re.M):
+        package = re.search(r"^package ([\w.]+)", text, re.M)[1]
+        serializers.add(f"{package}.{cls[1]}$$serializer")
         depth, end = 1, cls.end()
         while depth:
             depth += {"(": 1, ")": -1}.get(text[end], 0)
@@ -49,22 +38,29 @@ for path in src.rglob("*.kt"):
         params = text[cls.end():end - 1]
         for sn, name in re.findall(r'(?:@SerialName\("([^"]+)"\)\s*)?val (\w+)', params):
             keys.add(sn or name)
-if not keys:
-    print("FAIL no wire keys found -- check the source layout")
+if not serializers or not keys:
+    sys.exit("FAIL no serializable classes or wire keys found -- check the source layout")
+
+with mapping.open() as lines:
+    kept = {line.partition(" -> ")[0] for line in lines if "$$serializer -> " in line}
+
+passed = True
+for name in sorted(serializers):
+    if name in kept:
+        print(f"  ok    {name} kept")
+    else:
+        print(f"  FAIL  {name} was dropped by R8", file=sys.stderr)
+        passed = False
 for key in sorted(keys):
     raw = key.encode()
     entry = bytes([len(raw)]) + raw + b"\0"
-    print(("ok  " if entry in dex else "FAIL") + " " + key)
+    if entry in dex:
+        print(f'  ok    "{key}" present in the dex')
+    else:
+        print(f'  FAIL  "{key}" is not in the minified dex', file=sys.stderr)
+        passed = False
+sys.exit(0 if passed else 1)
 PYEOF
-)
-while read -r verdict key; do
-    if [ "$verdict" = "ok" ]; then
-        echo "  ok    \"$key\" present in the dex"
-    else
-        echo "  FAIL  \"$key\" is not in the minified dex" >&2
-        status=1
-    fi
-done <<< "$wire"
 
 RESTRICTIONS=app/src/main/res/xml/app_restrictions.xml
 aapt2=$(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$(sed -n 's/^sdk.dir=//p' local.properties 2>/dev/null)}}/build-tools" \

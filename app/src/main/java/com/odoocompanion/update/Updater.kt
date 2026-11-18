@@ -9,9 +9,12 @@ import android.util.Log
 import androidx.core.content.edit
 import androidx.core.content.pm.PackageInfoCompat
 import com.odoocompanion.net.WireJson
+import com.odoocompanion.net.readResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -73,20 +76,22 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
     fun dueForCheck(now: Long = System.currentTimeMillis()): Boolean =
         now - prefs.getLong(KEY_CHECKED_AT, 0) >= CHECK_EVERY_MILLIS
 
-    suspend fun check(): UpdateCheck = withContext(Dispatchers.IO) {
+    suspend fun check(): UpdateCheck = checkLock.withLock { checkFeed() }
+
+    private suspend fun checkFeed(): UpdateCheck = withContext(Dispatchers.IO) {
         val body = try {
-            fetch(UpdateFeed.LATEST + UpdateFeed.MANIFEST).use { response ->
+            call(UpdateFeed.LATEST + UpdateFeed.MANIFEST).readResponse { response ->
                 if (!response.isSuccessful) {
-                    return@withContext UpdateCheck.Failed("HTTP ${response.code}")
+                    throw IOException("HTTP ${response.code}")
                 }
                 val manifest = response.peekBody(MAX_MANIFEST_BYTES + 1)
                 if (manifest.contentLength() > MAX_MANIFEST_BYTES) {
-                    return@withContext UpdateCheck.Failed("oversized update manifest")
+                    throw IOException("oversized update manifest")
                 }
                 manifest.string()
             }
         } catch (e: IOException) {
-            Log.w(TAG, "Could not reach the update feed", e)
+            Log.w(TAG, "Could not read the update feed", e)
             return@withContext UpdateCheck.Failed(e.message ?: e.javaClass.simpleName)
         }
         val manifest = UpdateFeed.parse(body)
@@ -143,13 +148,13 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
         return InstallStart.Failed(failure.message ?: failure.javaClass.simpleName)
     }
 
-    private fun fetch(url: String) = http.newCall(Request.Builder().url(url).build()).execute()
+    private fun call(url: String) = http.newCall(Request.Builder().url(url).build())
 
     // Into the app's cache, checked against the manifest's size and digest
     // before Android ever sees it.
     private fun download(manifest: UpdateManifest, target: File) {
         val digest = MessageDigest.getInstance("SHA-256")
-        fetch(UpdateFeed.apkUrl(manifest)).use { response ->
+        call(UpdateFeed.apkUrl(manifest)).execute().use { response ->
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
             response.body.byteStream().use { input ->
                 target.outputStream().use { output ->
@@ -220,6 +225,8 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
     }
 
     companion object {
+        private val checkLock = Mutex()
+
         private val step = MutableStateFlow<UpdateStep?>(null)
 
         @Synchronized

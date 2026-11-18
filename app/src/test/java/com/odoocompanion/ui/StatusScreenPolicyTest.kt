@@ -130,7 +130,11 @@ class StatusScreenPolicyTest {
         val held = StatusScreen.panel(enrolled, health(), queues, false, false).held
 
         assertEquals(
-            HeldQueue(3, "phone-01@https://old.example.com/odoo", "old.example.com/odoo, phone-01"),
+            HeldQueue(
+                3,
+                "phone-01@https://old.example.com/odoo",
+                requireNotNull(enrolled.enrollment)
+            ),
             held,
         )
         assertEquals(
@@ -194,18 +198,30 @@ class StatusScreenPolicyTest {
     @Test
     fun `a held enrolment is named by the server it was for, port and path included`() {
         assertEquals(
-            "10.0.2.2:18650, phone-01",
+            "http://10.0.2.2:18650, phone-01",
             StatusScreen.describe("phone-01@http://10.0.2.2:18650")
         )
         assertEquals(
-            "odoo.example.com, phone-01",
+            "https://odoo.example.com, phone-01",
             StatusScreen.describe(
                 Settings("https://Odoo.Example.com:443/", "phone-01", "t").enrollment!!
             ),
         )
         assertEquals(
-            "example.com/erp, phone-01",
+            "https://example.com/erp, phone-01",
             StatusScreen.describe("phone-01@https://example.com/erp")
+        )
+    }
+
+    @Test
+    fun `an enrolment label distinguishes schemes and omits URL credentials and parameters`() {
+        assertEquals(
+            "https://example.com/erp, phone",
+            StatusScreen.describe("phone@https://user:password@example.com/erp?token=value#detail"),
+        )
+        assertEquals(
+            "http://example.com/erp, phone",
+            StatusScreen.describe("phone@http://example.com/erp")
         )
     }
 

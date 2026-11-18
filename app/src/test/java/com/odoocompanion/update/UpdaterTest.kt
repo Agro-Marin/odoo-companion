@@ -6,9 +6,13 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
+import com.odoocompanion.net.WireJson
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import okhttp3.Call
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
@@ -47,10 +51,13 @@ class UpdaterTest {
         shadowOf(context.packageManager).setCanRequestPackageInstalls(true)
     }
 
-    private fun updater(body: () -> ByteArray): Updater {
-        val client = OkHttpClient.Builder().addInterceptor { chain ->
+    private fun updater(
+        builder: OkHttpClient.Builder = OkHttpClient.Builder(),
+        body: (Call) -> ByteArray,
+    ): Updater {
+        val client = builder.addInterceptor { chain ->
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
-                .code(200).message("OK").body(body().toResponseBody()).build()
+                .code(200).message("OK").body(body(chain.call()).toResponseBody()).build()
         }.build()
         return Updater(context, client)
     }
@@ -161,6 +168,68 @@ class UpdaterTest {
     class FailingSession : ShadowPackageInstaller.ShadowSession() {
         @Implementation
         override fun fsync(out: OutputStream) = throw IOException("test fsync")
+    }
+
+    @Test
+    fun `a slow automatic check cannot overwrite the result of a later manual check`() =
+        runBlocking(Dispatchers.IO) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val requests = AtomicInteger()
+            val newer = manifest.copy(versionCode = Long.MAX_VALUE)
+            val older = newer.copy(versionCode = Long.MAX_VALUE - 1)
+            val network = Dispatcher()
+            val update = updater(OkHttpClient.Builder().dispatcher(network)) {
+                val result = if (requests.incrementAndGet() == 1) {
+                    entered.countDown()
+                    older
+                } else {
+                    newer
+                }
+                check(release.await(5, TimeUnit.SECONDS))
+                WireJson.encodeToString(UpdateManifest.serializer(), result).toByteArray()
+            }
+
+            val auto = async(Dispatchers.IO) { update.check() }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val manual = async(start = CoroutineStart.UNDISPATCHED) { update.check() }
+            try {
+                // Both coroutines started on IO. An overlapping call would already be enqueued.
+                assertEquals(1, network.runningCallsCount() + network.queuedCallsCount())
+            } finally {
+                release.countDown()
+            }
+            assertEquals(UpdateCheck.Available(older), auto.await())
+            assertEquals(UpdateCheck.Available(newer), manual.await())
+            assertEquals(newer, update.known())
+        }
+
+    @Test
+    fun `cancelled checks leave the next activity free to check again`() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val published = manifest.copy(versionCode = Long.MAX_VALUE)
+        val payload = WireJson.encodeToString(UpdateManifest.serializer(), published).toByteArray()
+        lateinit var request: Call
+        val update = updater { call ->
+            request = call
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            payload
+        }
+        val check = async(Dispatchers.IO) { update.check() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            check.cancel()
+            assertTrue(request.isCanceled())
+        } finally {
+            release.countDown()
+        }
+        check.join()
+        assertNull(update.known())
+        assertTrue(update.dueForCheck())
+        assertEquals(UpdateCheck.Available(published), update.check())
+        assertEquals(published, update.known())
     }
 
     @Test

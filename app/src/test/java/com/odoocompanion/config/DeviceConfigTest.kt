@@ -6,6 +6,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
@@ -126,6 +128,29 @@ class DeviceConfigTest {
         }
 
         assertNull(DeviceConfig(unreadable).currentOrNull())
+    }
+
+    @Test
+    fun `a held queue confirmation waits for an in-progress enrolment change`() = runTest {
+        val leaving = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val file = File.createTempFile("moving", ".preferences_pb").apply { delete() }
+        temporaryFiles += file
+        val config = DeviceConfig(PreferenceDataStoreFactory.create { file }) {
+            leaving.complete(Unit)
+            finish.await()
+        }
+        val url = "https://odoo.example.com"
+        config.enrol(url, "phone-b", "t")
+        val destination = requireNotNull(config.current().enrollment)
+        val move = async { config.enrol(url, "phone-c", "t") }
+        leaving.await()
+        val confirmation = async(start = CoroutineStart.UNDISPATCHED) {
+            config.withCurrentEnrollment(destination) { error("The old dialog changed the queue") }
+        }
+        finish.complete(Unit)
+        assertEquals(EnrollmentResult.Saved, move.await())
+        assertNull(confirmation.await())
     }
 
     @Test

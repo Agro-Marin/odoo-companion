@@ -34,6 +34,7 @@ import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.ui.Appearance
 import com.odoocompanion.ui.ScanWidget
+import com.odoocompanion.update.Updater
 import com.odoocompanion.whatsapp.DocumentReader
 import com.odoocompanion.whatsapp.SightingStore
 import com.odoocompanion.whatsapp.WhatsAppDocuments
@@ -62,6 +63,8 @@ open class CompanionApp : Application() {
             .addMigrations(*COMPANION_MIGRATIONS)
             .build()
     }
+
+    open val updater: Updater by lazy { Updater(this) }
 
     val softphones: SoftphoneStore by lazy { SoftphoneStore(this, config) }
 

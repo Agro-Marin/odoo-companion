@@ -7,6 +7,7 @@ import com.odoocompanion.config.Settings
 import com.odoocompanion.data.OutboxCounts
 import com.odoocompanion.system.Blocker
 import com.odoocompanion.system.HealthReport
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 sealed interface StatusLine {
     val text: Int
@@ -34,7 +35,7 @@ data class StatusPanel(
     val held: HeldQueue?,
 )
 
-data class HeldQueue(val rows: Int, val enrollment: String, val collectedFor: String)
+data class HeldQueue(val rows: Int, val from: String, val destination: String)
 
 object StatusScreen {
     fun panel(
@@ -74,15 +75,19 @@ object StatusScreen {
             lastAttempt = StatusLine.Since(R.string.status_last_attempt, settings.lastAttemptAt)
                 .takeIf { settings.lastAttemptAt > settings.lastUploadAt },
             queues = queues,
-            held = queues.heldFor
-                ?.takeIf { queues.held > 0 && settings.enrollment != null }
-                ?.let { HeldQueue(queues.held, it, describe(it)) },
+            held = settings.enrollment?.let { destination ->
+                queues.heldFor?.takeIf { queues.held > 0 && it != destination }
+                    ?.let { HeldQueue(queues.held, it, destination) }
+            },
         )
     }
 
     fun describe(enrollment: String): String {
-        val server = enrollment.substringAfter('@').substringAfter("://")
-        return "$server, ${enrollment.substringBefore('@')}"
+        val device = enrollment.substringBefore('@')
+        val server = enrollment.substringAfter('@').toHttpUrlOrNull() ?: return device
+        val address = server.newBuilder().username("").password("").query(null).fragment(null)
+            .build().toString().trimEnd('/')
+        return "$address, $device"
     }
 
     const val SMALLEST_MOBILE_CAP_BYTES = 8L * 1024 * 1024

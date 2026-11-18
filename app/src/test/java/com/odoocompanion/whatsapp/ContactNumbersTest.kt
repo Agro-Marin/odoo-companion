@@ -33,6 +33,20 @@ class ContactNumbersTest {
     }
 
     @Test
+    fun `different international prefixes do not become one contact through a shared suffix`() {
+        assertNull(
+            ContactNumbers.choose(
+                emptyList(),
+                listOf("+1 551 234 5678", "+52 55 1234 5678", "5512345678")
+            )
+        )
+        assertEquals(
+            "5215512345678",
+            ContactNumbers.choose(emptyList(), listOf("+52 1 55 1234 5678", "+52 55 1234 5678")),
+        )
+    }
+
+    @Test
     fun `two lines under one name are not guessed between`() {
         assertNull(ContactNumbers.choose(emptyList(), listOf("55 1234 5678", "33 1111 2222")))
         assertNull(
@@ -73,13 +87,24 @@ class ContactNumbersTest {
     fun `notices without a number take the contacts', each name asked once`() {
         val asked = mutableListOf<String>()
         val numbered = WhatsAppNotices.withNumbers(
-            listOf(notice("Yop"), notice("Yop"), notice("Juan", phone = "521999")),
+            listOf(
+                notice("Yop"),
+                notice("Yop"),
+                notice("Juan", phone = "521999"),
+                notice("Missing"),
+                notice("Missing")
+            ),
         ) { name ->
             asked += name
             "5215512345678".takeIf { name == "Yop" }
         }
 
-        assertEquals(listOf("5215512345678", "5215512345678", "521999"), numbered.map { it.phone })
-        assertEquals(listOf("Yop"), asked)
+        assertEquals(
+            listOf("5215512345678", "5215512345678", "521999", null, null),
+            numbered.map {
+                it.phone
+            }
+        )
+        assertEquals(listOf("Yop", "Missing"), asked)
     }
 }

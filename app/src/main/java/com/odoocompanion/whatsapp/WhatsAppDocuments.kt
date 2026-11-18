@@ -4,7 +4,30 @@ import com.odoocompanion.data.FileStamp
 import java.io.File
 import java.io.IOException
 
-data class DocumentFile(val path: String, val name: String, val modifiedAt: Long, val size: Long) {
+internal enum class WhatsAppInbox(val app: String, val source: String) {
+    PERSONAL(WhatsAppNotices.WHATSAPP, "WhatsApp"),
+    BUSINESS(WhatsAppNotices.WHATSAPP_BUSINESS, "WhatsApp Business");
+
+    val legacy = "$source/Media/$source Documents"
+    val modern = "Android/media/$app/$legacy"
+
+    companion object {
+        fun containing(path: String): WhatsAppInbox? {
+            val parent = File(path).toPath().parent ?: return null
+            return entries.firstOrNull {
+                parent.endsWith(it.legacy) || parent.parent?.endsWith(it.legacy) == true
+            }
+        }
+    }
+}
+
+data class DocumentFile(
+    val path: String,
+    val name: String,
+    val modifiedAt: Long,
+    val size: Long,
+    val app: String = WhatsAppNotices.WHATSAPP,
+) {
     val stamp: FileStamp get() = FileStamp(size, modifiedAt)
 
     private val sha256: String? by lazy(LazyThreadSafetyMode.NONE) {
@@ -23,15 +46,18 @@ data class DocumentFile(val path: String, val name: String, val modifiedAt: Long
 }
 
 class WhatsAppDocuments(private val root: File) {
-    fun scan(): List<DocumentFile> = CANDIDATE_DIRECTORIES
-        .map { File(root, it) }
-        .filter { it.isDirectory }
-        .flatMap { it.received().maxDepth(MAX_DEPTH) }
-        .filter { it.isFile && !it.name.startsWith(".") }
-        .distinctBy { it.absolutePath }
-        .map { DocumentFile(it.absolutePath, it.name, it.lastModified(), it.length()) }
+    fun scan(): List<DocumentFile> = inboxes.flatMap { (relative, inbox) ->
+        val directory = File(root, relative)
+        if (!directory.isDirectory) return@flatMap emptyList()
+        directory.received().maxDepth(MAX_DEPTH)
+            .filter { it.isFile && !it.name.startsWith(".") }
+            .map {
+                DocumentFile(it.absolutePath, it.name, it.lastModified(), it.length(), inbox.app)
+            }
+            .toList()
+    }
 
-    fun watchedDirectories(): List<File> = CANDIDATE_DIRECTORIES
+    fun watchedDirectories(): List<File> = inboxes.keys
         .map { File(root, it) }
         .filter { it.isDirectory }
         .flatMap { it.received().maxDepth(MAX_DEPTH - 1).filter(File::isDirectory) }
@@ -42,25 +68,12 @@ class WhatsAppDocuments(private val root: File) {
         walkTopDown().onEnter { it.name.lowercase() !in NOT_RECEIVED_DIRECTORIES }
 
     companion object {
-        val CANDIDATE_DIRECTORIES = listOf(
-            "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Documents",
-            "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/" +
-                "WhatsApp Business Documents",
-            "WhatsApp/Media/WhatsApp Documents",
-            "WhatsApp Business/Media/WhatsApp Business Documents",
-        )
+        private val inboxes = WhatsAppInbox.entries.associateBy { it.modern } +
+            WhatsAppInbox.entries.associateBy { it.legacy }
 
         val NOT_RECEIVED_DIRECTORIES = setOf("sent", "private")
 
         private const val MAX_DEPTH = 2
-
-        fun appOf(path: String): String = if (
-            WhatsAppNotices.WHATSAPP_BUSINESS in path || "WhatsApp Business" in path
-        ) {
-            WhatsAppNotices.WHATSAPP_BUSINESS
-        } else {
-            WhatsAppNotices.WHATSAPP
-        }
     }
 }
 
@@ -76,8 +89,14 @@ object DocumentMatcher {
         notice: DocumentNotice,
         files: List<DocumentFile>,
         claimed: Set<String>,
-    ): DocumentFile? {
-        val free = files.filterNot { it.path in claimed }
+    ): DocumentFile? = closest(notice, files, claimed).singleOrNull()
+
+    internal fun closest(
+        notice: DocumentNotice,
+        files: List<DocumentFile>,
+        claimed: Set<String>,
+    ): List<DocumentFile> {
+        val free = files.filter { it.app == notice.app && it.path !in claimed }
         val sameName = namePattern(notice.label)
         val candidates = if (sameName != null) {
             free.filter {
@@ -89,7 +108,10 @@ object DocumentMatcher {
                 it.modifiedAt - notice.at in -CAPTION_SLACK_MILLIS..CAPTION_SLACK_MILLIS
             }
         }
-        return candidates.minByOrNull { kotlin.math.abs(it.modifiedAt - notice.at) }
+        val distance =
+            candidates.minOfOrNull { kotlin.math.abs(it.modifiedAt - notice.at) }
+                ?: return emptyList()
+        return candidates.filter { kotlin.math.abs(it.modifiedAt - notice.at) == distance }
     }
 
     private fun namePattern(label: String): Regex? {

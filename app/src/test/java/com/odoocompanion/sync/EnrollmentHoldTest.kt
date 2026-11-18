@@ -1,6 +1,8 @@
 package com.odoocompanion.sync
 
 import android.app.Application
+import android.database.sqlite.SQLiteException
+import android.util.Log
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -24,16 +26,22 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.Call
+import okhttp3.EventListener
+import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -44,6 +52,7 @@ class EnrollmentHoldTest {
 
     @Before
     fun setUp() {
+        ShadowLog.setLoggable("OutboxDrainer", Log.DEBUG)
         database = Room.inMemoryDatabaseBuilder(
             ApplicationProvider.getApplicationContext(),
             CompanionDatabase::class.java,
@@ -139,12 +148,64 @@ class EnrollmentHoldTest {
     }
 
     @Test
+    fun `sending held rows leaves permanent refusals with their original enrolment`() = runTest {
+        val refused = queueCall(previous)
+        dao.markDeadIds(listOf(refused), NOW, "refused", DeadReason.REFUSED)
+        queueCall(previous)
+
+        assertEquals(1, dao.counts(current).first().held)
+        assertEquals(1, dao.adoptHeld(current, previous))
+        assertEquals(0, dao.counts(current).first().undeliverable)
+        assertEquals(1, dao.counts(previous).first().undeliverable)
+    }
+
+    @Test
+    fun `the new enrolment can send held rows immediately after the old one backed off`() =
+        runTest {
+            val waiting = queueCall(previous)
+            dao.markFailed(listOf(waiting), "busy", serverFault = true, retryAfter = NOW + 60_000)
+            val exhausted = queueCall(previous, at = 2)
+            dao.markDeadIds(listOf(exhausted), NOW, "budget", DeadReason.BUDGET)
+            val unreadable = queueCall(previous, at = 3)
+            dao.markDeadIds(listOf(unreadable), NOW, "format", DeadReason.UNDECODABLE)
+
+            assertEquals(3, dao.adoptHeld(current, previous))
+            val ready = dao.take(OutboxKind.CALL_LOG, 10, NOW, current)
+            assertEquals(listOf(waiting, exhausted), ready.map { it.id })
+            assertEquals(0, ready.first().attempts)
+            assertNull(ready.first().lastError)
+            assertFalse(ready.first().serverFault)
+            accept(2)
+            drainer().drainAll()
+            assertEquals(1, server.requestCount)
+            assertEquals(1, dao.counts(current).first().undeliverable)
+        }
+
+    @Test
+    fun `an interrupted retention pass leaves the held group intact`() = runTest {
+        val old = NOW - OutboxLimits.DEAD_RETENTION_MILLIS - 1
+        queuePosition(previous, createdAt = old)
+        queueCall(previous, createdAt = old)
+        database.openHelper.writableDatabase.execSQL(
+            """CREATE TRIGGER interrupt_withdrawal BEFORE UPDATE OF deadReason ON outbox
+                WHEN NEW.deadReason = 'withdrawn'
+                BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END"""
+        )
+
+        val failure = runCatching { drainer().drainAll() }.exceptionOrNull()
+        assertTrue(failure.toString(), failure is SQLiteException)
+        assertEquals(2, dao.counts(current).first().held)
+    }
+
+    @Test
     fun `discarded, positions go and the rest is withdrawn, never undeliverable`() = runTest {
         queueCall(previous)
         queuePosition(previous)
+        val older = queuePosition(previous)
+        dao.markDeadIds(listOf(older), NOW, "budget", DeadReason.BUDGET)
+        assertEquals(3, dao.counts(current).first().held)
 
-        dao.deleteHeldPositions(current, previous)
-        dao.withdrawHeld(current, previous, NOW)
+        assertEquals(2, dao.discardHeld(current, previous, NOW).positions)
         drainer().drainAll()
 
         assertEquals(0, server.requestCount)
@@ -168,6 +229,88 @@ class EnrollmentHoldTest {
         assertEquals("the old position went as positions go", 1, report.discarded)
         assertEquals("the old call is set aside", 1, dao.countDead())
         assertEquals("the young call is still held", 1, dao.counts(current).first().held)
+    }
+
+    @Test
+    fun `a drain cannot take unstamped calls collected after its enrolment changed`() =
+        runTest { changeDuringUpload(PREVIOUS_DEVICE) }
+
+    @Test
+    fun `a credential rotation stops the old worker before its next batch`() =
+        runTest { changeDuringUpload(CURRENT_DEVICE) }
+
+    private suspend fun changeDuringUpload(nextDevice: String) {
+        val snapshot = settings()
+        val dbFile = File.createTempFile("config", ".preferences_pb").apply { delete() }
+        try {
+            val config = DeviceConfig(PreferenceDataStoreFactory.create { dbFile }) {
+                dao.claimUnstamped(it)
+            }
+            config.enrol(snapshot.baseUrl, CURRENT_DEVICE, "t")
+            queuePosition(current)
+            accept(1)
+            accept(1)
+            val checking = AtomicBoolean()
+            val startedUnderCurrentCredentials = mutableListOf<Boolean>()
+            val http = OkHttpClient.Builder().eventListener(object : EventListener() {
+                override fun callStart(call: Call) {
+                    startedUnderCurrentCredentials += checking.get()
+                }
+            }).build()
+            val client = OdooClient(http, onServerNamedItself = {
+                config.enrol(snapshot.baseUrl, nextDevice, "other")
+                queueCall(null)
+            })
+            val report = OutboxDrainer(
+                dao,
+                client,
+                { NOW },
+                withCurrentCredentials = { owner, action ->
+                    config.withCurrentCredentials(owner) {
+                        checking.set(true)
+                        try {
+                            action()
+                        } finally {
+                            checking.set(false)
+                        }
+                    }
+                },
+            ) { snapshot }.drainAll()
+
+            assertEquals(listOf(true), startedUnderCurrentCredentials)
+            assertEquals(1, server.requestCount)
+            assertEquals(1, dao.counts(config.current().enrollment).first().calls)
+            assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+        } finally {
+            dbFile.delete()
+        }
+    }
+
+    @Test
+    fun `a superseded drain leaves the restored enrolment intact and sends nothing`() = runTest {
+        val snapshot = settings()
+        val dbFile = File.createTempFile("config", ".preferences_pb").apply { delete() }
+        try {
+            val config = DeviceConfig(PreferenceDataStoreFactory.create { dbFile })
+            config.enrol(snapshot.baseUrl, PREVIOUS_DEVICE, "t")
+            queuePosition(previous, createdAt = NOW - OutboxLimits.DEAD_RETENTION_MILLIS - 1)
+            queueCall(current)
+            accept(1)
+
+            val report = OutboxDrainer(
+                dao,
+                OdooClient(),
+                { NOW },
+                withCurrentCredentials = config::withCurrentCredentials,
+            ) { snapshot }.drainAll()
+
+            assertEquals(OutboxDrainer.Outcome.RETRY, report.outcome)
+            assertEquals(1, dao.counts(previous).first().positions)
+            assertEquals(1, dao.counts(current).first().calls)
+            assertEquals(0, server.requestCount)
+        } finally {
+            dbFile.delete()
+        }
     }
 
     @Test
@@ -237,8 +380,7 @@ class EnrollmentHoldTest {
         assertEquals(oldest, after.heldFor)
         assertEquals(1, after.held)
 
-        dao.deleteHeldPositions(current, oldest)
-        dao.withdrawHeld(current, oldest, NOW)
+        dao.discardHeld(current, oldest, NOW)
         assertEquals(0, dao.counts(current).first().held)
         assertEquals(2, dao.counts(current).first().calls)
     }

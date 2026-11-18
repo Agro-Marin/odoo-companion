@@ -30,9 +30,10 @@
     <string name="action_held_send">Enviar aquí</string>
     <string name="action_held_discard">Descartar</string>
     <string name="held_send_title">¿Enviar a este servidor?</string>
-    <string name="held_send_message">Se reunieron para %1$s. Envíalos aquí solo si este servidor es el mismo Odoo con otra dirección o el mismo dispositivo con otro nombre.</string>
+    <string name="held_send_message">Estos registros se reunieron para %1$s. Envíalos a %2$s solo si es el mismo Odoo con otra dirección o el mismo dispositivo con otro nombre.</string>
     <string name="held_discard_title">¿Descartarlos?</string>
-    <string name="held_discard_message">Las posiciones se borran; las llamadas, grabaciones y documentos se apartan y se eliminan en 90 días. Ninguno se enviará.</string>
+    <string name="held_action_retry">No se pudo actualizar la cola pendiente. Revisa la configuración actual del dispositivo y vuelve a intentarlo.</string>
+    <string name="held_discard_message">¿Descartar los registros pendientes de %1$s? Las posiciones se borran de inmediato. Las llamadas, grabaciones y documentos se apartan y se eliminan después de 90 días.</string>
     <plurals name="status_undeliverable">
         <item quantity="one">%1$d registro no se pudo entregar y ya no se reintenta</item>
         <item quantity="many">%1$d registros no se pudieron entregar y ya no se reintentan</item>

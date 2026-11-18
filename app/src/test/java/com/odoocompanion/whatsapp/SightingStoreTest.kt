@@ -1,13 +1,16 @@
 package com.odoocompanion.whatsapp
 
 import android.app.Application
+import android.util.Log
 import com.odoocompanion.data.DeadReason
+import com.odoocompanion.data.FileStamp
 import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.data.UploadState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -17,6 +20,7 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
@@ -54,6 +58,242 @@ class SightingStoreTest {
         assertEquals(1, store.record(listOf(notice("CSF.pdf"))))
         assertEquals(0, store.record(listOf(notice("CSF.pdf"))))
         assertEquals(1, store.sightings.value?.size)
+    }
+
+    @Test
+    fun `a notification-time fallback cannot hide two later timestamped messages`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val store = store()
+        val fallback = notice("ID.pdf", clock)
+        store.record(listOf(fallback))
+        val first = fallback.copy(at = clock + 1, hasMessageTime = true)
+        val second = first.copy(at = clock + 2)
+        assertEquals(1, store.record(listOf(first, second)))
+        assertEquals(listOf(second.at, first.at), store.sightings.value!!.map { it.at })
+        assertEquals(0, store().record(listOf(first, second)))
+    }
+
+    @Test
+    fun `different known numbers distinguish direct chats with the same display name`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val first = notice("ID.pdf")
+        assertEquals(2, store().record(listOf(first, first.copy(phone = "234567890"))))
+    }
+
+    @Test
+    fun `a group sender without a number cannot claim a namesake's verified identity`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        onDisk = listOf(DocumentFile("/w/ID.pdf", "ID.pdf", clock, 42))
+        val first = notice("ID.pdf", clock).copy(isGroup = true, sender = "Alex")
+        val store = store()
+        store.record(listOf(first))
+        val next = first.copy(at = clock + Sighting.SAME_MESSAGE_MILLIS + 1, phone = null)
+        clock = next.at + SightingStore.RESEND_SETTLE_MILLIS
+        store.record(listOf(next))
+        assertFalse(store.sightings.value!!.first().found)
+    }
+
+    @Test
+    fun `distinct message timestamps survive rapid same-sender attachments and restart`() =
+        runTest {
+            ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+            val chat = NoticeFields(
+                WhatsAppNotices.WHATSAPP,
+                "Team",
+                isGroup = true,
+                messages = listOf(NoticeMessage("📄 ID.pdf", "Ana", time = clock)),
+                postedAt = clock,
+            )
+            val first = WhatsAppNotices.documents(chat)
+            assertEquals(1, store().record(first))
+            val second = WhatsAppNotices.documents(
+                chat.copy(
+                    messages = listOf(
+                        chat.messages.single().copy(
+                            time =
+                            clock + 1
+                        )
+                    )
+                )
+            )
+            assertEquals(1, store().record(second))
+            assertEquals(0, store().record(first + second))
+        }
+
+    @Test
+    fun `a resend waits when two earlier downloads from that sender are plausible`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val store = store()
+        val first = notice("ID.pdf", clock)
+        onDisk = listOf(DocumentFile("/w/ID.pdf", "ID.pdf", clock, 16))
+        store.record(listOf(first))
+        clock += Sighting.SAME_MESSAGE_MILLIS + 1
+        onDisk = onDisk + DocumentFile("/w/ID (1).pdf", "ID (1).pdf", clock, 32)
+        store.record(listOf(first.copy(at = clock)))
+        clock += 3_600_000L
+        val last = first.copy(at = clock)
+        clock += SightingStore.RESEND_SETTLE_MILLIS
+        store.record(listOf(last))
+        assertFalse(store.sightings.value!!.first().found)
+        onDisk = onDisk.drop(1)
+        store.rematch()
+        assertEquals("/w/ID (1).pdf", store.sightings.value!!.first().filePath)
+    }
+
+    @Test
+    fun `two group participants can send a same-named document at the same time`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val first = notice("ID.pdf").copy(isGroup = true, sender = "Ana", phone = null)
+        val second = first.copy(sender = "Luis")
+        val store = store()
+        assertEquals(2, store.record(listOf(first, second)))
+        assertEquals(0, store.record(listOf(second, first)))
+    }
+
+    @Test
+    fun `simultaneous notices cannot assign a shared download by sender order`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val store = store()
+        store.open()
+        onDisk = listOf(DocumentFile("/w/ID.pdf", "ID.pdf", clock, 42))
+        val first = notice("ID.pdf", clock).copy(isGroup = true, sender = "Ana", phone = null)
+        store.record(listOf(first, first.copy(sender = "Luis")))
+        assertTrue(store.sightings.value!!.none { it.found })
+        clock += SightingStore.LOOSE_SETTLE_MILLIS
+        assertEquals(1, store.adoptLooseFiles())
+        store.rematch()
+        assertTrue(store.sightings.value!!.single { it.found }.loose)
+    }
+
+    @Test
+    fun `a group participant cannot inherit another participant's earlier file`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        onDisk = listOf(DocumentFile("/w/ID.pdf", "ID.pdf", clock, 42))
+        val first = notice("ID.pdf", clock).copy(isGroup = true, sender = "Alex", phone = "123")
+        val store = store()
+        store.record(listOf(first))
+        val next = first.copy(at = clock + Sighting.SAME_MESSAGE_MILLIS + 1, phone = "456")
+        clock = next.at + SightingStore.RESEND_SETTLE_MILLIS
+        store.record(listOf(next))
+        assertFalse(store.sightings.value!!.single { it.phone == "456" }.found)
+    }
+
+    @Test
+    fun `a loose file keeps its app even when its name mentions the other app`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val path = "/storage/WhatsApp/Media/WhatsApp Documents/WhatsApp Business.pdf"
+        val store = store()
+        store.open()
+        onDisk = listOf(DocumentFile(path, "WhatsApp Business.pdf", clock, 42))
+        clock += SightingStore.LOOSE_SETTLE_MILLIS
+        assertEquals(1, store.adoptLooseFiles())
+
+        store.record(
+            listOf(notice("WhatsApp Business.pdf").copy(app = WhatsAppNotices.WHATSAPP_BUSINESS))
+        )
+
+        val rows = store.sightings.value!!
+        assertFalse(rows.single { !it.loose }.found)
+        assertEquals(WhatsAppNotices.WHATSAPP, rows.single { it.loose }.app)
+    }
+
+    @Test
+    fun `older account mismatches release the notice and retain the file receipt`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val path = "/storage/WhatsApp Business/Media/WhatsApp Business Documents/CSF.pdf"
+        val wrong = Sighting(
+            app = WhatsAppNotices.WHATSAPP,
+            chat = "personal chat",
+            sender = "personal sender",
+            phone = "123",
+            label = "CSF.pdf",
+            at = clock,
+            filePath = path,
+            fileSize = 42,
+            classification = Classification(DocumentKind.CSF),
+            queued = true,
+            outcome = UploadState.DELIVERED,
+        )
+        storeFile.writeText(
+            """{"watchingSince":0,"sightings":${Json.encodeToString(listOf(wrong))}}"""
+        )
+        repeat(2) {
+            val store = store().apply { open() }
+            val rows = store.sightings.value!!
+            assertFalse(rows.single { !it.loose }.found)
+            val receipt = rows.single { it.loose }
+            assertEquals(WhatsAppNotices.WHATSAPP_BUSINESS, receipt.app)
+            assertEquals("", receipt.chat)
+            assertEquals(null, receipt.phone)
+            assertEquals(UploadState.DELIVERED, receipt.outcome)
+            assertEquals(0, store.enqueuePending { error("A delivered file was offered again") })
+        }
+    }
+
+    @Test
+    fun `repairing two notices for one verified file keeps one delivered download`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val path = "/storage/WhatsApp Business/Media/WhatsApp Business Documents/ID.pdf"
+        val stamp = FileStamp(42, clock, "a".repeat(64))
+        val pending = Sighting(
+            app = WhatsAppNotices.WHATSAPP,
+            chat = "two",
+            sender = "sender",
+            label = "ID.pdf",
+            at = clock + 1,
+            filePath = path,
+            fileSize = stamp.size,
+            classification = Classification(DocumentKind.INE, source = stamp),
+        )
+        val delivered = pending.copy(
+            chat = "one",
+            at = clock,
+            queued = true,
+            outcome = UploadState.DELIVERED
+        )
+        val stored = Json.encodeToString(listOf(pending, delivered))
+        storeFile.writeText("""{"watchingSince":0,"sightings":$stored}""")
+
+        repeat(2) {
+            val reopened = store().apply { open() }
+            val sightings = reopened.sightings.value!!
+            assertEquals(
+                setOf("one", "two"),
+                sightings.filterNot {
+                    it.found
+                }.map { it.chat }.toSet()
+            )
+            val loose = sightings.filter { it.loose }
+            assertEquals(1, loose.size)
+            assertEquals(UploadState.DELIVERED, loose.single().outcome)
+            assertEquals(0, reopened.enqueuePending { error("A delivered file was offered again") })
+        }
+    }
+
+    @Test
+    fun `a receipt can arrive before upgraded history has recorded the queued flag`() = runTest {
+        ShadowLog.setLoggable("WhatsAppSightings", Log.DEBUG)
+        val path = "/storage/WhatsApp Business/Media/WhatsApp Business Documents/ID.pdf"
+        val source = FileStamp(42, clock, "a".repeat(64))
+        val wrong = Sighting(
+            app = WhatsAppNotices.WHATSAPP,
+            chat = "A",
+            sender = "A",
+            label = "ID.pdf",
+            at = clock,
+            filePath = path,
+            fileSize = 42,
+            classification = Classification(DocumentKind.INE, source = source),
+        )
+        storeFile.writeText(
+            """{"watchingSince":0,"sightings":${Json.encodeToString(listOf(wrong))}}"""
+        )
+        store().remember(listOf(QueuedFileState(path, DeadReason.ACKNOWLEDGED, source)))
+
+        val store = store().apply { open() }
+        val loose = store.sightings.value!!.single { it.loose }
+        assertEquals(UploadState.DELIVERED, loose.outcome)
+        assertEquals(0, store.enqueuePending { error("A delivered file was offered again") })
     }
 
     @Test

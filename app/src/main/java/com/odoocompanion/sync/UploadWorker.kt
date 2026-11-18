@@ -6,7 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.data.OutboxKind
-import com.odoocompanion.data.QueuedFileState
+import com.odoocompanion.data.QueuedFile
 import com.odoocompanion.whatsapp.UploadedNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,15 +23,11 @@ class UploadWorker(context: Context, params: WorkerParameters) :
             client = app.client,
             documentReader = app.documentReader,
             settingsProvider = { settings },
+            withCurrentCredentials = app.config::withCurrentCredentials,
             rememberFiles = { kind, files ->
                 when (kind) {
                     OutboxKind.SCAN -> app.scans.remember(files)
-
-                    OutboxKind.DOCUMENT -> app.whatsapp.remember(
-                        files.map {
-                            QueuedFileState(it.filePath, it.deadReason, it.source, it.createdAt)
-                        }
-                    )
+                    OutboxKind.DOCUMENT -> app.whatsapp.remember(files.map(QueuedFile::fileState))
                 }
             },
             learnPayloadLimit = { bytes, at ->

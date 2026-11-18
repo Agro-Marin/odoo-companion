@@ -68,7 +68,7 @@ class MainActivity : AppCompatActivity() {
         keepContentOutFromUnderTheSystemBars()
 
         val app = CompanionApp.from(this)
-        updater = Updater(this)
+        updater = app.updater
         alerts = AlertBand(binding.alerts) { grants.requestAll() }
         setUpActions()
         scanCard = ScanCard(this, binding).also { it.start() }

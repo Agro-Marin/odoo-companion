@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.config.PAYLOAD_LIMIT_TTL_MILLIS
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.CompanionDatabase
+import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.FileStamp
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxEntry
@@ -730,6 +731,38 @@ class DeliverySemanticsTest {
             ),
         )
         return audio
+    }
+
+    @Test
+    fun `a legacy recording withdrawn before its file stamp is saved stays on disk`() = runTest {
+        ShadowLog.setLoggable("OutboxDrainer", Log.DEBUG)
+        val audio = queueRecording()
+        try {
+            accept()
+            val withdrawing = object : OutboxDao by dao {
+                override suspend fun take(
+                    kind: String,
+                    limit: Int,
+                    now: Long,
+                    enrollment: String?
+                ): List<OutboxEntry> {
+                    val entries = dao.take(kind, limit, now, enrollment)
+                    if (kind == OutboxKind.RECORDING && entries.isNotEmpty()) {
+                        dao.markDeadIds(entries.map { it.id }, now, null, DeadReason.WITHDRAWN)
+                    }
+                    return entries
+                }
+            }
+            val report = OutboxDrainer(withdrawing, OdooClient(), {
+                clock
+            }) { settings() }.drainAll()
+            assertFalse(report.delivered)
+            assertEquals(0, server.requestCount)
+            assertTrue(audio.exists())
+            assertEquals(1, dao.countDead())
+        } finally {
+            audio.delete()
+        }
     }
 
     @Test

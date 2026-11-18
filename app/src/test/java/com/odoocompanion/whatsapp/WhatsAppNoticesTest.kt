@@ -92,6 +92,14 @@ class WhatsAppNoticesTest {
     }
 
     @Test
+    fun `group messages with one filename and timestamp retain each sender`() {
+        val first = NoticeMessage("$page ID.pdf", "Alex", senderUri = "tel:+123456789")
+        val second = first.copy(senderUri = "tel:+234567890")
+        val found = WhatsAppNotices.documents(notice(first, second, first, isGroup = true))
+        assertEquals(listOf("123456789", "234567890"), found.map { it.phone })
+    }
+
+    @Test
     fun `a group names the chat and the sender apart`() {
         val found = WhatsAppNotices.documents(
             notice(

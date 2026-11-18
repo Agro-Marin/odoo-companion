@@ -7,10 +7,19 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkQuery
 import androidx.work.testing.WorkManagerTestInitHelper
+import com.odoocompanion.net.WireJson
+import com.odoocompanion.update.UpdateFeed
+import com.odoocompanion.update.UpdateManifest
+import com.odoocompanion.update.Updater
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.robolectric.Shadows.shadowOf
+import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -18,6 +27,19 @@ import java.util.concurrent.TimeUnit
 // Workers and application startup must see the same scheduler from the outset.
 class TestCompanionApp : CompanionApp() {
     private val workers = Executors.newSingleThreadExecutor()
+
+    override val updater: Updater by lazy {
+        val current = UpdateManifest(1, "1", "test.apk", "0".repeat(64), 1)
+        val feed = WireJson.encodeToString(UpdateManifest.serializer(), current)
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            if (chain.request().url.toString() != UpdateFeed.LATEST + UpdateFeed.MANIFEST) {
+                throw IOException("No test fixture for this update asset")
+            }
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK").body(feed.toResponseBody()).build()
+        }.build()
+        Updater(this, client)
+    }
 
     override fun onCreate() {
         val configuration = Configuration.Builder()

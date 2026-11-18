@@ -1,10 +1,8 @@
 package com.odoocompanion.sync
 
 import android.util.Log
-import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.FileStamp
 import com.odoocompanion.data.OutboxDao
-import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.OutboxLimits
 import com.odoocompanion.data.QueuedFile
@@ -18,19 +16,10 @@ internal class FileCleanup(
     private val dao: OutboxDao,
     private val remember: suspend (String, List<QueuedFile>) -> Unit,
 ) {
-    suspend fun acknowledge(entry: OutboxEntry, source: FileStamp, now: Long) {
-        val row = QueuedFile(
-            id = entry.id,
-            kind = entry.kind,
-            filePath = requireNotNull(entry.filePath),
-            createdAt = entry.createdAt,
-            deadAt = now,
-            scanPayload = entry.payload.takeIf { entry.kind == OutboxKind.SCAN },
-            deadReason = DeadReason.ACKNOWLEDGED,
-            source = if (entry.kind == OutboxKind.RECORDING) source else entry.source,
-        )
-        dao.markDeadIds(listOf(entry.id), now, null, DeadReason.ACKNOWLEDGED)
-        finish(listOf(row), now)
+    suspend fun acknowledge(id: Long, now: Long) {
+        // The database owns the fingerprint pinned just before the request.
+        // Reading its receipt here also gives crash recovery the same file identity.
+        finish(dao.acknowledgeFile(id, now), now)
     }
 
     suspend fun collect(now: Long): Int {

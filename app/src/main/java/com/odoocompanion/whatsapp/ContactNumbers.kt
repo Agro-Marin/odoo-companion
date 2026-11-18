@@ -8,6 +8,14 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 
 object ContactNumbers {
+    internal fun cachedLookup(numberOf: (String) -> String?): (String) -> String? {
+        val numbers = mutableMapOf<String, String?>()
+        return { name ->
+            if (name !in numbers) numbers[name] = numberOf(name)
+            numbers[name]
+        }
+    }
+
     const val WHATSAPP_PROFILE = "vnd.android.cursor.item/vnd.com.whatsapp.profile"
     const val WHATSAPP_BUSINESS_PROFILE = "vnd.android.cursor.item/vnd.com.whatsapp.w4b.profile"
 
@@ -20,7 +28,12 @@ object ContactNumbers {
     private fun onlyLine(numbers: List<String>): String? {
         val lines = numbers.filter { it.length >= SAME_LINE_DIGITS }
             .groupBy { it.takeLast(SAME_LINE_DIGITS) }
-        return lines.values.singleOrNull()?.maxBy { it.length }
+        val sameSuffix = lines.values.singleOrNull() ?: return null
+        // A local ten-digit number can accompany its international spelling. Two
+        // explicit country codes still distinguish lines with identical local digits.
+        val prefixes = sameSuffix.map { it.dropLast(SAME_LINE_DIGITS) }
+            .filter { it.isNotEmpty() }.map { if (it == "521") "52" else it }.distinct()
+        return sameSuffix.maxBy { it.length }.takeIf { prefixes.size <= 1 }
     }
 }
 

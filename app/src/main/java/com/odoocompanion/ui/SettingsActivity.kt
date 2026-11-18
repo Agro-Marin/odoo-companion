@@ -1,11 +1,14 @@
 package com.odoocompanion.ui
 
 import android.annotation.SuppressLint
+import android.database.sqlite.SQLiteException
 import android.os.Bundle
 import android.text.format.DateUtils
 import android.text.format.Formatter
+import android.util.Log
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.pm.PackageInfoCompat
@@ -29,8 +32,10 @@ import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.databinding.ActivitySettingsBinding
 import com.odoocompanion.location.LocationForegroundService
+import com.odoocompanion.sync.OutboxDrainer
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.DeviceHealth
+import com.odoocompanion.system.debug
 import com.odoocompanion.whatsapp.ContactBook
 import com.odoocompanion.whatsapp.Sighting
 import com.odoocompanion.whatsapp.WhatsAppIntake
@@ -479,7 +484,12 @@ class SettingsActivity : AppCompatActivity() {
         shownHeld = panel.held
         binding.heldBand.isVisible = panel.held != null
         binding.heldText.text = panel.held?.let {
-            resources.getQuantityString(R.plurals.status_held, it.rows, it.rows, it.collectedFor)
+            resources.getQuantityString(
+                R.plurals.status_held,
+                it.rows,
+                it.rows,
+                StatusScreen.describe(it.from)
+            )
         }
     }
 
@@ -489,30 +499,48 @@ class SettingsActivity : AppCompatActivity() {
             .setTitle(if (send) R.string.held_send_title else R.string.held_discard_title)
             .setMessage(
                 if (send) {
-                    getString(R.string.held_send_message, held.collectedFor)
+                    getString(
+                        R.string.held_send_message,
+                        StatusScreen.describe(held.from),
+                        StatusScreen.describe(held.destination),
+                    )
                 } else {
-                    getString(R.string.held_discard_message)
+                    getString(R.string.held_discard_message, StatusScreen.describe(held.from))
                 },
             )
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(
                 if (send) R.string.action_held_send else R.string.action_held_discard,
             ) { _, _ ->
-                val app = CompanionApp.from(this)
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val settings = app.config.currentOrNull() ?: return@launch
-                    val enrollment = settings.enrollment ?: return@launch
-                    val outbox = app.database.outbox()
+                lifecycleScope.launch { applyHeldDecision(held, send) }
+            }
+            .show()
+    }
+
+    private suspend fun applyHeldDecision(held: HeldQueue, send: Boolean) {
+        val app = CompanionApp.from(this)
+        val outbox = app.database.outbox()
+        var adopted = 0
+        val settings = try {
+            OutboxDrainer.withQueueOwnership {
+                app.config.withCurrentEnrollment(held.destination) {
                     if (send) {
-                        outbox.adoptHeld(enrollment, held.enrollment)
-                        SyncScheduler.uploadAfresh(this@SettingsActivity, settings.wifiOnlyUploads)
+                        adopted = outbox.adoptHeld(held.destination, held.from)
                     } else {
-                        outbox.deleteHeldPositions(enrollment, held.enrollment)
-                        outbox.withdrawHeld(enrollment, held.enrollment, System.currentTimeMillis())
+                        outbox.discardHeld(held.destination, held.from, System.currentTimeMillis())
                     }
                 }
             }
-            .show()
+        } catch (failure: SQLiteException) {
+            Log.w(TAG, "Could not update held rows (${failure.javaClass.simpleName})")
+            null
+        }
+        debug(TAG) { "Held queue confirmation applied=${settings != null}, adopted=$adopted" }
+        if (settings == null) {
+            Toast.makeText(this, R.string.held_action_retry, Toast.LENGTH_LONG).show()
+        } else if (adopted > 0) {
+            SyncScheduler.uploadAfresh(this, settings.wifiOnlyUploads)
+        }
     }
 
     private fun TextView.showOptional(value: String?) {
@@ -528,6 +556,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val TAG = "SettingsActivity"
 
         private const val REBIND_GRACE_MILLIS = 3_000L
 

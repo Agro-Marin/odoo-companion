@@ -29,9 +29,10 @@
     <string name="action_held_send">Send here</string>
     <string name="action_held_discard">Discard</string>
     <string name="held_send_title">Send to this server?</string>
-    <string name="held_send_message">They were collected for %1$s. Send them here only if this server is the same Odoo under a new address or a renamed device.</string>
+    <string name="held_send_message">These rows were collected for %1$s. Send them to %2$s only if it is the same Odoo under a new address or the same device under a new name.</string>
     <string name="held_discard_title">Discard them?</string>
-    <string name="held_discard_message">Positions are deleted; calls, recordings and documents are set aside and removed in 90 days. None of them will be sent.</string>
+    <string name="held_action_retry">The held queue could not be updated. Review the current enrollment and try again.</string>
+    <string name="held_discard_message">Discard the held rows for %1$s? Positions are deleted immediately. Calls, recordings and documents are set aside and removed after 90 days.</string>
     <plurals name="status_undeliverable">
         <item quantity="one">%1$d record could not be delivered and is no longer being retried</item>
         <item quantity="other">%1$d records could not be delivered and are no longer being retried</item>

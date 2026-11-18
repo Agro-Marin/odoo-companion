@@ -195,7 +195,14 @@ they were for, and never revived, taken or waited on by this enrolment's drain. 
 here* hands them to the current enrolment, for a server that only changed address;
 *Discard* deletes the positions and sets the rest aside as `withdrawn`, so the 90-day
 purge takes a recording's audio with it. The band names one previous enrolment at a time,
-the newest, and its buttons act on that one alone. A phone nobody looks at withdraws held
+the newest. The send dialog names both the source and destination. Held decisions wait
+for uploads already using the rows, then recheck the displayed destination. The worker
+checks its credentials when selecting a batch and again when submitting each HTTP request,
+including after verifying a document’s contents. A credential change leaves unsent rows
+queued with their retry budget intact. Adopted rows start with a fresh
+retry budget. Undecodable payloads still wait for a build that can read them, and permanent
+refusals stay with their original enrolment. A discard applies to the whole held group in
+one database transaction. A phone nobody looks at withdraws held
 rows itself once they were collected more than 90 days ago -- counted from collection,
 since nothing records when a row became held, so a row that had sat 89 days in a stuck
 queue goes a day after the re-enrolment. A rotated token keeps the enrolment.
@@ -271,7 +278,12 @@ each document and where it stands, and a notification says when one reached Odoo
 - **Where the file comes from.** WhatsApp's database is closed to other apps. What
   WhatsApp downloads lands in `…/Media/WhatsApp Documents/` (`WhatsAppDocuments` lists the
   folders), and reading that folder takes all-files access, the same grant the recording
-  harvest uses. `DocumentMatcher` pairs a notice with the file of its name, or with
+  harvest uses. Each notice can claim files only from the app that posted it, including
+  loose files and caption matches. When available, the message timestamp distinguishes
+  rapid same-name attachments. Notifications missing that time use a two-minute replay
+  window. Group notices also distinguish senders. If an older queue row paired a notice with the other
+  app’s file, the upload uses the file’s actual app and modification time and omits the
+  unrelated chat and sender. `DocumentMatcher` pairs a notice with the file of its name, or with
   WhatsApp's `name (1).ext` twin. The file must be written between 10 minutes before the
   notice and 7 days after it. A caption names no file, so it is paired only with a file
   written within 2 minutes of the notice.
@@ -279,14 +291,14 @@ each document and where it stands, and a notification says when one reached Odoo
   `FileObserver` on `CLOSE_WRITE` and `MOVED_TO`, plus a poll every 5 minutes for what
   inotify misses behind FUSE. A file that no notice claims within 10 s becomes a *loose*
   sighting, with no chat and no number. A notice that arrives later takes the loose file
-  over. WhatsApp keeps a single copy of a file it already has. So when the same chat
-  resends the same name and no new file appears within 60 s, the resend takes the file
-  the first notice took -- but only where downloads are seen to be automatic, that is,
-  the first file was written with its notice. Where it was written later, at a tap, no
-  new file is also what a different document nobody has tapped yet looks like, and it
-  used to be given the first one's file; it now waits for its own. A file written with
-  the resend's own notice counts too, in case WhatsApp writes its one copy again when the
-  same file comes back -- not measured either way.
+  over. When several notices with the same timestamp compete for one download, or several
+  downloads are equally close to a notice, the app leaves the association unresolved. A
+  loose download can still be processed without attaching a chat or sender.
+  WhatsApp sometimes keeps a single copy of a resent file. After 60 s, a resend can reuse
+  an earlier same-name download from the same chat and group sender. A file written at
+  the resend gets preference. Otherwise there must be one plausible earlier download
+  written with its notice. A download first written much later, at a tap, gives the app
+  no evidence that the new notice refers to it.
 - **The sender's number.** On a handset, no `Person.key`, `Person.uri`, shortcut id or
   tag carried the number of a saved contact; the notice names the sender only by contact
   name. `ContactBook` looks that name up, with `READ_CONTACTS`, which is asked from the
@@ -356,8 +368,13 @@ each document and where it stands, and a notification says when one reached Odoo
   A temporary read failure leaves the row queued. On the server,
   `device_mobile_document` (odoo) files it in Documents as uploaded by the phone's
   holder. From there the company's upload sort, and `l10n_mx_partner_import`'s offer to
-  create the contact, take over. A file another row already read takes that verdict and
-  is not read by OCR again.
+  create the contact, take over. Notices for the same verified file share its verdict and
+  delivery receipt, including when a later notice can verify the download only after the
+  upload finished. If WhatsApp reuses the path for different bytes, the earlier receipt
+  stays with its version. Intake checks for existing rows and inserts missing versions in
+  one Room transaction. Receipt cleanup waits for intake to record which files are queued.
+  If cleanup runs before classification, history keeps the verified receipt until it can
+  compare the file, including after a restart.
 - **Saying it went.** Once Odoo takes a document for the first time, `UploadedNotice`
   posts a notification on the *Documents sent to Odoo* channel: what the handset read it
   as (CSF, INE, passport), the RFC when it has one, the file name and the chat it came
