@@ -5,6 +5,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Files
 
 class RecordingScannerTest {
     @get:Rule
@@ -53,7 +54,7 @@ class RecordingScannerTest {
         val settled = recording("Recordings/Call/done.m4a", ageMillis = 10 * 60_000)
         val writing = recording("Recordings/Call/writing.m4a", ageMillis = 1_000)
 
-        val newestScanned = scanner().scan().maxOf { it.modifiedAt }
+        val newestScanned = scanner().scan().maxOf { it.stamp.modifiedAt }
 
         assertEquals(settled.lastModified(), newestScanned)
         assertEquals(true, newestScanned < writing.lastModified())
@@ -66,7 +67,7 @@ class RecordingScannerTest {
         val scanned = scanner().scan().single()
 
         assertEquals(settled.absolutePath, scanned.file.absolutePath)
-        assertEquals(settled.lastModified(), scanned.modifiedAt)
+        assertEquals(settled.lastModified(), scanned.stamp.modifiedAt)
     }
 
     @Test
@@ -74,6 +75,19 @@ class RecordingScannerTest {
         recording("Recordings/Call/twice.m4a", ageMillis = 10 * 60_000)
 
         assertEquals(1, scanner().scan().size)
+    }
+
+    @Test
+    fun `linked files and directories are skipped throughout candidate paths`() {
+        val other = recording("Other/Call/other.m4a", ageMillis = 60_000)
+        val valid = recording("PhoneRecord/valid.m4a", ageMillis = 60_000)
+        val tree = File(folder.root, "Other")
+        Files.createSymbolicLink(File(folder.root, "Recordings").toPath(), tree.toPath())
+        Files.createSymbolicLink(File(valid.parentFile, "alias.m4a").toPath(), other.toPath())
+        val nested = File(valid.parentFile, "nested").toPath()
+        Files.createSymbolicLink(nested, other.parentFile!!.toPath())
+
+        assertEquals(listOf(valid.name), names())
     }
 
     @Test

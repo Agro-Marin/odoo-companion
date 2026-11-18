@@ -4,9 +4,6 @@ import android.os.Looper
 import android.view.View
 import android.widget.EditText
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
-import androidx.work.testing.SynchronousExecutor
-import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.ManagedValues
@@ -29,11 +26,6 @@ class GuidedEnrollmentTest {
 
     @Before
     fun setUp() = runTest {
-        WorkManagerTestInitHelper.initializeTestWorkManager(
-            app,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build(),
-        )
-        app.startup.join()
         app.config.clearEnrollment()
         app.config.applyManaged(ManagedValues())
     }

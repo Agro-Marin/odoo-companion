@@ -13,7 +13,6 @@
     <color name="panel">#032C36</color>
     <color name="tile">#05394A</color>
     <color name="hairline">#11495A</color>
-    <color name="logo_ink">#FCF8F2</color>
     <color name="alert_bg">#2A2110</color>
     <color name="alert_ink">#F5C26B</color>
 </resources>

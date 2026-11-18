@@ -15,6 +15,10 @@ import kotlinx.serialization.json.jsonPrimitive
 // notice on this phone; it is kept beside the metadata, which never names it,
 // so it does not travel.
 data class QueuedDocument(val metadata: DocumentMetadata, val rfc: String?) {
+    fun agreesWith(verdict: Classification): Boolean = verdict.kind.uploads &&
+        (metadata.kind == null || metadata.kind == verdict.kind.name.lowercase()) &&
+        (rfc == null || rfc == verdict.rfc)
+
     fun encode(): String {
         val sent = WireJson.encodeToJsonElement(metadata).jsonObject
         return JsonObject(if (rfc == null) sent else sent + (RFC to JsonPrimitive(rfc))).toString()

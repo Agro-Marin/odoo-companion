@@ -1,10 +1,10 @@
 package com.odoocompanion.whatsapp
 
 import android.Manifest
+import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
 import androidx.test.core.app.ApplicationProvider
-import com.odoocompanion.CompanionApp
 import com.odoocompanion.net.DocumentMetadata
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -12,10 +12,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class)
 class UploadedNoticePostTest {
-    private val app: CompanionApp get() = ApplicationProvider.getApplicationContext()
+    private val app: Application get() = ApplicationProvider.getApplicationContext()
 
     private val notices
         get() = Shadows.shadowOf(app.getSystemService(NotificationManager::class.java))
@@ -60,6 +62,18 @@ class UploadedNoticePostTest {
 
         assertEquals(3, notices.size)
         assertTrue(notices.any { it.title() == "2 documents uploaded to Documents" })
+    }
+
+    @Test
+    @Config(sdk = [29])
+    fun `on Android 10 the notification setting controls document receipts`() {
+        val manager = Shadows.shadowOf(app.getSystemService(NotificationManager::class.java))
+        manager.setNotificationsEnabled(false)
+        UploadedNotice.post(app, listOf(csf))
+        assertTrue(notices.isEmpty())
+        manager.setNotificationsEnabled(true)
+        UploadedNotice.post(app, listOf(csf))
+        assertEquals(1, notices.size)
     }
 
     @Test

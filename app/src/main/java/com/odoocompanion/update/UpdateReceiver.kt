@@ -1,5 +1,6 @@
 package com.odoocompanion.update
 
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -13,30 +14,51 @@ import com.odoocompanion.R
 // to show the person, or how it ended.
 class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val session = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, Updater.NO_SESSION)
+        if (!Updater.owns(context, session)) return
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, NO_STATUS)
-        val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirm =
                     IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
-                        ?: return
-                context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                try {
+                    if (confirm != null) {
+                        context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        return
+                    }
+                } catch (_: ActivityNotFoundException) {
+                    Log.w(TAG, "The installer confirmation activity is unavailable")
+                } catch (_: SecurityException) {
+                    Log.w(TAG, "The installer confirmation activity could not be opened")
+                }
+                // Android still owns a pending session if its confirmation failed to open.
+                try {
+                    context.packageManager.packageInstaller.abandonSession(session)
+                } catch (_: SecurityException) {
+                    Log.w(TAG, "Android no longer grants access to the installer session")
+                } finally {
+                    Updater.finish(context, session, installed = false)
+                }
+                Toast.makeText(context, R.string.update_install_failed, Toast.LENGTH_LONG).show()
             }
 
-            PackageInstaller.STATUS_SUCCESS -> Log.i(TAG, "Update installed")
+            PackageInstaller.STATUS_SUCCESS -> {
+                Updater.finish(context, session, installed = true)
+                Log.i(TAG, "Update installed")
+            }
 
             // The person said no to Android's confirmation: Home offers it again.
             PackageInstaller.STATUS_FAILURE_ABORTED -> {
                 Log.i(TAG, "Update declined")
-                Updater.settled()
+                Updater.finish(context, session, installed = false)
             }
 
             // A key that is not the installed build's lands here, as
             // STATUS_FAILURE_CONFLICT or _INCOMPATIBLE: say it, since nothing
             // else on the phone would.
             else -> {
-                Log.w(TAG, "Update not installed: status $status, $message")
-                Updater.settled()
+                Log.w(TAG, "Update not installed: status $status")
+                Updater.finish(context, session, installed = false)
                 Toast.makeText(context, R.string.update_install_failed, Toast.LENGTH_LONG).show()
             }
         }

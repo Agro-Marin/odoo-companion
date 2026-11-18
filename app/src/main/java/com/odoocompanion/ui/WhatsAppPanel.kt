@@ -2,6 +2,7 @@ package com.odoocompanion.ui
 
 import androidx.annotation.StringRes
 import com.odoocompanion.R
+import com.odoocompanion.whatsapp.DocumentKind
 import com.odoocompanion.whatsapp.Sighting
 
 data class WhatsAppCard(
@@ -52,3 +53,12 @@ object WhatsAppPanel {
         )
     }
 }
+
+@get:StringRes
+internal val DocumentKind.labelResource: Int
+    get() = when (this) {
+        DocumentKind.CSF -> R.string.whatsapp_kind_csf
+        DocumentKind.INE -> R.string.whatsapp_kind_ine
+        DocumentKind.PASSPORT -> R.string.whatsapp_kind_passport
+        DocumentKind.OTHER -> R.string.whatsapp_kind_other
+    }

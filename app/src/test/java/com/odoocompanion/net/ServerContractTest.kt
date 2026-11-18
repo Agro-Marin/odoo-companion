@@ -32,7 +32,7 @@ class ServerContractTest {
     private suspend fun classify(code: Int, body: String): UploadOutcome {
         val outcomes = listOf(false, true).map { namesItself ->
             server.enqueue(MockResponse(code = code, body = body))
-            OdooClient().post(settings(namesItself), "location", "{}")
+            OdooClient().uploads(settings(namesItself)).post("location", "{}")
         }
         assertEquals(
             "a learned server must read the same reply the same way",
@@ -150,7 +150,7 @@ class ServerContractTest {
                 """"error":"invalid_json","message":"the request body is not JSON"}""",
         )
         assertTrue(outcome.toString(), outcome is UploadOutcome.Retry)
-        assertTrue((outcome as UploadOutcome.Retry).serverFault.not())
+        assertTrue((outcome as UploadOutcome.Retry).scope != RetryScope.ROW)
     }
 
     @Test

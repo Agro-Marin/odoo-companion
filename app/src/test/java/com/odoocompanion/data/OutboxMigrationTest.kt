@@ -56,8 +56,7 @@ class OutboxMigrationTest {
         }
 
     @Test
-    fun `migrating to v2 adds the index and keeps every queued row`() {
-        val db = openV1()
+    fun `migrating to v2 adds the index and keeps every queued row`() = openV1().use { db ->
         db.execSQL(
             "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
                 "('calllog', '{\"number\":\"+52\"}', 10, 3), ('location', '{}', 20, 0)",
@@ -72,19 +71,16 @@ class OutboxMigrationTest {
             assertEquals("calllog", cursor.getString(0))
             assertEquals(3, cursor.getInt(1))
         }
-        db.close()
     }
 
     @Test
-    fun `the migration is idempotent`() {
-        val db = openV1()
+    fun `the migration is idempotent`() = openV1().use { db ->
         val migration = COMPANION_MIGRATIONS.single { it.startVersion == 1 && it.endVersion == 2 }
 
         migration.migrate(db)
         migration.migrate(db)
 
         assertEquals(1, indexesOn(db, "outbox").count { it == "index_outbox_kind_createdAt" })
-        db.close()
     }
 
     @Test
@@ -153,8 +149,7 @@ class OutboxMigrationTest {
     }
 
     @Test
-    fun `migrating to v3 adds deadAt and leaves existing rows retryable`() {
-        val db = openV1()
+    fun `migrating to v3 adds deadAt and leaves existing rows retryable`() = openV1().use { db ->
         db.execSQL(
             "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
                 "('calllog', '{\"number\":\"+52\"}', 10, 3)",
@@ -171,12 +166,10 @@ class OutboxMigrationTest {
 
             assertTrue(cursor.isNull(2))
         }
-        db.close()
     }
 
     @Test
-    fun `migrating to v4 records why each dead row is dead`() {
-        val db = openV1()
+    fun `migrating to v4 records why each dead row is dead`() = openV1().use { db ->
         db.execSQL(
             "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
                 "('calllog', '{\"number\":\"+52\"}', 10, 30), " +
@@ -203,12 +196,10 @@ class OutboxMigrationTest {
         assertTrue("index_outbox_deadAt" in indexes)
 
         assertTrue("index_outbox_kind_createdAt" !in indexes)
-        db.close()
     }
 
     @Test
-    fun `the v4 migration is idempotent`() {
-        val db = openV1()
+    fun `the v4 migration is idempotent`() = openV1().use { db ->
         migrate(db, 1, 2)
         migrate(db, 2, 3)
 
@@ -217,59 +208,59 @@ class OutboxMigrationTest {
 
         assertTrue(second.isFailure)
         assertEquals(1, indexesOn(db, "outbox").count { it == "index_outbox_deadAt" })
-        db.close()
     }
 
     @Test
-    fun `migrating to v6 treats every existing failure as the link's, not the row's`() {
-        val db = openV1()
-        db.execSQL(
-            "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
-                "('calllog', '{\"number\":\"+52\"}', 10, 30)",
-        )
-        for (version in 1..5) migrate(db, version, version + 1)
-
-        db.query("SELECT serverFault FROM outbox").use { cursor ->
-            assertEquals(1, cursor.count)
-            cursor.moveToFirst()
-            assertEquals("no server verdict was recorded, so none is assumed", 0, cursor.getInt(0))
-        }
-        db.close()
-    }
-
-    @Test
-    fun `migrating to v5 bounds revivals and marks the queue format of existing rows`() {
-        val db = openV1()
-        db.execSQL(
-            "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
-                "('calllog', '{\"number\":\"+52\"}', 10, 30)",
-        )
-        migrate(db, 1, 2)
-        migrate(db, 2, 3)
-        migrate(db, 3, 4)
-
-        migrate(db, 4, 5)
-
-        db.query("SELECT revivals, payloadVersion FROM outbox").use { cursor ->
-            assertEquals(1, cursor.count)
-            cursor.moveToFirst()
-            assertEquals(
-                "a row that predates the counter has spent no revival",
-                0,
-                cursor.getInt(0)
+    fun `migrating to v6 treats every existing failure as the link's, not the row's`() =
+        openV1().use { db ->
+            db.execSQL(
+                "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
+                    "('calllog', '{\"number\":\"+52\"}', 10, 30)",
             )
-            assertEquals(
-                "and was written by a build whose format is the one we still read",
-                CURRENT_PAYLOAD_VERSION,
-                cursor.getInt(1),
-            )
+            for (version in 1..5) migrate(db, version, version + 1)
+
+            db.query("SELECT serverFault FROM outbox").use { cursor ->
+                assertEquals(1, cursor.count)
+                cursor.moveToFirst()
+                assertEquals(
+                    "no server verdict was recorded, so none is assumed",
+                    0,
+                    cursor.getInt(0)
+                )
+            }
         }
-        db.close()
-    }
 
     @Test
-    fun `the v5 migration is idempotent`() {
-        val db = openV1()
+    fun `migrating to v5 bounds revivals and marks the queue format of existing rows`() =
+        openV1().use { db ->
+            db.execSQL(
+                "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
+                    "('calllog', '{\"number\":\"+52\"}', 10, 30)",
+            )
+            migrate(db, 1, 2)
+            migrate(db, 2, 3)
+            migrate(db, 3, 4)
+
+            migrate(db, 4, 5)
+
+            db.query("SELECT revivals, payloadVersion FROM outbox").use { cursor ->
+                assertEquals(1, cursor.count)
+                cursor.moveToFirst()
+                assertEquals(
+                    "a row that predates the counter has spent no revival",
+                    0,
+                    cursor.getInt(0)
+                )
+                assertEquals(
+                    "and was written by a build whose format is the one we still read",
+                    CURRENT_PAYLOAD_VERSION,
+                    cursor.getInt(1),
+                )
+            }
+        }
+
+    @Test
+    fun `the v5 migration is idempotent`() = openV1().use { db ->
         migrate(db, 1, 2)
         migrate(db, 2, 3)
         migrate(db, 3, 4)
@@ -278,7 +269,6 @@ class OutboxMigrationTest {
         val second = runCatching { migrate(db, 4, 5) }
 
         assertTrue("adding a column twice must not pass silently", second.isFailure)
-        db.close()
     }
 
     private fun migrate(db: SupportSQLiteDatabase, from: Int, to: Int) = COMPANION_MIGRATIONS
@@ -286,8 +276,7 @@ class OutboxMigrationTest {
         .migrate(db)
 
     @Test
-    fun `migrating to v7 makes every existing row due at once`() {
-        val db = openV1()
+    fun `migrating to v7 makes every existing row due at once`() = openV1().use { db ->
         db.execSQL(
             "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
                 "('calllog', '{\"number\":\"+52\"}', 10, 3)",
@@ -302,18 +291,58 @@ class OutboxMigrationTest {
     }
 
     @Test
-    fun `migrating to v8 leaves every existing row to the current enrolment`() {
-        val db = openV1()
-        db.execSQL(
-            "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
-                "('calllog', '{\"number\":\"+52\"}', 10, 3)",
-        )
-        for (version in 1..7) migrate(db, version, version + 1)
+    fun `migrating to v8 leaves every existing row to the current enrolment`() =
+        openV1().use { db ->
+            db.execSQL(
+                "INSERT INTO outbox (kind, payload, createdAt, attempts) VALUES " +
+                    "('calllog', '{\"number\":\"+52\"}', 10, 3)",
+            )
+            for (version in 1..7) migrate(db, version, version + 1)
 
-        db.query("SELECT enrollment FROM outbox").use { cursor ->
-            assertEquals(1, cursor.count)
-            cursor.moveToFirst()
-            assertTrue("queued before stamping, so it is the current one's", cursor.isNull(0))
+            db.query("SELECT enrollment FROM outbox").use { cursor ->
+                assertEquals(1, cursor.count)
+                cursor.moveToFirst()
+                assertTrue("queued before stamping, so it is the current one's", cursor.isNull(0))
+            }
+        }
+
+    @Test
+    fun `v9 preserves legacy recording paths and leaves their source unknown`() {
+        openV1().use { db ->
+            for (version in 1..7) migrate(db, version, version + 1)
+            db.execSQL(
+                "INSERT INTO outbox (kind, payload, filePath, createdAt, attempts, " +
+                    "deadAt, deadReason) " +
+                    "VALUES ('recording', '{}', '/audio/a.m4a', 100, 2, 200, 'refused')",
+            )
+            migrate(db, 8, 9)
+            db.query(
+                "SELECT filePath, deadReason, source_size, source_modifiedAt FROM outbox"
+            ).use {
+                assertTrue(it.moveToFirst())
+                assertEquals("/audio/a.m4a", it.getString(0))
+                assertEquals("refused", it.getString(1))
+                assertTrue(it.isNull(2))
+                assertTrue(it.isNull(3))
+            }
+        }
+    }
+
+    @Test
+    fun `v10 leaves an earlier document available for content verification`() = openV1().use { db ->
+        for (version in 1..8) migrate(db, version, version + 1)
+        db.execSQL(
+            "INSERT INTO outbox (kind,payload,filePath,createdAt,attempts," +
+                "source_size,source_modifiedAt) " +
+                "VALUES ('document','{}','/w/original.pdf',3,1,10,2)"
+        )
+        migrate(db, 9, 10)
+        db.query("SELECT source_size, source_modifiedAt, source_sha256, attempts FROM outbox").use {
+            assertTrue(it.moveToFirst())
+            assertEquals(10, it.getInt(0))
+            assertEquals(2, it.getInt(1))
+            assertTrue(it.isNull(2))
+            assertEquals(1, it.getInt(3))
         }
     }
 }

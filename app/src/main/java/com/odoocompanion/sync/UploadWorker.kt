@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.odoocompanion.CompanionApp
+import com.odoocompanion.data.OutboxKind
+import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.whatsapp.UploadedNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,12 +21,31 @@ class UploadWorker(context: Context, params: WorkerParameters) :
         val drainer = OutboxDrainer(
             dao = app.database.outbox(),
             client = app.client,
+            documentReader = app.documentReader,
             settingsProvider = { settings },
-            learnPayloadLimit = app.config::learnPayloadLimit,
+            rememberFiles = { kind, files ->
+                when (kind) {
+                    OutboxKind.SCAN -> app.scans.remember(files)
+
+                    OutboxKind.DOCUMENT -> app.whatsapp.remember(
+                        files.map {
+                            QueuedFileState(it.filePath, it.deadReason, it.source, it.createdAt)
+                        }
+                    )
+                }
+            },
+            learnPayloadLimit = { bytes, at ->
+                app.config.learnPayloadLimit(settings.enrollment, bytes, at)
+            },
         )
         val report = drainer.drainAll()
         if (report.deferred) return@withContext Result.success()
-        app.config.recordUpload(System.currentTimeMillis(), report.delivered, report.lastError)
+        app.config.recordUpload(
+            settings,
+            System.currentTimeMillis(),
+            report.delivered,
+            report.lastError,
+        )
         UploadedNotice.post(applicationContext, report.deliveredDocuments)
 
         if (report.deadLettered > 0 ||
@@ -58,7 +79,13 @@ class UploadWorker(context: Context, params: WorkerParameters) :
 
             OutboxDrainer.Outcome.DONE -> {
                 if (report.moreWorkPending) {
-                    SyncScheduler.continueUpload(applicationContext, settings.wifiOnlyUploads)
+                    val current = app.config.currentOrNull() ?: return@withContext Result.retry()
+                    if (current.isEnrolled) {
+                        SyncScheduler.continueUpload(
+                            applicationContext,
+                            current.wifiOnlyUploads
+                        )
+                    }
                 }
                 Result.success()
             }

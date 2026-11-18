@@ -64,6 +64,9 @@ data class Settings(
             "lastUploadAt=$lastUploadAt, lastAttemptAt=$lastAttemptAt, " +
             "lastUploadError=$lastUploadError)"
 
+    fun sameCredentialsAs(other: Settings): Boolean =
+        enrollment == other.enrollment && token == other.token
+
     fun payloadLimit(now: Long): Long =
         if (maxPayloadBytes > 0 && now - maxPayloadLearnedAt < PAYLOAD_LIMIT_TTL_MILLIS) {
             maxPayloadBytes
@@ -71,14 +74,17 @@ data class Settings(
             0
         }
 
-    fun endpoint(suffix: String): String = baseUrl.toHttpUrl()
-        .newBuilder()
-        .addPathSegment("remote")
-        .addPathSegment("mobile")
-        .addPathSegment(identifier)
-        .addPathSegment(suffix)
-        .build()
-        .toString()
+    fun endpoint(suffix: String): String {
+        require(!identifier.isDotSegment()) { "Invalid device identifier" }
+        return baseUrl.toHttpUrl()
+            .newBuilder()
+            .addPathSegment("remote")
+            .addPathSegment("mobile")
+            .addPathSegment(identifier)
+            .addPathSegment(suffix)
+            .build()
+            .toString()
+    }
 }
 
 private fun String.redacted(): String = if (isEmpty()) "" else "***($length chars)"
@@ -125,7 +131,9 @@ fun canonicalBaseUrl(value: String): String =
     value.trim().toHttpUrlOrNull()?.toString()?.trimEnd('/') ?: value.trim()
 
 fun isUsableIdentifier(value: String): Boolean =
-    value.trim().let { it.isNotEmpty() && IDENTIFIER_PATTERN.matches(it) }
+    value.trim().let { !it.isDotSegment() && IDENTIFIER_PATTERN.matches(it) }
+
+private fun String.isDotSegment(): Boolean = this == "." || this == ".."
 
 fun isIdentifierChar(c: Char): Boolean =
     c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c in IDENTIFIER_PUNCTUATION
@@ -229,6 +237,9 @@ class DeviceConfig(
         val newDevice = newServer || (identifier != null && this[IDENTIFIER] != identifier)
         if (newServer) remove(SERVER_NAMES_ITSELF)
         if (newDevice) {
+            remove(LAST_ATTEMPT_AT)
+            remove(LAST_UPLOAD_AT)
+            remove(LAST_UPLOAD_ERROR)
             remove(MAX_PAYLOAD)
             remove(MAX_PAYLOAD_LEARNED_AT)
         }
@@ -317,12 +328,17 @@ class DeviceConfig(
         return changed
     }
 
-    suspend fun learnServerNamesItself() {
-        store.edit { prefs -> prefs[SERVER_NAMES_ITSELF] = true }
+    suspend fun learnServerNamesItself(baseUrl: String) {
+        store.edit { prefs ->
+            if (canonicalBaseUrl(prefs[BASE_URL].orEmpty()) == canonicalBaseUrl(baseUrl)) {
+                prefs[SERVER_NAMES_ITSELF] = true
+            }
+        }
     }
 
-    suspend fun learnPayloadLimit(bytes: Long, at: Long) {
+    suspend fun learnPayloadLimit(enrollment: String?, bytes: Long, at: Long) {
         store.edit { prefs ->
+            if (prefs.toSettings().enrollment != enrollment) return@edit
             if (bytes > 0) {
                 prefs[MAX_PAYLOAD] = bytes
                 prefs[MAX_PAYLOAD_LEARNED_AT] = at
@@ -333,8 +349,9 @@ class DeviceConfig(
         }
     }
 
-    suspend fun recordUpload(at: Long, delivered: Boolean, error: String?) {
+    suspend fun recordUpload(owner: Settings, at: Long, delivered: Boolean, error: String?) {
         store.edit { prefs ->
+            if (!prefs.toSettings().sameCredentialsAs(owner)) return@edit
             prefs[LAST_ATTEMPT_AT] = at
             if (delivered) prefs[LAST_UPLOAD_AT] = at
             if (error != null) prefs[LAST_UPLOAD_ERROR] = error else prefs.remove(LAST_UPLOAD_ERROR)

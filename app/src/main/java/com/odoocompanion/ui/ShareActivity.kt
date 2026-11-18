@@ -1,23 +1,26 @@
 package com.odoocompanion.ui
 
+import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
-import android.provider.OpenableColumns
-import android.util.Log
+import android.os.Process
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
+import com.odoocompanion.scan.ImportResult
 import com.odoocompanion.scan.ScanIntake
-import com.odoocompanion.scan.ScanPreview
+import com.odoocompanion.scan.importDocument
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.system.debug
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 // Companion in the system's share sheet: whatever photos or files are shared
 // to it go to Odoo's Documents the way a picked file does. It has no screen of
@@ -38,52 +41,67 @@ class ShareActivity : ComponentActivity() {
             return
         }
         lifecycleScope.launch {
-            val queued = withContext(Dispatchers.IO) { uris.count { queue(it) } }
+            val app = CompanionApp.from(this@ShareActivity)
+            val results = withContext(Dispatchers.IO) {
+                val grants = grantedUris(intent)
+                uris.map { uri ->
+                    if (canReadShare(uri, grants)) {
+                        app.importDocument(
+                            uri,
+                            ScanIntake.SOURCE_SHARE,
+                            fallbackType = intent.type ?: "application/octet-stream",
+                        )
+                    } else {
+                        ImportResult.UNREADABLE
+                    }
+                }
+            }
+            val queued = results.count { it == ImportResult.QUEUED }
             if (queued > 0) {
-                CompanionApp.from(this@ShareActivity).config.currentOrNull()
+                app.config.currentOrNull()
                     ?.takeIf { it.isEnrolled }
                     ?.let { SyncScheduler.uploadNow(this@ShareActivity, it.wifiOnlyUploads) }
             }
-            Toast.makeText(this@ShareActivity, message(queued, uris.size), Toast.LENGTH_SHORT)
+            Toast.makeText(this@ShareActivity, message(queued, results), Toast.LENGTH_SHORT)
                 .show()
             finish()
         }
     }
 
-    private suspend fun queue(uri: Uri): Boolean = runCatching {
-        val app = CompanionApp.from(this)
-        val mimetype = contentResolver.getType(uri) ?: intent.type ?: ScanIntake.PDF
-        val fileName = displayName(uri)
-        val intake = ScanIntake(File(filesDir, ScanIntake.FOLDER), app.database.outbox(), app.scans)
-        val input = requireNotNull(contentResolver.openInputStream(uri)) {
-            "nothing to read at the shared item"
+    private fun canReadShare(uri: Uri, grants: Set<Uri>): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        // MediaStore ownership can be invisible to Android 15's caller snapshot.
+        // An explicit read grant on this launch also authorizes the shared item.
+        if (uri in grants && checkUriPermission(uri, Process.myPid(), Process.myUid(), read) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            debug("ShareActivity") { "using an explicit document read grant" }
+            return true
         }
-        val file = input.use { intake.copy(it, ScanIntake.extensionFor(mimetype, fileName)) }
-        val preview = ScanPreview(File(filesDir, ScanPreview.FOLDER)).render(file, mimetype)
-        val enrollment = app.config.currentOrNull()?.enrollment
-        intake.queue(
-            file,
-            fileName,
-            mimetype,
-            ScanIntake.SOURCE_SHARE,
-            enrollment,
-            preview?.absolutePath,
-        )
-    }.onFailure { Log.w(TAG, "Could not queue a shared item", it) }.isSuccess
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return false
+        return try {
+            initialCaller.checkContentUriPermission(uri, read) == PackageManager.PERMISSION_GRANTED
+        } catch (_: SecurityException) {
+            false
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+    }
 
-    private fun message(queued: Int, shared: Int): String = when {
+    private fun message(queued: Int, results: List<ImportResult>): String = when {
+        results.all { it == ImportResult.TOO_LARGE } -> getString(R.string.scan_too_large)
         queued == 0 -> getString(R.string.scan_unreadable)
-        queued < shared -> getString(R.string.share_partly_queued, queued, shared)
+        queued < results.size -> getString(R.string.share_partly_queued, queued, results.size)
         else -> resources.getQuantityString(R.plurals.share_queued, queued, queued)
     }
 
-    private fun displayName(uri: Uri): String = runCatching {
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-    }.getOrNull()?.takeIf { it.isNotBlank() } ?: getString(R.string.scan_file_fallback)
-
     private companion object {
-        const val TAG = "ShareActivity"
+        fun grantedUris(intent: Intent): Set<Uri> {
+            if (intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION == 0) return emptySet()
+            val clip = intent.clipData ?: return emptySet()
+            return (0 until clip.itemCount).mapNotNullTo(HashSet()) { clip.getItemAt(it).uri }
+        }
 
         fun sharedUris(intent: Intent): List<Uri> = when (intent.action) {
             Intent.ACTION_SEND -> listOfNotNull(
@@ -93,7 +111,7 @@ class ShareActivity : ComponentActivity() {
             Intent.ACTION_SEND_MULTIPLE ->
                 IntentCompat
                     .getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-                    .orEmpty()
+                    .orEmpty().filterIsInstance<Uri>()
 
             else -> emptyList()
         }.distinct()

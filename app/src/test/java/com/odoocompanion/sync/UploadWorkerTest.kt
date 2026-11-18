@@ -1,11 +1,8 @@
 package com.odoocompanion.sync
 
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
 import androidx.work.ListenableWorker
-import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
-import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.config.enrol
 import com.odoocompanion.data.OutboxEntry
@@ -32,10 +29,6 @@ class UploadWorkerTest {
 
     @Before
     fun setUp() {
-        WorkManagerTestInitHelper.initializeTestWorkManager(
-            app,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build(),
-        )
         server = MockWebServer()
         server.start()
     }

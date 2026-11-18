@@ -9,40 +9,54 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
+import com.odoocompanion.config.DeviceConfig
+import com.odoocompanion.config.Settings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-class SoftphoneStore(private val store: DataStore<Preferences>) {
-    constructor(context: Context) : this(storeFor(context))
+class SoftphoneStore(private val store: DataStore<Preferences>, config: DeviceConfig) {
+    constructor(context: Context, config: DeviceConfig) : this(storeFor(context), config)
 
-    val configured: Flow<Boolean> = store.data.map { it[USERNAME] != null }.distinctUntilChanged()
+    private val active = combine(store.data, config.settings) { prefs, settings ->
+        prefs.credentialsFor(settings)
+    }.distinctUntilChanged()
 
-    val domain: Flow<String?> = store.data.map { it[DOMAIN] }.distinctUntilChanged()
+    val configured: Flow<Boolean> = active.map { it != null }.distinctUntilChanged()
 
-    suspend fun current(): SoftphoneSettings? {
-        val prefs = store.data.first()
-        val username = prefs[USERNAME] ?: return null
-        val secret = prefs[SECRET] ?: return null
-        val domain = prefs[DOMAIN] ?: return null
+    val domain: Flow<String?> = active.map { it?.domain }.distinctUntilChanged()
+
+    suspend fun current(): SoftphoneSettings? = active.first()
+
+    suspend fun current(owner: Settings): SoftphoneSettings? =
+        store.data.first().credentialsFor(owner)
+
+    private fun Preferences.credentialsFor(owner: Settings): SoftphoneSettings? {
+        if (!owner.isEnrolled || this[ENROLLMENT] != owner.enrollment) return null
+        val username = this[USERNAME] ?: return null
+        val secret = this[SECRET] ?: return null
+        val domain = this[DOMAIN] ?: return null
         return SoftphoneSettings(username, secret, domain)
     }
 
-    suspend fun save(settings: SoftphoneSettings?) {
+    suspend fun save(owner: Settings, credentials: SoftphoneSettings) {
         store.edit { prefs ->
-            if (settings == null) {
-                prefs.clear()
-            } else {
-                prefs[USERNAME] = settings.username
-                prefs[SECRET] = settings.secret
-                prefs[DOMAIN] = settings.domain
-            }
+            prefs[ENROLLMENT] = requireNotNull(owner.enrollment)
+            prefs[USERNAME] = credentials.username
+            prefs[SECRET] = credentials.secret
+            prefs[DOMAIN] = credentials.domain
         }
+    }
+
+    suspend fun clear() {
+        store.edit { it.clear() }
     }
 
     companion object {
         private const val STORE_NAME = "companion_softphone"
+        private val ENROLLMENT = stringPreferencesKey("enrollment")
         private val USERNAME = stringPreferencesKey("username")
         private val SECRET = stringPreferencesKey("secret")
         private val DOMAIN = stringPreferencesKey("domain")

@@ -3,12 +3,9 @@ package com.odoocompanion.calllog
 import android.Manifest
 import android.provider.CallLog
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
 import androidx.work.ListenableWorker
 import androidx.work.WorkManager
-import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
-import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.config.Settings
 import com.odoocompanion.config.enrol
@@ -35,10 +32,6 @@ class CallLogSyncWorkerTest {
 
     @Before
     fun setUp() {
-        WorkManagerTestInitHelper.initializeTestWorkManager(
-            app,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build(),
-        )
         FakeCallLogProvider.calls = emptyList()
         FakeCallLogProvider.returnsNull = false
         FakeCallLogProvider.onRead = {}

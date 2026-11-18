@@ -2,6 +2,8 @@ package com.odoocompanion.net
 
 import android.util.Log
 import com.odoocompanion.config.Settings
+import com.odoocompanion.config.canonicalBaseUrl
+import com.odoocompanion.data.FileStamp
 import com.odoocompanion.push.PushKeyLookup
 import com.odoocompanion.push.PushRegistration
 import com.odoocompanion.softphone.SoftphoneLookup
@@ -33,6 +35,8 @@ import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
+enum class RetryScope { REQUEST, LINK, ROW, LOCAL_FILE }
+
 sealed interface UploadOutcome {
     data class Success(
         val accepted: Int,
@@ -46,57 +50,94 @@ sealed interface UploadOutcome {
 
     data object Duplicate : UploadOutcome
 
-    data class Retry(
-        val reason: String,
-        val serverFault: Boolean = false,
-        val linkDown: Boolean = false,
-    ) : UploadOutcome
+    data class Retry(val reason: String, val scope: RetryScope = RetryScope.REQUEST,) :
+        UploadOutcome
 
     data class TooLarge(val limitBytes: Long?) : UploadOutcome
 }
 
 class OdooClient(
     private val http: OkHttpClient = defaultClient(),
-    private val onServerNamedItself: suspend () -> Unit = {},
+    private val onServerNamedItself: suspend (baseUrl: String) -> Unit = {},
 ) {
-    suspend fun post(settings: Settings, suffix: String, body: String): UploadOutcome =
-        post(settings, suffix, body.toRequestBody(JSON))
+    private var unpersistedServiceUrl: String? = null
 
-    suspend fun post(
-        settings: Settings,
-        suffix: String,
+    // One sequential drain talks to a fixed destination. A named reply tightens
+    // the contract immediately for every subsequent batch and file in that drain.
+    fun uploads(settings: Settings): Uploads {
+        val baseUrl = canonicalBaseUrl(settings.baseUrl)
+        if (unpersistedServiceUrl != baseUrl || settings.serverNamesItself) {
+            unpersistedServiceUrl = null
+        }
+        return Uploads(settings, baseUrl)
+    }
+
+    inner class Uploads internal constructor(
+        private val settings: Settings,
+        private val baseUrl: String,
+    ) {
+        val enrollment = settings.enrollment
+        private var requiresName = settings.serverNamesItself || unpersistedServiceUrl == baseUrl
+
+        suspend fun post(suffix: String, body: String): UploadOutcome =
+            post(suffix, body.toRequestBody(JSON))
+
+        suspend fun post(
+            suffix: String,
+            file: File,
+            metadata: JsonObject,
+            fileKey: String = FileBody.AUDIO_KEY,
+        ): UploadOutcome = post(suffix, FileBody(metadata, file, JSON, fileKey))
+
+        internal suspend fun post(suffix: String, body: RequestBody): UploadOutcome = exchange(
+            settings,
+            suffix,
+            body,
+            failed = { reason, cause ->
+                when (cause) {
+                    is UploadSourceUnavailable -> UploadOutcome.Retry(
+                        cause.message.orEmpty(),
+                        RetryScope.LOCAL_FILE
+                    )
+
+                    is InterruptedIOException -> UploadOutcome.Retry(reason)
+
+                    else -> UploadOutcome.Retry(reason, RetryScope.LINK)
+                }
+            },
+        ) { code, text, reply ->
+            if (reply.namesTheService() && (!requiresName || unpersistedServiceUrl == baseUrl)) {
+                requiresName = true
+                unpersistedServiceUrl = baseUrl
+                try {
+                    onServerNamedItself(baseUrl)
+                    unpersistedServiceUrl = null
+                } catch (failure: IOException) {
+                    Log.w(
+                        TAG,
+                        "Could not save the server capability (${failure.javaClass.simpleName})"
+                    )
+                }
+            }
+            classify(code, text, reply, requiresName)
+        }
+    }
+
+    internal fun fileBody(
         file: File,
         metadata: JsonObject,
-        fileKey: String = FileBody.AUDIO_KEY,
-    ): UploadOutcome = post(settings, suffix, FileBody(metadata, file, JSON, fileKey))
-
-    fun wireSize(file: File, metadata: JsonObject, fileKey: String = FileBody.AUDIO_KEY,): Long =
-        FileBody(metadata, file, JSON, fileKey).contentLength()
-
-    private suspend fun post(
-        settings: Settings,
-        suffix: String,
-        body: RequestBody,
-    ): UploadOutcome = exchange(
-        settings,
-        suffix,
-        body,
-        failed = { reason, cause ->
-            UploadOutcome.Retry(reason, linkDown = cause !is InterruptedIOException)
-        },
-    ) { code, text, reply ->
-        if (!settings.serverNamesItself && reply.namesTheService()) onServerNamedItself()
-        classify(code, text, reply, settings.serverNamesItself)
-    }
+        fileKey: String,
+        source: FileStamp,
+    ): FileBody = FileBody(metadata, file, JSON, fileKey, source)
 
     suspend fun softphone(settings: Settings): SoftphoneLookup = exchange(
         settings,
         SOFTPHONE,
         body = null,
         failed = { reason, _ -> SoftphoneLookup.Unavailable(reason) },
-    ) { code, text, reply ->
+    ) { code, _, reply ->
         when {
-            !reply.namesTheService() -> SoftphoneLookup.Unavailable(notOdoo(code, text))
+            !reply.namesTheService() -> SoftphoneLookup.Unavailable(notOdoo(code))
 
             code in 200..299 ->
                 SoftphoneSettings.fromReply(reply)?.let { SoftphoneLookup.Found(it) }
@@ -106,7 +147,7 @@ class OdooClient(
 
             code in AUTH_REFUSED -> SoftphoneLookup.Refused(code)
 
-            else -> SoftphoneLookup.Unavailable(reasonFor(code, text))
+            else -> SoftphoneLookup.Unavailable(reasonFor(code))
         }
     }
 
@@ -132,17 +173,17 @@ class OdooClient(
         PUSH,
         body,
         failed = { reason, _ -> PushKeyLookup.Unavailable(reason) },
-    ) { code, text, reply ->
+    ) { code, _, reply ->
         val key = reply.primitive("vapid_public_key")?.takeIf { it.isString }?.content
         when {
-            !reply.namesTheService() -> PushKeyLookup.Unavailable(notOdoo(code, text))
+            !reply.namesTheService() -> PushKeyLookup.Unavailable(notOdoo(code))
 
             code in 200..299 && key != null ->
                 PushKeyLookup.Found(key, reply.primitive("registered")?.booleanOrNull == true)
 
             reply.errorIs(PUSH_UNAVAILABLE) -> PushKeyLookup.Off
 
-            else -> PushKeyLookup.Unavailable(reasonFor(code, text))
+            else -> PushKeyLookup.Unavailable(reasonFor(code))
         }
     }
 
@@ -160,8 +201,8 @@ class OdooClient(
                 .apply { if (body == null) get() else post(body) }
                 .build()
         } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Cannot build a request for $suffix", e)
-            return failed(e.message ?: "malformed endpoint URL", e)
+            Log.w(TAG, "Cannot build a request for $suffix")
+            return failed("malformed endpoint URL or authorization header", e)
         }
         return try {
             http.newCall(request).await().use { response ->
@@ -169,8 +210,9 @@ class OdooClient(
                 read(response.code, text, text.asJsonObject())
             }
         } catch (e: IOException) {
-            Log.w(TAG, "Request to $suffix failed", e)
-            failed(e.message ?: "network failure", e)
+            val reason = "request failed (${e.javaClass.simpleName})"
+            Log.w(TAG, "$suffix: $reason")
+            failed(reason, e)
         }
     }
 
@@ -201,10 +243,10 @@ class OdooClient(
         )
         return when {
             removesRows(code) && !body.isOdooReply(mustNameItself) ->
-                UploadOutcome.Retry(notOdoo(code, text), linkDown = true)
+                UploadOutcome.Retry(notOdoo(code), RetryScope.LINK)
 
             code in 200..299 && !body.reportsSuccess() ->
-                UploadOutcome.Retry(notOdoo(code, text), linkDown = true)
+                UploadOutcome.Retry(notOdoo(code), RetryScope.LINK)
 
             code in 200..299 -> UploadOutcome.Success(
                 counts.accepted,
@@ -228,10 +270,13 @@ class OdooClient(
             code == HTTP_TOO_LARGE -> UploadOutcome.TooLarge(declaredLimit(text, body))
 
             else -> UploadOutcome.Retry(
-                reasonFor(code, text),
-                serverFault = code in ROW_FAULTS,
-                linkDown = code == HTTP_UNAVAILABLE ||
-                    (code in DEVICE_REFUSALS && body.isOdooReply(mustNameItself)),
+                reasonFor(code),
+                when {
+                    code in ROW_FAULTS -> RetryScope.ROW
+                    code == HTTP_UNAVAILABLE -> RetryScope.LINK
+                    code in DEVICE_REFUSALS && body.isOdooReply(mustNameItself) -> RetryScope.LINK
+                    else -> RetryScope.REQUEST
+                },
             )
         }
     }
@@ -243,8 +288,8 @@ class OdooClient(
     private fun removesRows(code: Int): Boolean =
         code in 200..299 || code == HTTP_CONFLICT || code in PERMANENTLY_REFUSED
 
-    private fun notOdoo(code: Int, text: String): String =
-        "$code from something that is not the Odoo endpoint${excerpt(text)} - a captive " +
+    private fun notOdoo(code: Int): String =
+        "$code from something that is not the Odoo endpoint - a captive " +
             "portal or proxy is answering, so the queue is kept"
 
     private data class Counts(val accepted: Int, val duplicates: Int, val skipped: Int)
@@ -253,7 +298,7 @@ class OdooClient(
 
     private fun JsonObject?.isOdooReply(mustNameItself: Boolean): Boolean = when {
         this == null -> false
-        mustNameItself -> namesTheService()
+        mustNameItself || "service" in this -> namesTheService()
         else -> "status" in this || "error" in this
     }
 
@@ -271,7 +316,7 @@ class OdooClient(
     private fun JsonObject?.indexesAt(key: String): List<Int> =
         (this?.get(key) as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.intOrNull }.orEmpty()
 
-    private fun reasonFor(code: Int, text: String): String = when (code) {
+    private fun reasonFor(code: Int): String = when (code) {
         401, 403 -> "auth rejected ($code)"
 
         404 ->
@@ -282,13 +327,8 @@ class OdooClient(
 
         in 500..599 -> "server $code"
 
-        else -> "unexpected response $code${excerpt(text)}"
+        else -> "unexpected response $code"
     }
-
-    private fun excerpt(text: String): String =
-        text.take(MAX_EXCERPT_CHARS).split(WHITESPACE).filter { it.isNotEmpty() }
-            .joinToString(" ")
-            .let { if (it.isEmpty()) "" else ": $it" }
 
     private companion object {
         const val TAG = "OdooClient"
@@ -297,8 +337,6 @@ class OdooClient(
         const val HTTP_TOO_LARGE = 413
         val DECLARED_KILOBYTES = Regex("""maximum size of (\d+)KB""")
         const val MAX_READ_BYTES = 64L * 1024
-        const val MAX_EXCERPT_CHARS = 120
-        val WHITESPACE = Regex("""\s+""")
         const val HTTP_UNPROCESSABLE = 422
         const val HTTP_NOT_FOUND = 404
         const val SOFTPHONE = "softphone"

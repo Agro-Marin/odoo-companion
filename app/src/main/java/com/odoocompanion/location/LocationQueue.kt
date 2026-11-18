@@ -1,15 +1,17 @@
 package com.odoocompanion.location
 
 import com.odoocompanion.config.DEFAULT_MIN_MOVE_METRES
+import com.odoocompanion.data.LocationDepth
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.OutboxLimits
-import com.odoocompanion.data.QueueDepth
 import com.odoocompanion.net.LocationFix
 import com.odoocompanion.net.WireJson
 import com.odoocompanion.sync.UploadCadence
 import com.odoocompanion.system.debug
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlin.math.asin
 import kotlin.math.cos
@@ -21,6 +23,8 @@ class LocationQueue(
     private val dao: OutboxDao,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
+    private val recording = Mutex()
+    private var owner: String? = null
     private var askedAt: Long? = null
 
     private var lastQueued: LocationFix? = null
@@ -30,9 +34,15 @@ class LocationQueue(
         windowSeconds: Long,
         minMoveMetres: Long = DEFAULT_MIN_MOVE_METRES,
         enrollment: String? = null,
-    ): Boolean {
+    ): Boolean = recording.withLock {
         if (fixes.isEmpty()) return false
-        val moving = fixes.filter { worthKeeping(it, minMoveMetres) }
+        val sameOwner = enrollment == owner
+        var previous = lastQueued.takeIf { sameOwner }
+        val moving = fixes.filter { fix ->
+            val keep = worthKeeping(previous, fix, minMoveMetres)
+            if (keep) previous = fix
+            keep
+        }
         if (moving.isEmpty()) {
             debug(TAG) { "dropped ${fixes.size} fix(es) under $minMoveMetres m of the last kept" }
             return false
@@ -48,41 +58,37 @@ class LocationQueue(
                 )
             },
         )
-        val depth = trimToBound(enrollment)
+        if (!sameOwner) askedAt = null
+        owner = enrollment
+        lastQueued = previous
         val at = now()
+        val depth = trimToBound(enrollment, at)
         val due = UploadCadence.dueNow(
-            queued = depth.queued,
+            queued = depth.ready,
             oldestCreatedAt = depth.oldestCreatedAt,
             windowSeconds = windowSeconds,
             now = at,
         )
         val last = askedAt
-        val asked = due && (last == null || at - last >= windowSeconds * 1_000)
+        val asked = due && (last == null || at < last || at - last >= windowSeconds * 1_000)
         debug(TAG) {
-            "kept ${moving.size} of ${fixes.size} fix(es), ${depth.queued} queued, " +
+            "kept ${moving.size} of ${fixes.size} fix(es), ${depth.total} stored, " +
                 "due=$due, asking=$asked"
         }
         if (asked) askedAt = at
-        return asked
+        asked
     }
 
-    private fun worthKeeping(fix: LocationFix, minMoveMetres: Long): Boolean {
-        if (minMoveMetres <= 0) return true
-        val last = lastQueued
-        if (last == null || fix.timestamp - last.timestamp >= HEARTBEAT_MILLIS) {
-            lastQueued = fix
-            return true
-        }
-        if (metresBetween(last, fix) < minMoveMetres) return false
-        lastQueued = fix
-        return true
-    }
+    private fun worthKeeping(last: LocationFix?, fix: LocationFix, minMoveMetres: Long): Boolean =
+        minMoveMetres <= 0 || last == null || fix.timestamp < last.timestamp ||
+            fix.timestamp - last.timestamp >= HEARTBEAT_MILLIS ||
+            metresBetween(last, fix) >= minMoveMetres
 
-    private suspend fun trimToBound(enrollment: String?): QueueDepth {
-        val depth = dao.depthOf(OutboxKind.LOCATION, enrollment = enrollment)
-        if (depth.queued <= OutboxLimits.MAX_QUEUED_FIXES) return depth
+    private suspend fun trimToBound(enrollment: String?, at: Long): LocationDepth {
+        val depth = dao.locationDepth(enrollment, UploadCadence.BATCH_THRESHOLD, at)
+        if (depth.total <= OutboxLimits.MAX_QUEUED_FIXES) return depth
         dao.trimOldest(OutboxKind.LOCATION, OutboxLimits.TRIMMED_FIXES)
-        return dao.depthOf(OutboxKind.LOCATION, enrollment = enrollment)
+        return dao.locationDepth(enrollment, UploadCadence.BATCH_THRESHOLD, at)
     }
 
     companion object {

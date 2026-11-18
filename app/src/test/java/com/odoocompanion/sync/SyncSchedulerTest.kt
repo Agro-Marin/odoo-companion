@@ -1,38 +1,24 @@
 package com.odoocompanion.sync
 
 import android.Manifest
-import android.app.Application
 import android.provider.CallLog
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import androidx.work.testing.SynchronousExecutor
-import androidx.work.testing.WorkManagerTestInitHelper
+import com.odoocompanion.CompanionApp
 import com.odoocompanion.config.Settings
 import com.odoocompanion.recording.RecordingScanner
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
-import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class)
 class SyncSchedulerTest {
-    private val app: Application get() = ApplicationProvider.getApplicationContext()
-
-    @Before
-    fun setUp() {
-        WorkManagerTestInitHelper.initializeTestWorkManager(
-            app,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build(),
-        )
-    }
+    private val app: CompanionApp get() = ApplicationProvider.getApplicationContext()
 
     private fun states(name: String): List<WorkInfo.State> =
         WorkManager.getInstance(app).getWorkInfosForUniqueWork(name).get().map { it.state }

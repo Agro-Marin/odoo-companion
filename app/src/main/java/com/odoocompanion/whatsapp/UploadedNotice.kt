@@ -7,12 +7,13 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.odoocompanion.R
 import com.odoocompanion.ui.MainActivity
-import com.odoocompanion.ui.SettingsActivity
+import com.odoocompanion.ui.labelResource
 
 // What a notice says about a WhatsApp document that reached Odoo: what it
 // is, which file, and the chat it came from.
@@ -46,9 +47,10 @@ object UploadedNotice {
         (document.metadata.fileName + document.metadata.receivedAt).hashCode() and Int.MAX_VALUE
 
     fun post(context: Context, delivered: List<QueuedDocument>) {
-        if (delivered.isEmpty() || !allowed(context)) return
-        ensureChannel(context)
+        if (delivered.isEmpty()) return
         val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled() || !permissionGranted(context)) return
+        ensureChannel(context)
         val open = PendingIntent.getActivity(
             context,
             0,
@@ -57,12 +59,13 @@ object UploadedNotice {
         )
         val documents = delivered.map { idOf(it) to of(it) }
         documents.forEach { (id, document) ->
+            val message = detail(context, document)
             val notice = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_document)
                 .setColor(ContextCompat.getColor(context, R.color.xiuman_fertil))
                 .setContentTitle(title(context, document))
-                .setContentText(detail(context, document))
-                .setStyle(NotificationCompat.BigTextStyle().bigText(detail(context, document)))
+                .setContentText(message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .setGroup(GROUP)
@@ -93,7 +96,7 @@ object UploadedNotice {
 
     private fun title(context: Context, document: UploadedDocument): String {
         val kind = document.kind?.takeIf { it.uploads }
-            ?.let { context.getString(SettingsActivity.kindName(it)) }
+            ?.let { context.getString(it.labelResource) }
             ?: context.getString(R.string.notification_kind_document)
         return context.getString(R.string.notification_document_title, kind)
     }
@@ -110,8 +113,8 @@ object UploadedNotice {
 
     // Android 13+ asks for the permission, and every version lets the person
     // switch the app's notices off: either way nothing is posted.
-    private fun allowed(context: Context): Boolean =
-        NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+    private fun permissionGranted(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
 

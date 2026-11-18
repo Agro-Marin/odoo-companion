@@ -32,9 +32,7 @@ import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.DeviceHealth
 import com.odoocompanion.whatsapp.ContactBook
-import com.odoocompanion.whatsapp.DocumentKind
 import com.odoocompanion.whatsapp.Sighting
-import com.odoocompanion.whatsapp.UploadState
 import com.odoocompanion.whatsapp.WhatsAppIntake
 import com.odoocompanion.whatsapp.WhatsAppNotificationListener
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +40,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
@@ -68,21 +65,11 @@ class SettingsActivity : AppCompatActivity() {
 
     private var governedKeys: Set<String> = emptySet()
 
-    // "Last upload: 2 minutes ago" is how long the phone has been silent, and an
-    // idle phone writes nothing to the store that would redraw it: without a
-    // tick it said "2 minutes ago" for as long as the screen stayed open.
-    private val minutes = flow {
-        while (true) {
-            emit(Unit)
-            delay(STATUS_TICK_MILLIS)
-        }
-    }
-
     // The grant the WhatsApp card's button opens, as the card last said.
     private var whatsappMissing: WhatsAppGrant? = null
 
     // Each document file in the outbox, and whether it was set aside.
-    private var documentQueue: Map<String, QueuedFileState> = emptyMap()
+    private var documentQueue: Map<String, List<QueuedFileState>> = emptyMap()
 
     private var shownHeld: HeldQueue? = null
 
@@ -144,7 +131,7 @@ class SettingsActivity : AppCompatActivity() {
                     app.config.settings,
                     StatusText.queueCounts(app),
                     refusal,
-                    merge(healthChecks, minutes),
+                    merge(healthChecks, statusMinutes),
                     combine(
                         app.softphones.configured,
                         StatusText.localNetworkWanted(app, healthChecks),
@@ -169,10 +156,10 @@ class SettingsActivity : AppCompatActivity() {
                 launch(Dispatchers.IO) { app.whatsapp.open() }
                 combine(
                     app.whatsapp.sightings,
-                    app.database.outbox().fileStates(OutboxKind.DOCUMENT),
-                    merge(healthChecks, minutes),
+                    app.database.outbox().fileStates(OutboxKind.DOCUMENT).distinctUntilChanged(),
+                    merge(healthChecks, statusMinutes),
                 ) { sightings, queue, _ ->
-                    documentQueue = queue.associateBy { it.filePath }
+                    documentQueue = queue.groupBy { it.filePath }
                     WhatsAppPanel.card(
                         listenerOn = WhatsAppNotificationListener.isEnabled(this@SettingsActivity),
                         listenerConnected = WhatsAppNotificationListener.connected,
@@ -330,16 +317,8 @@ class SettingsActivity : AppCompatActivity() {
             else -> getString(R.string.whatsapp_item_no_phone)
         }
         val kind = sighting.classification?.let { read ->
-            val name = getString(kindName(read.kind))
-            val upload = when (WhatsAppIntake.uploadStateOf(sighting, documentQueue)) {
-                UploadState.WAITING -> R.string.whatsapp_upload_waiting
-                UploadState.QUEUED -> R.string.whatsapp_upload_queued
-                UploadState.DELIVERED -> R.string.whatsapp_upload_done
-                UploadState.SET_ASIDE -> R.string.whatsapp_upload_failed
-                UploadState.GONE -> R.string.whatsapp_upload_gone
-                UploadState.WITHDRAWN -> R.string.whatsapp_upload_withdrawn
-                null -> null
-            }
+            val name = getString(read.kind.labelResource)
+            val upload = WhatsAppIntake.uploadStateOf(sighting, documentQueue)?.labelResource
             listOfNotNull(
                 name,
                 read.rfc?.let { getString(R.string.whatsapp_item_rfc, it) },
@@ -549,18 +528,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val STATUS_TICK_MILLIS = 60_000L
 
         private const val REBIND_GRACE_MILLIS = 3_000L
 
         private val FORM_KEYS = ManagedKey.ALL
-
-        @StringRes
-        fun kindName(kind: DocumentKind): Int = when (kind) {
-            DocumentKind.CSF -> R.string.whatsapp_kind_csf
-            DocumentKind.INE -> R.string.whatsapp_kind_ine
-            DocumentKind.PASSPORT -> R.string.whatsapp_kind_passport
-            DocumentKind.OTHER -> R.string.whatsapp_kind_other
-        }
     }
 }

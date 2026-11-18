@@ -3,6 +3,7 @@ package com.odoocompanion.ui
 import android.content.Context
 import android.content.res.ColorStateList
 import android.text.format.DateUtils
+import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.core.widget.ImageViewCompat
@@ -10,20 +11,32 @@ import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.OutboxCounts
+import com.odoocompanion.data.UploadState
 import com.odoocompanion.databinding.AlertBandBinding
 import com.odoocompanion.databinding.StatePillBinding
 import com.odoocompanion.system.DeviceHealth
 import com.odoocompanion.system.LocalNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
+
+// Relative times also advance while the outbox and settings are idle.
+internal val statusMinutes: Flow<Unit> = flow {
+    while (true) {
+        emit(Unit)
+        delay(DateUtils.MINUTE_IN_MILLIS)
+    }
+}
 
 // The status panel as text, formatted before it is compared, so the minute
 // tick redraws "2 minutes ago" while an unchanged panel draws nothing. Home
@@ -78,12 +91,14 @@ object StatusText {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun localNetworkWanted(app: CompanionApp, checks: Flow<*>): Flow<Boolean> = combine(
-        app.config.settings.map { it.baseUrl.takeIf { _ -> it.isEnrolled } },
+        app.config.settings.map { if (it.isEnrolled) it.baseUrl else null }.distinctUntilChanged(),
         app.softphones.domain,
         checks,
     ) { baseUrl, domain, _ -> baseUrl to domain }
         .mapLatest { (baseUrl, domain) -> LocalNetwork.anyLocal(baseUrl, domain) }
         .flowOn(Dispatchers.IO)
+        // Show enrollment and queue counts while DNS resolves the optional permission warning.
+        .onStart { emit(false) }
         .distinctUntilChanged()
 
     suspend fun localNetworkWanted(app: CompanionApp, settings: Settings): Boolean =
@@ -153,3 +168,15 @@ class AlertBand(private val band: AlertBandBinding, onGrant: () -> Unit) {
         }
     }
 }
+
+@get:StringRes
+internal val UploadState.labelResource: Int
+    get() = when (this) {
+        UploadState.WAITING -> R.string.whatsapp_upload_waiting
+        UploadState.QUEUED -> R.string.whatsapp_upload_queued
+        UploadState.DELIVERED -> R.string.whatsapp_upload_done
+        UploadState.SET_ASIDE -> R.string.whatsapp_upload_failed
+        UploadState.GONE -> R.string.whatsapp_upload_gone
+        UploadState.WITHDRAWN -> R.string.whatsapp_upload_withdrawn
+        UploadState.UNCONFIRMED -> R.string.upload_unconfirmed
+    }

@@ -2,14 +2,15 @@ package com.odoocompanion.whatsapp
 
 import android.content.Context
 import com.odoocompanion.CompanionApp
-import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.QueuedFileState
+import com.odoocompanion.data.UploadState
 import com.odoocompanion.net.DocumentMetadata
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.system.debug
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -22,12 +23,11 @@ class DocumentQueue(
     suspend fun queueClassified(): Int = queueing.withLock {
         val ready = store.toUpload()
         if (ready.isEmpty()) return@withLock 0
-        val queued = dao.filesQueued(OutboxKind.DOCUMENT).toHashSet()
-        val fresh = ready.mapNotNull { sighting ->
-            sighting.filePath?.takeIf(queued::add)?.let { path -> entryOf(sighting, path) }
-        }
+        val queued = dao.fileStates(OutboxKind.DOCUMENT).first().groupBy { it.filePath }
+        val fresh = ready.distinctBy { it.fileVersion }.filter { it.queueRow(queued) == null }
+            .map { entryOf(it, requireNotNull(it.filePath)) }
         if (fresh.isNotEmpty()) dao.insertAll(fresh)
-        store.markQueued(ready.mapNotNullTo(HashSet()) { it.filePath })
+        store.markQueued(ready)
         debug(TAG) { "${ready.size} document(s) ready, ${fresh.size} queued" }
         fresh.size
     }
@@ -53,6 +53,7 @@ class DocumentQueue(
                 rfc = read?.rfc,
             ).encode(),
             filePath = path,
+            source = read?.source,
             createdAt = now(),
             enrollment = enrollment,
         )
@@ -68,29 +69,20 @@ class DocumentQueue(
 }
 
 object WhatsAppIntake {
-    private val reader = PageReader()
-
     suspend fun process(context: Context) {
         val app = CompanionApp.from(context)
-        app.whatsapp.classifyPending(reader::classify)
-        val settings = app.config.currentOrNull()
-        val queued = DocumentQueue(app.whatsapp, app.database.outbox(), settings?.enrollment)
+        app.whatsapp.classifyPending(app.documentReader::classify)
+        val settings = app.config.currentOrNull() ?: return
+        val queued = DocumentQueue(app.whatsapp, app.database.outbox(), settings.enrollment)
             .queueClassified()
-        if (queued == 0 || settings == null) return
+        if (queued == 0) return
         if (settings.isEnrolled) SyncScheduler.uploadNow(context, settings.wifiOnlyUploads)
     }
 
-    fun uploadStateOf(sighting: Sighting, queue: Map<String, QueuedFileState>): UploadState? {
+    fun uploadStateOf(sighting: Sighting, queue: Map<String, List<QueuedFileState>>): UploadState? {
         if (sighting.classification?.kind?.uploads != true) return null
-        if (!sighting.queued) return UploadState.WAITING
-        val row = queue[sighting.filePath] ?: return UploadState.DELIVERED
-        return when (row.deadReason) {
-            null -> UploadState.QUEUED
-            DeadReason.GONE -> UploadState.GONE
-            DeadReason.WITHDRAWN -> UploadState.WITHDRAWN
-            else -> UploadState.SET_ASIDE
-        }
+        val row = sighting.queueRow(queue)
+        if (row == null && sighting.outcome == null && !sighting.queued) return UploadState.WAITING
+        return UploadState.forFile(row, sighting.outcome)
     }
 }
-
-enum class UploadState { WAITING, QUEUED, DELIVERED, SET_ASIDE, GONE, WITHDRAWN }

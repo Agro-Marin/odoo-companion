@@ -136,6 +136,7 @@
     <string name="whatsapp_item_no_notice">no number: there was no notice</string>
     <string name="whatsapp_upload_waiting">goes to Odoo</string>
     <string name="whatsapp_upload_queued">⏳ queued for Odoo</string>
+    <string name="upload_unconfirmed">Delivery unconfirmed</string>
     <string name="whatsapp_upload_done">✅ in Odoo</string>
     <string name="whatsapp_upload_failed">⚠️ Odoo did not take it</string>
     <string name="whatsapp_upload_gone">⚠️ the file left WhatsApp before it was sent</string>
@@ -145,6 +146,7 @@
     <string name="scan_none_yet">Scan a document or pick a PDF or a photo: it goes to Odoo\'s Documents as uploaded by whoever holds this phone.</string>
     <string name="scan_recent">Sent from this phone</string>
     <string name="scan_queued">Document queued for Odoo</string>
+    <string name="scan_too_large">Documents can be up to 36 MiB</string>
     <string name="scan_unreadable">The document could not be read</string>
     <string name="scan_unavailable">The document scanner is not available on this phone</string>
     <string name="scan_file_name">Scan %1$s.pdf</string>
@@ -212,7 +214,7 @@
     <string name="new_admin_body">The gear\'s Settings now ask for the administrator password. The version you have is at the bottom of Home.</string>
     <string name="new_lock_widget_title">Scan from the lock screen</string>
     <string name="new_lock_widget_body">The Scan widget now works on the home screen and can go on the lock screen: touch and hold the lock screen, choose Widgets and add Companion. Tapping it asks you to unlock and opens the scanner.</string>
-    <string name="share_partly_queued">%1$d of %2$d items queued for Odoo; the rest could not be read</string>
+    <string name="share_partly_queued">%1$d of %2$d items queued for Odoo</string>
     <string name="new_share_title">Share to Odoo</string>
     <string name="new_share_body">Photos and files can now be sent from any app: tap Share and choose Odoo Companion. They reach Odoo\'s Documents under your name.</string>
     <plurals name="share_queued">

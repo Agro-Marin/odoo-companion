@@ -21,7 +21,7 @@ to whatever Odoo instance those point at.
 ## Endpoints used
 
 All are authenticated with `Authorization: Bearer <token>`, where `<identifier>` is
-the device's identifier in Odoo; the three uploads are `POST`, the softphone
+the device's identifier in Odoo; the upload routes are `POST`, the softphone
 settings `GET`, and the push registration both:
 
 | Purpose | Route | Body |
@@ -29,6 +29,7 @@ settings `GET`, and the push registration both:
 | Location | `/remote/mobile/<identifier>/location` | `{"points": [ … ]}` |
 | Call logs | `/remote/mobile/<identifier>/calllog` | `{"calls": [ … ]}` |
 | Recordings | `/remote/mobile/<identifier>/recording` | one object with `audio_b64` |
+| Documents (with `device_mobile_document`) | `/remote/mobile/<identifier>/document` | one object with `file_b64` and document metadata |
 | Softphone settings | `/remote/mobile/<identifier>/softphone` | — |
 | Wake-ups | `/remote/mobile/<identifier>/push` | `GET`: none; `POST`: `{"endpoint", "keys": {"p256dh", "auth"}}`, or `{"endpoint": null}` to leave |
 
@@ -67,12 +68,13 @@ The softphone settings answer `{"sip": {"username", "secret", "domain", "transpo
 the extension of the device's **user** on the company phone system (Odoo's
 `voip_device`), or 404 with `"error": "no_extension"` when that user has none. The app
 asks on every reconciliation (`CompanionApp.applyConfiguration`), keeps the last answer
-in its own store, and keeps registering with it while Odoo cannot be reached — an
+with its Odoo enrollment, and keeps registering with it while that Odoo cannot be reached — an
 Odoo outage must not silence the company number. `no_extension`, a 401 or 403 from
 Odoo (the device token revoked or rotated), or an unenrolled handset, stops the
 softphone and forgets the secret; a settings change waits for a call in progress to
 end. `domain` must be a bare host name or IPv4 address — no scheme, port or path —
-or the reply is not used.
+or the reply is not used. The first run after upgrading from an unscoped credential cache
+requires one successful lookup before the phone can use its extension offline.
 
 A recording carries `number`, `recorded_at`, `file_name`, `mimetype`, base64
 `audio_b64` and, when the container states it, `duration` in whole seconds.
@@ -112,11 +114,15 @@ set `upload_window_seconds` to `0` and every fix is sent on its own, exactly as 
 Call logs and recordings are unaffected — they are collected on their own schedule and
 upload as soon as they are found. `OutboxDrainer`
 batches up to 200 positions or 100 calls per request; recordings go one at a time,
-under a per-pass size budget, and the local file is removed with its queue row.
+under a per-pass size budget. A receipt first takes the file off the upload queue.
+For scans and WhatsApp documents, the drain saves that outcome to local history
+before removing the row. If history storage is unavailable, the next drain retries
+the local write. A temporary read failure defers just that file and leaves its
+delivery-attempt count intact.
 Draining is serialised — periodic, manual and post-collection uploads are separate
 WorkManager requests, and two that overlap would otherwise send the same rows twice.
 
-The location queue is capped at the newest 20,000 fixes (about two weeks at the default
+Across all enrollments, the location queue is capped at the newest 20,000 fixes (about two weeks at the default
 interval): a phone out of coverage would otherwise queue without limit, and the periodic
 upload cannot trim it because it is network-constrained and never runs while offline.
 The trim cuts back to 19,000 rather than to the cap — it is a delete with a
@@ -128,8 +134,7 @@ coverage (16.7 ms a fix against 1.8 ms with a short queue).
 used to dead-letter them alongside the call logs and put GPS fixes into the count
 an operator is meant to act on. A call log or a recording that nothing can deliver is
 marked dead rather than deleted: it stops being retried, the status screen counts it, and
-it is purged — with its audio — only after 90 days. An empty queue therefore means
-delivered, which is not something it used to mean.
+it is purged — with its audio — only after 90 days. An empty queue means there are no pending rows. Document history keeps its own delivery outcomes.
 
 **And dead is not permanent.** The retry budget is twenty-five drains, not
 twenty-five minutes, and WorkManager backs a failing worker off to a five-hour
@@ -341,10 +346,14 @@ each document and where it stands, and a notification says when one reached Odoo
   `document` row, once per file. The drain sends it to `/remote/mobile/<id>/document`
   under `file_b64`, along the recording's streamed path, with one difference: **the file
   is WhatsApp's, so it is never deleted**, neither on delivery nor when a set-aside row
-  is purged. The 90-day purge deletes only recording audio. A file that leaves WhatsApp's
-  folder before it is sent sets its row aside as `gone`, which the card shows as such:
-  the row is the card's only memory of the document, and while it was deleted the card
-  read the empty queue as delivered. On the server,
+  is purged. OCR reads a private, temporary copy of each eligible PDF. The queue records
+  its size, modification time and SHA-256 digest. Before sending, the uploader checks
+  those values and streams the verified copy. A missing or changed source sets the row
+  aside as `gone`. Android releases the temporary storage when its descriptor closes,
+  including after a process exit. For older rows without a digest, the uploader reads
+  the current copy with OCR and checks the saved document type and RFC when present.
+  It saves that copy's digest before the first request so retries use the same bytes.
+  A temporary read failure leaves the row queued. On the server,
   `device_mobile_document` (odoo) files it in Documents as uploaded by the phone's
   holder. From there the company's upload sort, and `l10n_mx_partner_import`'s offer to
   create the contact, take over. A file another row already read takes that verdict and
@@ -361,22 +370,26 @@ each document and where it stands, and a notification says when one reached Odoo
 
 Home's two tiles send a document by hand: **Scan** opens the system's document scanner
 (ML Kit, `play-services-mlkit-document-scanner`, one PDF of up to 20 pages per scan,
-gallery import allowed) and **Upload** picks a PDF or a photo.
+gallery import allowed) and **Upload** picks a PDF or a photo. The Android share sheet also
+accepts documents from other apps. All three routes use the same intake and size limit.
 
 - **Where the file comes from.** `ScanIntake` copies what was scanned or picked into
   `files/scans/` in the app's private storage before anything else: the picker's grant
-  on a file can lapse and the scanner's output is a cache the system may clear.
+  on a file can lapse and the scanner's output is a cache the system may clear. The copy
+  stops at 36 MiB. A failed read, an empty stream, or an oversized item leaves no queued file.
 - **Where it goes.** The copy is queued as a `scan` row and sent to the same
   `/remote/mobile/<id>/document` route a WhatsApp document takes, under `file_b64`, with
-  `file_name`, `mimetype`, `source` (`Scanner` or `File`) and `received_at`. On the server
+  `file_name`, `mimetype`, `source` (`Scanner`, `File` or `Shared`) and `received_at`. On the server
   `device_mobile_document` files it in Documents as uploaded by the phone's holder, and
   the company's upload sort takes over. Unlike a WhatsApp document the file is the app's
   own: **delivered, the copy is deleted with its row**, and a set-aside one is deleted by
   the 90-day purge.
-- **What Home shows.** `ScanLog` keeps the last ten scans in `files/scans.json`. A
-  scan whose file the outbox no longer holds was delivered, so its state is read off the
-  queue, as for a WhatsApp document. Where Odoo filed it is not shown: the server has no
-  route that answers that yet.
+- **What Home shows.** `ScanLog` keeps the last ten scans in `files/scans.json`. Live queue rows supply the current status.
+  Before removing a row, the uploader records Odoo’s acknowledgement or the expired
+  row’s final status in the scan or WhatsApp history. A historical item without a
+  queue row or a recorded outcome shows “Delivery unconfirmed”. If intake saved the
+  scan to the outbox but its history write failed, the uploader recovers its name,
+  source and collection time from the queued metadata within the ten-scan window.
 - A scan follows the phone's *Wi-Fi only* setting like every other upload.
 
 ## Wake-ups
@@ -395,7 +408,9 @@ an endpoint URL that leaks lets nobody command the phone.
 
 `applyConfiguration` asks Odoo for its push key on every reconcile and registers
 against it (`PushPlan` decides; `CompanionPushService` is the connector's
-callback). Nothing about it can stop a phone reporting: no distributor, an Odoo
+callback). Each enrollment gets its own distributor instance. Late callbacks from a retired
+instance are ignored. A legacy default registration is replaced at the next successful setup.
+Nothing about it can stop a phone reporting: no distributor, an Odoo
 that answers `push_unavailable` (no `ODOO_API_ENCRYPTION_KEY`), or an Odoo out of
 reach leave the periodic work exactly as it was. A handset with several
 distributors and none chosen takes the first by package name; MDM installs one.
@@ -567,7 +582,8 @@ spends its nights parked and its days waiting at client sites, most of that is t
 coordinate repeated.
 
 `min_move_metres` skips a fix that is closer than that to the **last fix kept** — not to
-the last one seen, so a slow drift still registers once it adds up. It is `0` by default,
+the last one seen, so a slow drift still registers once it adds up. Each enrollment starts
+with a fresh baseline, and a failed insert leaves the previous baseline in place. It is `0` by default,
 which keeps every fix and is what the app has always done: how finely a fleet is tracked
 is a decision for whoever runs the fleet, not something a release should change under
 them.
@@ -586,11 +602,10 @@ inside the distance a vehicle covers between two fixes.
 
 Release builds talk **only to HTTPS**. That is Android's default for `targetSdk` 28+ and it is
 kept deliberately: location, call metadata and call audio should not cross a network in the
-clear. A release build pointed at an `http://` URL fails every upload with
-`CLEARTEXT communication to <host> not permitted by network security policy`, which the app
-records in the outbox row's `lastError` and logs under the `OdooClient` tag (observed on a
-release build). So the app refuses such a URL before storing it, from the form and from a
-managed policy alike, asking the platform per host exactly as OkHttp does.
+clear. The form and managed policy check the host against Android’s network policy
+before storing the URL. When a transport failure reaches the uploader, the outbox and
+the `OdooClient` log record the exception type. The exception message can include the
+host or a local filename and is omitted.
 
 Debug builds relax this (`app/src/debug/AndroidManifest.xml`) so they can reach a development
 server — including `http://10.0.2.2:8069`, the host loopback as seen from an emulator. If an
@@ -686,8 +701,14 @@ row it posts is stored.
 ## Known constraints
 
 - **An uploaded recording is deleted from the phone.** Once the endpoint accepts it,
-  the drain removes the audio file from the OEM dialer's folder, and a row purged
-  after 90 days undeliverable takes its file too. This is deliberate — a fleet
+  the drain removes the audio file from the OEM dialer's folder. Cleanup also runs
+  after 90 days for undeliverable rows. The app compares the recording's queued
+  size and modification time before upload and deletion. If the dialer reuses
+  a name and either value changes, the replacement stays available for harvest.
+  For a row created before database version 9, the original recording must
+  have been written by the time it was queued. A newer modification time
+  leaves the file for a fresh harvest. An eligible legacy file acquires a
+  stamp on its first drain. This is deliberate — a fleet
   handset would otherwise fill its storage with audio already safe in Odoo — but it
   means the phone is not a second copy, and a recording lost between the dialer
   writing it and Odoo storing it is lost outright. Anyone who expects the dialer's
@@ -813,7 +834,8 @@ re-derives them.
   each excluding `root`, `database`, `sharedpref` and `file`. Verified, not
   assumed: the token and the unsent queue stay on the handset they belong to.
 - **Exported components, read off the merged manifest.** The app's own: `MainActivity`
-  (the launcher); `BootReceiver`, whose two actions are system-only broadcasts and
+  (the launcher); `ShareActivity`, which checks read access to each shared content URI
+  before opening it; `BootReceiver`, whose two actions are system-only broadcasts and
   which returns at once on anything else; and a service only the system can bind,
   behind its binding permission -- `WhatsAppNotificationListener`
   (`BIND_NOTIFICATION_LISTENER_SERVICE`, which drops every other app's notice at its

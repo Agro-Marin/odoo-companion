@@ -1,8 +1,26 @@
 package com.odoocompanion.whatsapp
 
+import com.odoocompanion.data.FileStamp
 import java.io.File
+import java.io.IOException
 
-data class DocumentFile(val path: String, val name: String, val modifiedAt: Long, val size: Long)
+data class DocumentFile(val path: String, val name: String, val modifiedAt: Long, val size: Long) {
+    val stamp: FileStamp get() = FileStamp(size, modifiedAt)
+
+    private val sha256: String? by lazy(LazyThreadSafetyMode.NONE) {
+        try {
+            DocumentSnapshot.digest(File(path), size)
+        } catch (_: IOException) {
+            null
+        } catch (_: SecurityException) {
+            null
+        }
+    }
+
+    fun matches(source: FileStamp?): Boolean =
+        source != null && stamp.matchesQueuedMetadata(source, modifiedAt) &&
+            source.sha256 != null && source.sha256 == sha256
+}
 
 class WhatsAppDocuments(private val root: File) {
     fun scan(): List<DocumentFile> = CANDIDATE_DIRECTORIES

@@ -1,5 +1,6 @@
 package com.odoocompanion.whatsapp
 
+import com.odoocompanion.data.FileStamp
 import kotlinx.serialization.Serializable
 import java.text.Normalizer
 
@@ -15,7 +16,11 @@ enum class DocumentKind {
 }
 
 @Serializable
-data class Classification(val kind: DocumentKind, val rfc: String? = null)
+data class Classification(
+    val kind: DocumentKind,
+    val rfc: String? = null,
+    val source: FileStamp? = null
+)
 
 object DocumentClassifier {
     private val SAT_QR = Regex("""siat\.sat\.gob\.mx.*[?&]D3=\d+_([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})""")

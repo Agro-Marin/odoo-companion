@@ -2,6 +2,10 @@ package com.odoocompanion.whatsapp
 
 import android.util.AtomicFile
 import android.util.Log
+import com.odoocompanion.data.OutboxLimits
+import com.odoocompanion.data.QueuedFileState
+import com.odoocompanion.data.UploadState
+import com.odoocompanion.data.writeHistory
 import com.odoocompanion.system.debug
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,6 +18,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.nio.file.Files
 
 @Serializable
 data class Sighting(
@@ -31,12 +36,23 @@ data class Sighting(
     val queued: Boolean = false,
     val readFailures: Int = 0,
     val missing: Boolean = false,
+    val outcome: UploadState? = null,
 ) {
     val found: Boolean
         get() = filePath != null
 
     val unreadable: Boolean
         get() = found && classification == null && readFailures >= MAX_READ_ATTEMPTS
+
+    val fileVersion get() = filePath to classification?.source
+
+    fun queueRow(rowsByPath: Map<String, List<QueuedFileState>>): QueuedFileState? {
+        val candidates = rowsByPath[filePath] ?: return null
+        val source = classification?.source
+        return candidates.lastOrNull { it.source == source } ?: candidates.lastOrNull {
+            it.source == null && source != null && source.matchesQueuedMetadata(null, it.createdAt)
+        }
+    }
 
     fun sameDocumentAs(notice: DocumentNotice): Boolean =
         app == notice.app && chat == notice.chat && label == notice.label &&
@@ -71,26 +87,32 @@ class SightingStore(
 
     private var retired = emptyList<String>()
 
+    private var writePending = false
+
     val sightings: StateFlow<List<Sighting>?> = state.asStateFlow()
 
     suspend fun record(notices: List<DocumentNotice>): Int = lock.withLock {
-        val known = load()
+        val known = load() ?: return@withLock 0
         val fresh = mutableListOf<Sighting>()
         for (notice in notices) {
-            if ((known + fresh).none { it.sameDocumentAs(notice) }) fresh += sightingOf(notice)
+            if (known.none { it.sameDocumentAs(notice) } &&
+                fresh.none { it.sameDocumentAs(notice) }
+            ) {
+                fresh += sightingOf(notice)
+            }
         }
         save(matched(fresh + known, scan))
         fresh.size
     }
 
     suspend fun rematch() = lock.withLock {
-        val known = load()
+        val known = load() ?: return@withLock
         save(matched(known, scan))
     }
 
     suspend fun adoptLooseFiles(): Int = lock.withLock {
         val files = scan()
-        val known = matched(load()) { files }
+        val known = matched(load() ?: return@withLock 0) { files }
         val claimed = known.mapNotNullTo(HashSet()) { it.filePath }
         val loose = files
             .filter { it.path !in claimed && it.path !in retired }
@@ -103,7 +125,7 @@ class SightingStore(
     }
 
     suspend fun fillNumbers(numberOf: (String) -> String?) = lock.withLock {
-        val known = load()
+        val known = load() ?: return@withLock
         val asked = mutableMapOf<String, String?>()
         val filled = known.map { sighting ->
             if (sighting.phone != null || sighting.loose || sighting.sender.isBlank()) {
@@ -115,25 +137,27 @@ class SightingStore(
         if (filled != known) save(filled)
     }
 
-    suspend fun classifyPending(read: (File) -> Classification?): Int = reading.withLock {
-        val (earlier, pending) = lock.withLock {
-            val all = load()
-            val earlier = all.mapNotNull { row ->
-                val path = row.filePath ?: return@mapNotNull null
-                row.classification?.let { path to it }
-            }.toMap()
-            earlier to all.filter { it.found && it.classification == null && !it.unreadable }
-                .mapNotNull { it.filePath }
-                .filterNot { it in earlier }
-                .distinct()
+    suspend fun classifyPending(read: (File) -> Classification?): Int = reading.withLock classify@{
+        val all = lock.withLock { load() } ?: return@classify 0
+        val pending = all.filter { it.classification == null && !it.unreadable }
+            .mapNotNullTo(HashSet()) { it.filePath }
+        if (pending.isEmpty()) return@classify 0
+        val onDisk = scan().filter { it.path in pending }.associateBy { it.path }
+        val verdicts = all.mapNotNull { sighting ->
+            val path = sighting.filePath ?: return@mapNotNull null
+            val file = onDisk[path] ?: return@mapNotNull null
+            sighting.classification?.takeIf { file.matches(it.source) }?.let { path to it }
+        }.toMap().toMutableMap()
+        var reads = 0
+        for ((path, file) in onDisk) {
+            if (path in verdicts) continue
+            read(File(path))?.let {
+                verdicts[path] = if (it.source == null) it.copy(source = file.stamp) else it
+                reads++
+            }
         }
-        val onDisk = if (pending.isEmpty()) emptySet() else scan().mapTo(HashSet()) { it.path }
-        val fresh = pending.filter { it in onDisk }
-            .mapNotNull { path -> read(File(path))?.let { path to it } }
-            .toMap()
-        val verdicts = earlier + fresh
         lock.withLock {
-            val known = load()
+            val known = requireNotNull(state.value)
             val classified = known.map { sighting ->
                 val path = sighting.filePath
                 val verdict = verdicts[path]
@@ -154,17 +178,45 @@ class SightingStore(
             }
             if (classified != known) save(classified)
         }
-        fresh.size
+        reads
     }
 
     suspend fun toUpload(): List<Sighting> = lock.withLock {
-        load().filter { it.found && !it.queued && it.classification?.kind?.uploads == true }
+        load().orEmpty().filter {
+            it.found && !it.queued && it.outcome == null && it.classification?.kind?.uploads == true
+        }
     }
 
-    suspend fun markQueued(paths: Set<String>) = lock.withLock {
-        val known = load()
-        if (known.none { !it.queued && it.filePath in paths }) return@withLock
-        save(known.map { if (it.filePath in paths) it.copy(queued = true) else it })
+    suspend fun markQueued(ready: List<Sighting>) = lock.withLock {
+        val known = load() ?: return@withLock
+        val versions = ready.mapTo(HashSet()) { it.fileVersion }
+        save(
+            known.map {
+                if (!it.queued &&
+                    it.fileVersion in versions
+                ) {
+                    it.copy(queued = true)
+                } else {
+                    it
+                }
+            }
+        )
+    }
+
+    suspend fun remember(receipts: List<QueuedFileState>) = lock.withLock {
+        val known = load() ?: throw IOException("Document history unavailable")
+        val byPath = receipts.groupBy { it.filePath }
+        save(
+            known.map { sighting ->
+                sighting.queueRow(byPath)?.let {
+                    sighting.copy(
+                        queued = true,
+                        outcome = UploadState.fromDeadReason(it.deadReason)
+                    )
+                } ?: sighting
+            }
+        )
+        if (writePending) throw IOException("Document history is waiting for storage")
     }
 
     suspend fun open() = lock.withLock { load() }
@@ -176,6 +228,7 @@ class SightingStore(
         if (sightings.none { !it.found }) return sightings
         val files = scan()
         val claimed = sightings.mapNotNullTo(HashSet()) { it.filePath }
+        val classified = sightings.filter { it.classification != null }.groupBy { it.filePath }
         val loosePaths = sightings.filter { it.loose }.mapNotNullTo(HashSet()) { it.filePath }
         val adopted = mutableSetOf<String>()
         val result = mutableListOf<Sighting>()
@@ -193,8 +246,17 @@ class SightingStore(
                         result.removeAll { it.loose && it.filePath == file.path }
                     }
                 ?: resentFile(sighting, result, files)
-            result += file?.let {
-                sighting.copy(filePath = it.path, fileSize = it.size)
+            result += file?.let { found ->
+                val prior = classified[found.path]?.firstOrNull {
+                    found.matches(it.classification?.source)
+                }
+                sighting.copy(
+                    filePath = found.path,
+                    fileSize = found.size,
+                    classification = prior?.classification,
+                    queued = prior?.queued == true,
+                    outcome = prior?.outcome,
+                )
             } ?: sighting
         }
         debug(TAG) { "${result.count { it.found }} of ${result.size} sighting(s) matched" }
@@ -228,24 +290,39 @@ class SightingStore(
         file.modifiedAt - sighting.at in
             -DocumentMatcher.BEFORE_NOTICE_MILLIS..RESEND_SETTLE_MILLIS
 
-    private fun load(): List<Sighting> {
+    private fun load(): List<Sighting>? {
         state.value?.let { return it }
         val read = try {
             STORE_JSON.decodeFromString<StoredSightings>(
                 AtomicFile(file).readFully().decodeToString(),
             )
-        } catch (_: FileNotFoundException) {
+        } catch (failure: FileNotFoundException) {
+            if (!Files.notExists(file.toPath()) && file.parentFile?.isFile != true) {
+                Log.w(TAG, "Could not open the sightings (${failure.javaClass.simpleName})")
+                return null
+            }
             null
         } catch (e: IOException) {
-            Log.w(TAG, "Could not read the sightings; starting over", e)
-            null
+            Log.w(TAG, "Could not read the sightings (${e.javaClass.simpleName})")
+            return null
         } catch (e: SerializationException) {
-            Log.w(TAG, "Could not decode the sightings; starting over", e)
+            Log.w(TAG, "Could not decode the sightings; starting over (${e.javaClass.simpleName})")
             null
         }
         watchingSince = read?.watchingSince ?: now()
         retired = read?.retired.orEmpty()
-        val sightings = read?.sightings.orEmpty()
+        val sightings = read?.sightings.orEmpty().map { sighting ->
+            val verdict = sighting.classification
+            if (!sighting.queued && sighting.outcome == null &&
+                verdict?.kind?.uploads == true && verdict.source?.sha256 == null &&
+                (verdict.source?.size ?: 0) <= OutboxLimits.MAX_FILE_BYTES
+            ) {
+                // Older history never tied its verdict to the bytes being queued.
+                sighting.copy(classification = null, readFailures = 0)
+            } else {
+                sighting
+            }
+        }
         if (read == null) save(sightings) else state.value = sightings
         return sightings
     }
@@ -254,23 +331,16 @@ class SightingStore(
         val ordered = sightings.sortedByDescending { it.at }
         val kept = ordered.take(MAX_SIGHTINGS)
         val trimmed = ordered.drop(MAX_SIGHTINGS).mapNotNull { it.filePath }
-        if (kept == state.value && trimmed.all { it in retired }) return
+        if (!writePending && kept == state.value && trimmed.all { it in retired }) return
         retired = (retired - trimmed.toSet() + trimmed).takeLast(MAX_RETIRED)
         state.value = kept
-        val atomic = AtomicFile(file)
-        val out = try {
-            atomic.startWrite()
-        } catch (e: IOException) {
-            Log.w(TAG, "Could not write the sightings", e)
-            return
-        }
+        writePending = true
         try {
             val stored = StoredSightings(watchingSince, kept, retired)
-            out.write(STORE_JSON.encodeToString(stored).toByteArray())
-            atomic.finishWrite(out)
-        } catch (e: IOException) {
-            atomic.failWrite(out)
-            Log.w(TAG, "Could not write the sightings", e)
+            file.writeHistory(STORE_JSON.encodeToString(stored))
+            writePending = false
+        } catch (failure: IOException) {
+            Log.w(TAG, "Could not write the sightings (${failure.javaClass.simpleName})")
         }
     }
 
@@ -316,6 +386,9 @@ class SightingStore(
 
         const val LOOSE_SETTLE_MILLIS = 10_000L
 
-        private val STORE_JSON = Json { ignoreUnknownKeys = true }
+        private val STORE_JSON = Json {
+            ignoreUnknownKeys = true
+            coerceInputValues = true
+        }
     }
 }

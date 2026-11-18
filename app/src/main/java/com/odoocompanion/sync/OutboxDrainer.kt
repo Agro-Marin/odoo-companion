@@ -1,13 +1,16 @@
 package com.odoocompanion.sync
 
+import android.database.sqlite.SQLiteException
 import android.util.Log
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.CURRENT_PAYLOAD_VERSION
 import com.odoocompanion.data.DeadReason
+import com.odoocompanion.data.FileStamp
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.OutboxLimits
+import com.odoocompanion.data.QueuedFile
 import com.odoocompanion.net.CallLogUpload
 import com.odoocompanion.net.CallRecord
 import com.odoocompanion.net.DocumentMetadata
@@ -16,9 +19,11 @@ import com.odoocompanion.net.LocationFix
 import com.odoocompanion.net.LocationUpload
 import com.odoocompanion.net.OdooClient
 import com.odoocompanion.net.RecordingMetadata
+import com.odoocompanion.net.RetryScope
 import com.odoocompanion.net.UploadOutcome
 import com.odoocompanion.net.WireJson
 import com.odoocompanion.system.debug
+import com.odoocompanion.whatsapp.DocumentReader
 import com.odoocompanion.whatsapp.QueuedDocument
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -29,6 +34,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import java.io.File
+import java.io.IOException
+import java.nio.file.NoSuchFileException
 
 data class DrainReport(
     val outcome: OutboxDrainer.Outcome,
@@ -52,7 +59,7 @@ data class DrainReport(
     val moreWorkPending: Boolean = false,
 )
 
-private class DrainTally {
+private class DrainTally(val readyAt: Long) {
     val accepted = mutableMapOf<String, Int>()
     val skipped = mutableMapOf<String, Int>()
     val duplicates = mutableMapOf<String, Int>()
@@ -106,8 +113,13 @@ class OutboxDrainer(
     private val client: OdooClient,
     private val now: () -> Long = System::currentTimeMillis,
     private val learnPayloadLimit: suspend (bytes: Long, at: Long) -> Unit = { _, _ -> },
+    rememberFiles: suspend (String, List<QueuedFile>) -> Unit = { _, _ -> },
+    private val documentReader: DocumentReader =
+        DocumentReader(File(System.getProperty("java.io.tmpdir"))),
     private val settingsProvider: suspend () -> Settings,
 ) {
+    private val cleanup = FileCleanup(dao, rememberFiles)
+
     enum class Outcome { DONE, RETRY }
 
     suspend fun drainAll(): DrainReport {
@@ -123,11 +135,11 @@ class OutboxDrainer(
     }
 
     private suspend fun drain(): DrainReport {
-        val tally = DrainTally()
+        val tally = DrainTally(now())
 
         retireWhatWillNeverBeTaken(tally)
         tally.discarded = dao.deleteExhausted(OutboxKind.IRREPLACEABLE, MAX_ATTEMPTS)
-        purgeExpiredDeadRows(tally)
+        tally.purged = cleanup.collect(now())
 
         val settings = attempt { settingsProvider() }.getOrElse { cause ->
             return reportUnreadableSettings(tally, cause)
@@ -140,16 +152,21 @@ class OutboxDrainer(
         if (outcome == Outcome.DONE && !tally.moreWork) {
             tally.moreWork = anythingArrivedLate(settings)
         }
-        return tally.report(outcome).also { debug(TAG) { "drain finished: $it" } }
+        debug(TAG) {
+            "drain finished: $outcome, accepted=${tally.accepted}, skipped=${tally.skipped}, " +
+                "duplicates=${tally.duplicates}, moreWork=${tally.moreWork}"
+        }
+        return tally.report(outcome)
     }
 
     private suspend fun drainUntilTheLinkFails(settings: Settings, tally: DrainTally): Outcome {
+        val uploads = client.uploads(settings)
         val kinds: List<suspend () -> Outcome> = listOf(
-            { drainBatch(LOCATIONS, settings, tally) },
-            { drainBatch(CALLS, settings, tally) },
-            { drainFiles(DOCUMENTS, settings, tally) },
-            { drainFiles(SCANS, settings, tally) },
-            { drainFiles(RECORDINGS, settings, tally) },
+            { drainBatch(LOCATIONS, uploads, tally) },
+            { drainBatch(CALLS, uploads, tally) },
+            { drainFiles(DOCUMENTS, uploads, tally) },
+            { drainFiles(SCANS, uploads, tally) },
+            { drainFiles(RECORDINGS, uploads, tally) },
         )
         var outcome = Outcome.DONE
         for (drainKind in kinds) {
@@ -163,10 +180,10 @@ class OutboxDrainer(
     private suspend fun anythingArrivedLate(settings: Settings): Boolean {
         val now = now()
         val enrollment = settings.enrollment
-        if (OutboxKind.IRREPLACEABLE.any { dao.countOf(it, now, enrollment) > 0 }) return true
-        val positions = dao.depthOf(OutboxKind.LOCATION, now, enrollment)
+        if (dao.hasReady(OutboxKind.IRREPLACEABLE, now, enrollment)) return true
+        val positions = dao.locationDepth(enrollment, UploadCadence.BATCH_THRESHOLD, now)
         return UploadCadence.dueNow(
-            queued = positions.queued,
+            queued = positions.ready,
             oldestCreatedAt = positions.oldestCreatedAt,
             windowSeconds = settings.uploadWindowSeconds,
             now = now,
@@ -187,9 +204,10 @@ class OutboxDrainer(
         }
     }
 
-    private fun deferral(attemptsSoFar: Int): Long {
+    private fun deferral(attemptsSoFar: Int, readyAt: Long): Long {
         val step = minOf(attemptsSoFar, ROW_BACKOFF_DOUBLINGS)
-        return now() + minOf(ROW_BACKOFF_MAX_MILLIS, ROW_BACKOFF_BASE_MILLIS shl step)
+        return maxOf(readyAt, now()) +
+            minOf(ROW_BACKOFF_MAX_MILLIS, ROW_BACKOFF_BASE_MILLIS shl step)
     }
 
     private suspend fun retireWhatWillNeverBeTaken(tally: DrainTally) {
@@ -234,7 +252,7 @@ class OutboxDrainer(
             else -> 0
         }
         if (tally.revived > 0) {
-            learnPayloadLimit(0, now())
+            persistLimit(0)
             Log.i(
                 TAG,
                 "Queueing ${tally.revived} row(s) that had only run out of retries " +
@@ -247,13 +265,20 @@ class OutboxDrainer(
         if (limitBytes == null || limitBytes <= 0) return
         tally.payloadLimit = limitBytes
         if (tally.persistedLimit == limitBytes) return
-        learnPayloadLimit(limitBytes, now())
-        tally.persistedLimit = limitBytes
+        if (persistLimit(limitBytes)) tally.persistedLimit = limitBytes
+    }
+
+    private suspend fun persistLimit(limit: Long): Boolean = try {
+        learnPayloadLimit(limit, now())
+        true
+    } catch (failure: IOException) {
+        Log.w(TAG, "Could not save the payload limit (${failure.javaClass.simpleName})")
+        false
     }
 
     private fun reportUnreadableSettings(tally: DrainTally, cause: Throwable): DrainReport {
-        val reason = cause.message ?: cause.javaClass.simpleName
-        Log.w(TAG, "Cannot read the device configuration; nothing can be uploaded: $reason")
+        val reason = "device configuration unavailable (${cause.javaClass.simpleName})"
+        Log.w(TAG, reason)
         tally.lastError = reason
         return tally.report(Outcome.RETRY)
     }
@@ -266,33 +291,32 @@ class OutboxDrainer(
         val encodeBatch: (List<T>) -> String,
     )
 
+    private class FilePayload(val metadata: JsonObject, val document: QueuedDocument? = null)
+
     private class FileKind(
         val kind: String,
         val suffix: String,
         val noun: String,
         val fileKey: String,
-        val ownsFile: Boolean,
-        val metadataOf: (String) -> JsonObject,
+        val decode: (String) -> FilePayload,
     )
 
     private suspend fun <T> drainBatch(
         wire: Wire<T>,
-        settings: Settings,
+        uploads: OdooClient.Uploads,
         tally: DrainTally,
     ): Outcome {
         var budget = BATCHES_PER_DRAIN
         var size = wire.batchSize
-        val poisoned = mutableSetOf<Long>()
         while (true) {
             if (budget-- <= 0) {
                 tally.moreWork = true
                 return Outcome.DONE
             }
-            val entries = dao.take(wire.kind, size + poisoned.size, now(), settings.enrollment)
-                .filter { it.id !in poisoned }
+            val entries = dao.take(wire.kind, size, tally.readyAt, uploads.enrollment)
             debug(TAG) {
                 "${wire.kind}: took ${entries.size} at batch size $size, " +
-                    "${poisoned.size} deferred this pass, $budget batch(es) left"
+                    "$budget batch(es) left"
             }
             if (entries.isEmpty()) return Outcome.DONE
             val kind = wire.kind
@@ -320,25 +344,35 @@ class OutboxDrainer(
             val sent = entries.map { it.id } - unreadable.map { it.id }.toSet()
             tally.attempted = true
             val outcome = attempt {
-                client.post(settings, wire.suffix, wire.encodeBatch(items))
+                uploads.post(wire.suffix, wire.encodeBatch(items))
             }.getOrElse { return failBatch(tally, sent, it) }
-            debug(TAG) { "${wire.suffix} with ${sent.size} row(s) answered $outcome" }
+            debug(TAG) {
+                "${wire.suffix} with ${sent.size} row(s) answered ${outcome.diagnostic()}"
+            }
             when (outcome) {
                 is UploadOutcome.Success -> {
-                    tally.delivered = true
                     learn(tally, outcome.limitBytes)
                     if (outcome.accepted > 0) tally.note(tally.accepted, kind, outcome.accepted)
                     if (outcome.duplicates > 0) {
                         tally.note(tally.duplicates, kind, outcome.duplicates)
                     }
-                    val refused = outcome.skippedIndexes.distinct()
-                        .mapNotNull { sent.getOrNull(it) }
+                    val refused = if (outcome.skipped == sent.size &&
+                        outcome.accepted == 0 && outcome.duplicates == 0
+                    ) {
+                        sent
+                    } else {
+                        outcome.skippedIndexes.distinct().mapNotNull { sent.getOrNull(it) }
+                    }
                     if (refused.isNotEmpty()) {
                         abandon(tally, kind, refused, "server read it and could not store it")
-                    } else if (outcome.skipped > 0) {
-                        noteSkipped(tally, kind, outcome.skipped)
                     }
-                    dao.delete(sent - refused.toSet())
+                    if (outcome.skipped > refused.size) {
+                        noteSkipped(tally, kind, outcome.skipped - refused.size)
+                    }
+                    if (refused.size < sent.size) {
+                        tally.delivered = true
+                        dao.delete(sent - refused.toSet())
+                    }
                 }
 
                 is UploadOutcome.Duplicate -> {
@@ -354,10 +388,10 @@ class OutboxDrainer(
                 is UploadOutcome.TooLarge -> {
                     learn(tally, outcome.limitBytes)
                     if (sent.size > 1) {
-                        size = halved(size, kind, outcome.describe())
+                        size = halved(sent.size, kind, outcome.describe())
                         continue
                     }
-                    poisoned += deferRuledOn(
+                    deferRuledOn(
                         tally,
                         entries.single { it.id in sent },
                         "one row on its own is ${outcome.describe()}",
@@ -366,15 +400,19 @@ class OutboxDrainer(
                 }
 
                 is UploadOutcome.Retry -> {
-                    if (outcome.serverFault && sent.size > 1) {
-                        size = halved(size, kind, outcome.reason)
+                    if (outcome.scope == RetryScope.ROW && sent.size > 1) {
+                        size = halved(sent.size, kind, outcome.reason)
                         continue
                     }
-                    if (!outcome.serverFault) {
-                        return chargeTheLink(tally, sent, outcome.reason, outcome.linkDown)
+                    if (outcome.scope != RetryScope.ROW) {
+                        return chargeTheLink(
+                            tally,
+                            sent,
+                            outcome.reason,
+                            outcome.scope == RetryScope.LINK
+                        )
                     }
-                    poisoned +=
-                        deferRuledOn(tally, entries.single { it.id in sent }, outcome.reason)
+                    deferRuledOn(tally, entries.single { it.id in sent }, outcome.reason)
                     size = wire.batchSize
                     continue
                 }
@@ -400,33 +438,66 @@ class OutboxDrainer(
         return narrowed
     }
 
+    private fun UploadOutcome.diagnostic(): String = when (this) {
+        is UploadOutcome.Retry -> "Retry($scope)"
+        else -> toString()
+    }
+
     private fun UploadOutcome.TooLarge.describe(): String =
         limitBytes?.let { "over the server's ${it / 1024} KB payload cap" }
             ?: "over the server's payload cap"
 
     private suspend fun drainFiles(
         files: FileKind,
-        settings: Settings,
+        uploads: OdooClient.Uploads,
         tally: DrainTally,
     ): Outcome {
-        val poisoned = mutableSetOf<Long>()
         while (true) {
-            val entries =
-                dao.take(files.kind, FILE_BATCH + poisoned.size, now(), settings.enrollment)
-                    .filter { it.id !in poisoned }
+            val entries = dao.take(files.kind, FILE_BATCH, tally.readyAt, uploads.enrollment)
             if (entries.isEmpty()) return Outcome.DONE
             for (entry in entries) {
                 val file = entry.filePath?.let(::File)
-                if (file == null || !file.exists()) {
+                if (file == null) {
                     forgetLostFile(tally, entry, files)
                     continue
                 }
-                if (file.length() > MAX_FILE_BYTES) {
-                    poisoned += deferRuledOn(
+                val source = try {
+                    FileStamp.read(file)?.takeIf { current ->
+                        entry.kind == OutboxKind.SCAN ||
+                            current.matchesQueuedMetadata(entry.source, entry.createdAt)
+                    }
+                } catch (_: NoSuchFileException) {
+                    forgetLostFile(tally, entry, files)
+                    continue
+                } catch (failure: IOException) {
+                    deferFile(
+                        tally,
+                        entry.id,
+                        "file access failed (${failure.javaClass.simpleName})"
+                    )
+                    continue
+                } catch (failure: SecurityException) {
+                    deferFile(
+                        tally,
+                        entry.id,
+                        "file access failed (${failure.javaClass.simpleName})"
+                    )
+                    continue
+                }
+                if (source == null) {
+                    forgetLostFile(tally, entry, files)
+                    continue
+                }
+                val size = source.size
+                if (entry.kind == OutboxKind.RECORDING && entry.source == null) {
+                    dao.stampLegacyRecording(entry.id, size, source.modifiedAt)
+                }
+                if (size > OutboxLimits.MAX_FILE_BYTES) {
+                    deferRuledOn(
                         tally,
                         entry,
-                        "${files.noun} of ${file.length()} bytes is over the " +
-                            "${MAX_FILE_BYTES / 1024 / 1024} MB any mobile device accepts",
+                        "${files.noun} of $size bytes is over the " +
+                            "${OutboxLimits.MAX_FILE_BYTES / 1024 / 1024} MB any mobile device accepts",
                     )
                     continue
                 }
@@ -435,8 +506,8 @@ class OutboxDrainer(
                     return Outcome.DONE
                 }
 
-                val metadata = attempt {
-                    files.metadataOf(entry.payload)
+                val payload = attempt {
+                    files.decode(entry.payload)
                 }.getOrElse {
                     abandon(
                         tally,
@@ -448,15 +519,16 @@ class OutboxDrainer(
                     )
                     continue
                 }
-                val wireSize = client.wireSize(file, metadata, files.fileKey)
+                val body = client.fileBody(file, payload.metadata, files.fileKey, source)
+                val wireSize = body.contentLength()
                 val declared = tally.payloadLimit
                 debug(TAG) {
-                    "${files.noun} row ${entry.id}: ${file.length()} bytes, " +
+                    "${files.noun} row ${entry.id}: $size bytes, " +
                         "$wireSize on the wire, cap $declared, " +
                         "attempt ${entry.attempts + 1}, ${tally.bytesLeft} budget left"
                 }
                 if (declared in 1..<wireSize) {
-                    poisoned += deferRuledOn(
+                    deferRuledOn(
                         tally,
                         entry,
                         "${files.noun} would send $wireSize bytes and the server declared a " +
@@ -464,37 +536,78 @@ class OutboxDrainer(
                     )
                     continue
                 }
-                tally.bytesLeft -= wireSize
-                tally.attempted = true
+                suspend fun send(verifiedBody: FileBody): UploadOutcome {
+                    tally.bytesLeft -= wireSize
+                    tally.attempted = true
+                    return uploads.post(files.suffix, verifiedBody)
+                }
 
                 val outcome = attempt {
-                    client.post(settings, files.suffix, file, metadata, files.fileKey)
-                }.getOrElse { return failBatch(tally, listOf(entry.id), it) }
-                debug(TAG) { "${files.noun} row ${entry.id} answered $outcome" }
+                    val document = payload.document
+                    if (document == null) {
+                        send(body)
+                    } else {
+                        documentReader.withVerifiedContent(
+                            file,
+                            size,
+                            entry.source?.sha256 ?: entry.recheckedSha256,
+                            document,
+                            pinRechecked = { digest ->
+                                if (dao.pinRecheckedDocument(entry.id, digest) == 0) {
+                                    throw IOException("Pending document changed before upload")
+                                }
+                            },
+                        ) { input ->
+                            send(body.fromVerifiedCopy(input))
+                        }
+                    }
+                }.getOrElse { failure ->
+                    if (failure is SQLiteException) {
+                        val reason = "digest write failed (${failure.javaClass.simpleName})"
+                        Log.w(TAG, reason)
+                        tally.lastError = reason
+                        return Outcome.RETRY
+                    }
+                    if (failure is IOException || failure is SecurityException) {
+                        deferFile(
+                            tally,
+                            entry.id,
+                            "file access failed (${failure.javaClass.simpleName})"
+                        )
+                        continue
+                    }
+                    return failBatch(tally, listOf(entry.id), failure)
+                }
+                if (outcome == null) {
+                    forgetLostFile(tally, entry, files)
+                    continue
+                }
+                debug(TAG) {
+                    "${files.noun} row ${entry.id} answered ${outcome.diagnostic()}"
+                }
                 when (outcome) {
                     is UploadOutcome.Success, is UploadOutcome.Duplicate -> {
-                        tally.delivered = true
                         val success = outcome as? UploadOutcome.Success
                         learn(tally, success?.limitBytes)
+                        if (success != null &&
+                            (success.skipped > 0 || 0 in success.skippedIndexes)
+                        ) {
+                            abandon(
+                                tally,
+                                files.kind,
+                                listOf(entry.id),
+                                "server skipped the ${files.noun}"
+                            )
+                            continue
+                        }
+                        tally.delivered = true
                         if (success == null || success.duplicates > 0) {
                             tally.note(tally.duplicates, files.kind, 1)
                         } else {
                             tally.note(tally.accepted, files.kind, 1)
-                            if (files.kind == OutboxKind.DOCUMENT) {
-                                attempt { QueuedDocument.decode(entry.payload) }
-                                    .getOrNull()?.let(tally.deliveredDocuments::add)
-                            }
+                            payload.document?.let(tally.deliveredDocuments::add)
                         }
-                        if (!files.ownsFile || deleteAudio(file)) {
-                            dao.delete(listOf(entry.id))
-                        } else {
-                            dao.markDeadIds(
-                                listOf(entry.id),
-                                now(),
-                                "uploaded, but the file could not be deleted",
-                                DeadReason.KEPT_ON_DISK,
-                            )
-                        }
+                        cleanup.acknowledge(entry, source, now())
                     }
 
                     is UploadOutcome.Rejected -> abandon(
@@ -506,23 +619,27 @@ class OutboxDrainer(
 
                     is UploadOutcome.TooLarge -> {
                         learn(tally, outcome.limitBytes)
-                        poisoned += deferRuledOn(
+                        deferRuledOn(
                             tally,
                             entry,
-                            "${files.noun} of ${file.length()} bytes is ${outcome.describe()}",
+                            "${files.noun} of $size bytes is ${outcome.describe()}",
                         )
                     }
 
                     is UploadOutcome.Retry -> {
-                        if (!outcome.serverFault) {
+                        if (outcome.scope == RetryScope.LOCAL_FILE) {
+                            deferFile(tally, entry.id, outcome.reason)
+                            continue
+                        }
+                        if (outcome.scope != RetryScope.ROW) {
                             return chargeTheLink(
                                 tally,
                                 listOf(entry.id),
                                 outcome.reason,
-                                outcome.linkDown,
+                                outcome.scope == RetryScope.LINK,
                             )
                         }
-                        poisoned += deferRuledOn(tally, entry, outcome.reason)
+                        deferRuledOn(tally, entry, outcome.reason)
                     }
                 }
             }
@@ -531,8 +648,8 @@ class OutboxDrainer(
 
     private suspend fun forgetLostFile(tally: DrainTally, entry: OutboxEntry, files: FileKind) {
         val folder = entry.filePath.orEmpty().loggableDirectory()
-        val reason = "its file is no longer under $folder, so nothing can be uploaded"
-        val verb = if (files.ownsFile) {
+        val reason = "its original file is no longer available under $folder"
+        val verb = if (files.kind == OutboxKind.RECORDING) {
             dao.delete(listOf(entry.id))
             "Dropping"
         } else {
@@ -564,26 +681,6 @@ class OutboxDrainer(
         }
     }
 
-    private suspend fun purgeExpiredDeadRows(tally: DrainTally) {
-        val before = now() - OutboxLimits.DEAD_RETENTION_MILLIS
-        dao.deadFilesBefore(before)
-            .filterNot { deleteAudio(File(it.filePath)) }
-            .map { it.id }
-            .chunked(SQLITE_MAX_PARAMETERS)
-            .forEach { dao.restampDead(it, now()) }
-        val purged = dao.deleteDeadBefore(before)
-        if (purged == 0) return
-        tally.purged += purged
-        Log.i(TAG, "Purged $purged row(s) that had been undeliverable for 90 days")
-    }
-
-    private fun deleteAudio(file: File): Boolean {
-        if (!file.exists() || file.delete()) return true
-        val folder = file.absolutePath.loggableDirectory()
-        Log.w(TAG, "Could not delete an uploaded recording under $folder")
-        return false
-    }
-
     private fun noteSkipped(tally: DrainTally, kind: String, count: Int) {
         tally.note(tally.skipped, kind, count)
         Log.w(TAG, "Server could not store $count $kind row(s); they are not retried")
@@ -598,20 +695,25 @@ class OutboxDrainer(
         Result.failure(failure)
     }
 
-    private suspend fun deferRuledOn(tally: DrainTally, entry: OutboxEntry, reason: String): Long {
+    private suspend fun deferFile(tally: DrainTally, id: Long, reason: String) {
+        Log.w(TAG, "Deferring file row $id: $reason")
+        dao.deferFile(id, reason, deferral(0, tally.readyAt))
+        tally.lastError = reason
+    }
+
+    private suspend fun deferRuledOn(tally: DrainTally, entry: OutboxEntry, reason: String) {
         Log.w(TAG, "Keeping ${entry.kind} row ${entry.id} the server would not take: $reason")
         dao.markFailed(
             listOf(entry.id),
             reason,
             serverFault = true,
-            retryAfter = deferral(entry.attempts),
+            retryAfter = deferral(entry.attempts, tally.readyAt),
         )
         tally.lastError = reason
-        return entry.id
     }
 
     private suspend fun failBatch(tally: DrainTally, ids: List<Long>, cause: Throwable): Outcome =
-        chargeTheLink(tally, ids, cause.message ?: cause.javaClass.simpleName, linkDown = false)
+        chargeTheLink(tally, ids, "upload failed (${cause.javaClass.simpleName})", linkDown = false)
 
     private suspend fun chargeTheLink(
         tally: DrainTally,
@@ -635,8 +737,6 @@ class OutboxDrainer(
 
         const val ATTEMPTS_AFTER_REVIVAL = MAX_ATTEMPTS - 1
 
-        const val MAX_FILE_BYTES = 36L * 1024 * 1024
-
         const val FILE_BYTES_PER_DRAIN = 64L * 1024 * 1024
 
         const val BATCHES_PER_DRAIN = 25
@@ -646,8 +746,6 @@ class OutboxDrainer(
         private const val ROW_BACKOFF_DOUBLINGS = 6
 
         const val REVIVAL_PROBE = 1
-
-        private const val SQLITE_MAX_PARAMETERS = 900
 
         private const val TAG = "OutboxDrainer"
 
@@ -670,10 +768,12 @@ class OutboxDrainer(
             "recording",
             "recording",
             FileBody.AUDIO_KEY,
-            ownsFile = true,
         ) {
-            WireJson.encodeToJsonElement(WireJson.decodeFromString<RecordingMetadata>(it))
-                .jsonObject
+            FilePayload(
+                WireJson.encodeToJsonElement(
+                    WireJson.decodeFromString<RecordingMetadata>(it)
+                ).jsonObject
+            )
         }
 
         private val DOCUMENTS = FileKind(
@@ -681,10 +781,9 @@ class OutboxDrainer(
             "document",
             "document",
             FileBody.FILE_KEY,
-            ownsFile = false,
         ) {
-            WireJson.encodeToJsonElement(WireJson.decodeFromString<DocumentMetadata>(it))
-                .jsonObject
+            val document = QueuedDocument.decode(it)
+            FilePayload(WireJson.encodeToJsonElement(document.metadata).jsonObject, document)
         }
 
         private val SCANS = FileKind(
@@ -692,10 +791,12 @@ class OutboxDrainer(
             "document",
             "scan",
             FileBody.FILE_KEY,
-            ownsFile = true,
         ) {
-            WireJson.encodeToJsonElement(WireJson.decodeFromString<DocumentMetadata>(it))
-                .jsonObject
+            FilePayload(
+                WireJson.encodeToJsonElement(
+                    WireJson.decodeFromString<DocumentMetadata>(it)
+                ).jsonObject
+            )
         }
 
         private val drainLock = Mutex()

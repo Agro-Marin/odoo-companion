@@ -66,9 +66,9 @@ class PushPlanTest {
     }
 
     @Test
-    fun `a registration never prints its keys`() {
+    fun `a registration never prints its endpoint or keys`() {
         assertEquals(
-            "PushRegistration(endpoint=https://push.example/x)",
+            "PushRegistration(redacted)",
             PushRegistration("https://push.example/x", "p256dh-secret", "auth-secret").toString(),
         )
     }

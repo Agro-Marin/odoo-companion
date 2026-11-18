@@ -44,7 +44,7 @@ class OdooClientTest {
     fun `posts to the device endpoint with a bearer token`() = runTest {
         server.enqueue(MockResponse(body = """{"status":"success","accepted":2}"""))
 
-        val outcome = OdooClient().post(settings(), "location", """{"points":[]}""")
+        val outcome = OdooClient().uploads(settings()).post("location", """{"points":[]}""")
 
         val request = server.takeRequest()
         assertEquals("/remote/mobile/phone-01/location", request.target)
@@ -57,7 +57,9 @@ class OdooClientTest {
     fun `a trailing slash on the base url does not double up`() = runTest {
         server.enqueue(MockResponse(body = """{"accepted":0}"""))
 
-        OdooClient().post(settings().copy(baseUrl = server.url("/").toString()), "calllog", "{}")
+        OdooClient().uploads(
+            settings().copy(baseUrl = server.url("/").toString())
+        ).post("calllog", "{}")
 
         assertEquals("/remote/mobile/phone-01/calllog", server.takeRequest().target)
     }
@@ -71,7 +73,7 @@ class OdooClientTest {
                 .build(),
         )
 
-        val outcome = OdooClient().post(settings(), "calllog", "{}")
+        val outcome = OdooClient().uploads(settings()).post("calllog", "{}")
 
         assertTrue("$outcome", outcome is UploadOutcome.Retry)
     }
@@ -83,8 +85,8 @@ class OdooClientTest {
 
         val client = OdooClient()
 
-        assertTrue(client.post(settings(), "calllog", "{}") is UploadOutcome.Retry)
-        assertTrue(client.post(settings(), "calllog", "{}") is UploadOutcome.Retry)
+        assertTrue(client.uploads(settings()).post("calllog", "{}") is UploadOutcome.Retry)
+        assertTrue(client.uploads(settings()).post("calllog", "{}") is UploadOutcome.Retry)
     }
 
     @Test
@@ -96,7 +98,7 @@ class OdooClientTest {
             ),
         )
 
-        val outcome = OdooClient().post(settings(), "calllog", "{}")
+        val outcome = OdooClient().uploads(settings()).post("calllog", "{}")
 
         assertEquals(UploadOutcome.Rejected(400), outcome)
     }
@@ -107,21 +109,20 @@ class OdooClientTest {
         server.enqueue(MockResponse(code = 429))
 
         val client = OdooClient()
-        assertTrue(client.post(settings(), "location", "{}") is UploadOutcome.Retry)
-        assertTrue(client.post(settings(), "location", "{}") is UploadOutcome.Retry)
+        assertTrue(client.uploads(settings()).post("location", "{}") is UploadOutcome.Retry)
+        assertTrue(client.uploads(settings()).post("location", "{}") is UploadOutcome.Retry)
     }
 
     @Test
     fun `a bad token is retryable so queued data survives a re-enrollment`() = runTest {
         server.enqueue(MockResponse(code = 401))
 
-        assertTrue(OdooClient().post(settings(), "location", "{}") is UploadOutcome.Retry)
+        assertTrue(OdooClient().uploads(settings()).post("location", "{}") is UploadOutcome.Retry)
     }
 
     @Test
     fun `a base url with no scheme is retryable rather than thrown`() = runTest {
-        val outcome = OdooClient().post(
-            settings().copy(baseUrl = "odoo.example.com"),
+        val outcome = OdooClient().uploads(settings().copy(baseUrl = "odoo.example.com")).post(
             "location",
             "{}",
         )
@@ -133,7 +134,7 @@ class OdooClientTest {
     fun `an unprocessable payload is rejected rather than retried forever`() = runTest {
         server.enqueue(MockResponse(code = 422, body = """{"error":"no_points"}"""))
 
-        val outcome = OdooClient().post(settings(), "location", "{}")
+        val outcome = OdooClient().uploads(settings()).post("location", "{}")
 
         assertTrue(outcome is UploadOutcome.Rejected)
         assertEquals(422, (outcome as UploadOutcome.Rejected).code)
@@ -142,7 +143,7 @@ class OdooClientTest {
     @Test
     fun `a reply that names the service is remembered, and from then on required`() = runTest {
         var learned = 0
-        val client = OdooClient(onServerNamedItself = { learned++ })
+        val uploads = OdooClient(onServerNamedItself = { learned++ }).uploads(settings())
         server.enqueue(
             MockResponse(body = """{"service":"remote_mobile","status":"success","accepted":1}"""),
         )
@@ -152,21 +153,38 @@ class OdooClientTest {
             MockResponse(code = 400, body = """{"service":"remote_mobile","error":"no_calls"}"""),
         )
 
-        assertTrue(client.post(settings(), "calllog", "{}") is UploadOutcome.Success)
+        assertTrue(uploads.post("calllog", "{}") is UploadOutcome.Success)
         assertEquals(1, learned)
 
-        val strict = settings().copy(serverNamesItself = true)
         assertTrue(
             "a gateway's own success envelope no longer deletes anything",
-            client.post(strict, "calllog", "{}") is UploadOutcome.Retry,
+            uploads.post("calllog", "{}") is UploadOutcome.Retry,
         )
         assertTrue(
             "nor does a gateway's own refusal dead-letter anything",
-            client.post(strict, "calllog", "{}") is UploadOutcome.Retry,
+            uploads.post("calllog", "{}") is UploadOutcome.Retry,
         )
-        assertEquals(UploadOutcome.Rejected(400), client.post(strict, "calllog", "{}"))
+        assertEquals(UploadOutcome.Rejected(400), uploads.post("calllog", "{}"))
         assertEquals("learned once, not on every reply", 1, learned)
     }
+
+    @Test
+    fun `a gateway response body is excluded from the operator diagnostic`() = runTest {
+        server.enqueue(MockResponse(body = "<html>private document title</html>"))
+
+        val retry = OdooClient().uploads(settings()).post("document", "{}") as UploadOutcome.Retry
+
+        assertTrue(retry.reason.contains("200"))
+        assertFalse(retry.reason.contains("private document title"))
+    }
+
+    @Test
+    fun `even the first upload keeps rows when the reply identifies a different service`() =
+        runTest {
+            server.enqueue(MockResponse(body = """{"service":"gateway","status":"success"}"""))
+            val outcome = OdooClient().uploads(settings()).post("location", "{}")
+            assertTrue(outcome is UploadOutcome.Retry)
+        }
 
     @Test
     fun `an older server that does not name itself is still believed`() = runTest {
@@ -175,7 +193,7 @@ class OdooClientTest {
 
         val outcome = OdooClient(onServerNamedItself = {
             learned++
-        }).post(settings(), "calllog", "{}")
+        }).uploads(settings()).post("calllog", "{}")
 
         assertTrue(outcome is UploadOutcome.Success)
         assertEquals(0, learned)
@@ -183,7 +201,11 @@ class OdooClientTest {
 
     private suspend fun linkDownFor(response: MockResponse): Boolean {
         server.enqueue(response)
-        return (OdooClient().post(settings(), "calllog", "{}") as UploadOutcome.Retry).linkDown
+        return (
+            OdooClient().uploads(
+                settings()
+            ).post("calllog", "{}") as UploadOutcome.Retry
+            ).scope == RetryScope.LINK
     }
 
     @Test
@@ -210,12 +232,11 @@ class OdooClientTest {
 
     @Test
     fun `a refused connection is the link, a read timeout is the request`() = runTest {
-        val refused = OdooClient().post(
-            settings().copy(baseUrl = "http://127.0.0.1:1"),
+        val refused = OdooClient().uploads(settings().copy(baseUrl = "http://127.0.0.1:1")).post(
             "calllog",
             "{}",
         ) as UploadOutcome.Retry
-        assertTrue(refused.reason, refused.linkDown)
+        assertTrue(refused.reason, refused.scope == RetryScope.LINK)
 
         server.enqueue(
             MockResponse.Builder()
@@ -226,9 +247,9 @@ class OdooClientTest {
         val impatient = OkHttpClient.Builder()
             .readTimeout(200, java.util.concurrent.TimeUnit.MILLISECONDS)
             .build()
-        val timedOut = OdooClient(impatient).post(settings(), "calllog", "{}")
+        val timedOut = OdooClient(impatient).uploads(settings()).post("calllog", "{}")
             as UploadOutcome.Retry
-        assertFalse(timedOut.reason, timedOut.linkDown)
+        assertFalse(timedOut.reason, timedOut.scope == RetryScope.LINK)
     }
 
     @Test
@@ -241,7 +262,7 @@ class OdooClientTest {
                 ),
             )
 
-            val outcome = OdooClient().post(settings(), "calllog", "{}")
+            val outcome = OdooClient().uploads(settings()).post("calllog", "{}")
 
             assertTrue("$accepted: $outcome", outcome is UploadOutcome.Success)
         }
@@ -256,7 +277,7 @@ class OdooClientTest {
             ),
         )
 
-        val outcome = OdooClient().post(settings(), "calllog", "{}")
+        val outcome = OdooClient().uploads(settings()).post("calllog", "{}")
 
         assertEquals(UploadOutcome.Success(1, 0, 0), outcome)
     }

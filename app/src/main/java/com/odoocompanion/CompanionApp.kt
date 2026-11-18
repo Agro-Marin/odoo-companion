@@ -19,6 +19,7 @@ import com.odoocompanion.data.COMPANION_MIGRATIONS
 import com.odoocompanion.data.CompanionDatabase
 import com.odoocompanion.location.LocationForegroundService
 import com.odoocompanion.net.OdooClient
+import com.odoocompanion.push.PushBinding
 import com.odoocompanion.push.PushCommand
 import com.odoocompanion.push.PushKeyLookup
 import com.odoocompanion.push.PushPlan
@@ -33,14 +34,17 @@ import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.ui.Appearance
 import com.odoocompanion.ui.ScanWidget
+import com.odoocompanion.whatsapp.DocumentReader
 import com.odoocompanion.whatsapp.SightingStore
 import com.odoocompanion.whatsapp.WhatsAppDocuments
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -48,7 +52,7 @@ import kotlinx.coroutines.sync.withLock
 import org.unifiedpush.android.connector.UnifiedPush
 import java.io.File
 
-class CompanionApp : Application() {
+open class CompanionApp : Application() {
     val config: DeviceConfig by lazy {
         DeviceConfig(this) { leaving -> database.outbox().claimUnstamped(leaving) }
     }
@@ -59,7 +63,9 @@ class CompanionApp : Application() {
             .build()
     }
 
-    val softphones: SoftphoneStore by lazy { SoftphoneStore(this) }
+    val softphones: SoftphoneStore by lazy { SoftphoneStore(this, config) }
+
+    val documentReader by lazy { DocumentReader(cacheDir) }
 
     val whatsapp: SightingStore by lazy {
         SightingStore(File(filesDir, "whatsapp_sightings.json")) {
@@ -72,7 +78,7 @@ class CompanionApp : Application() {
     var adminGate = AdminGate()
 
     val client: OdooClient by lazy {
-        OdooClient(onServerNamedItself = { config.learnServerNamesItself() })
+        OdooClient(onServerNamedItself = config::learnServerNamesItself)
     }
 
     private val scope = CoroutineScope(
@@ -102,6 +108,12 @@ class CompanionApp : Application() {
         scope.launch { for (request in pushRefreshes) refreshPushSafely() }
     }
 
+    override fun onTerminate() {
+        scope.cancel()
+        unregisterReceiver(restrictionsChanged)
+        super.onTerminate()
+    }
+
     internal lateinit var startup: Job
         private set
 
@@ -122,34 +134,39 @@ class CompanionApp : Application() {
         } else {
             LocationForegroundService.stop(this)
         }
-        applySoftphone(settings.isEnrolled, SoftphoneLookup.Unavailable("not asked yet"))
+        applySoftphone(settings, SoftphoneLookup.Unavailable("not asked yet"))
         if (settings.isEnrolled) softphoneRefreshes.trySend(Unit)
         pushRefreshes.trySend(Unit)
     }
 
-    fun obey(command: PushCommand) {
+    private val pushBinding by lazy { PushBinding(this) }
+    private val reportingPush = Mutex()
+
+    fun obey(instance: String, command: PushCommand) = scope.launch {
+        val settings = pushOwner(instance) ?: return@launch
         Log.i(TAG, "Odoo woke this handset: $command")
         when (command) {
-            PushCommand.SYNC -> scope.launch {
-                val settings = config.currentOrNull() ?: return@launch
-                if (settings.isEnrolled) {
-                    SyncScheduler.collectAndUploadNow(this@CompanionApp, settings.wifiOnlyUploads)
-                }
-            }
+            PushCommand.SYNC ->
+                SyncScheduler.collectAndUploadNow(this@CompanionApp, settings.wifiOnlyUploads)
 
             PushCommand.SOFTPHONE -> softphoneRefreshes.trySend(Unit)
         }
     }
 
-    fun reportPushEndpoint(registration: PushRegistration?) {
-        scope.launch {
-            val settings = config.currentOrNull()?.takeIf { it.isEnrolled } ?: return@launch
-            when (val reply = client.registerPush(settings, registration)) {
-                is PushKeyLookup.Found -> Log.i(TAG, "Wake-ups registered: ${reply.registered}")
-                else -> Log.w(TAG, "Odoo did not take the push endpoint: $reply")
+    fun reportPushEndpoint(instance: String, registration: PushRegistration?) =
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            // Enter in callback order, so an earlier endpoint cannot finish after its replacement.
+            reportingPush.withLock {
+                val settings = pushOwner(instance) ?: return@withLock
+                when (val reply = client.registerPush(settings, registration)) {
+                    is PushKeyLookup.Found -> Log.i(TAG, "Wake-ups registered: ${reply.registered}")
+                    else -> Log.w(TAG, "Odoo did not take the push endpoint: $reply")
+                }
             }
         }
-    }
+
+    private suspend fun pushOwner(instance: String): Settings? = config.currentOrNull()
+        ?.takeIf { it.isEnrolled && pushBinding.owns(it.enrollment, instance) }
 
     private val softphoneRefreshes = Channel<Unit>(Channel.CONFLATED)
 
@@ -174,12 +191,10 @@ class CompanionApp : Application() {
         }
         reconfiguring.withLock {
             val now = config.current()
-            if (now.endpoint() != asked.endpoint()) return@withLock
-            applySoftphone(now.isEnrolled, lookup)
+            if (!now.sameCredentialsAs(asked)) return@withLock
+            applySoftphone(now, lookup)
         }
     }
-
-    private fun Settings.endpoint() = Triple(baseUrl, identifier, token)
 
     private val pushRefreshes = Channel<Unit>(Channel.CONFLATED)
 
@@ -201,6 +216,12 @@ class CompanionApp : Application() {
         } else {
             PushKeyLookup.Unavailable("not enrolled")
         }
+        reconfiguring.withLock {
+            if (config.current().sameCredentialsAs(settings)) applyPush(settings, lookup)
+        }
+    }
+
+    private fun applyPush(settings: Settings, lookup: PushKeyLookup) {
         val plan = PushPlan.decide(
             settings.isEnrolled,
             lookup,
@@ -209,11 +230,14 @@ class CompanionApp : Application() {
         )
         when (plan) {
             is PushPlan.Register -> {
+                val instance = pushBinding.activate(requireNotNull(settings.enrollment)) {
+                    UnifiedPush.unregister(this, it)
+                }
                 UnifiedPush.saveDistributor(this, plan.distributor)
-                UnifiedPush.register(this, vapid = plan.vapidPublicKey)
+                UnifiedPush.register(this, instance, vapid = plan.vapidPublicKey)
             }
 
-            PushPlan.Unregister -> UnifiedPush.unregister(this)
+            PushPlan.Unregister -> pushBinding.disable { UnifiedPush.unregister(this, it) }
 
             PushPlan.NoDistributor ->
                 Log.i(TAG, "No push distributor installed; the handset keeps its schedule")
@@ -222,10 +246,16 @@ class CompanionApp : Application() {
         }
     }
 
-    private suspend fun applySoftphone(enrolled: Boolean, lookup: SoftphoneLookup) {
-        when (val plan = SoftphonePlan.decide(enrolled, lookup, softphones.current())) {
+    private suspend fun applySoftphone(owner: Settings, lookup: SoftphoneLookup) {
+        when (
+            val plan = SoftphonePlan.decide(
+                owner.isEnrolled,
+                lookup,
+                softphones.current(owner)
+            )
+        ) {
             is SoftphonePlan.Run -> {
-                softphones.save(plan.settings)
+                softphones.save(owner, plan.settings)
                 if (!hasMicrophone()) {
                     Log.w(TAG, "Softphone not running: microphone permission not granted")
                     SoftphoneService.stop(this)
@@ -236,7 +266,7 @@ class CompanionApp : Application() {
             }
 
             SoftphonePlan.Stop -> {
-                softphones.save(null)
+                softphones.clear()
                 SoftphoneService.stop(this)
             }
         }

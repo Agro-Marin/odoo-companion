@@ -53,14 +53,14 @@ class OutboxCostTest {
     fun `the per-drain purge scan at the queue ceiling`() = runBlocking {
         fill(OutboxLimits.MAX_QUEUED_FIXES)
 
-        val purge = millis(20) { runBlocking { dao.deadFilesBefore(0L) } }
+        val purge = millis(20) { runBlocking { dao.filesForCleanup(0, 0, 64) } }
         val countDead = millis(20) { runBlocking { dao.countDead() } }
         val take = millis(20) {
             runBlocking { dao.take(OutboxKind.LOCATION, 200) }
         }
 
         println(
-            "COST rows=%d deadFilesBefore=%.2fms countDead=%.2fms take200=%.2fms".format(
+            "COST rows=%d filesForCleanup=%.2fms countDead=%.2fms take200=%.2fms".format(
                 OutboxLimits.MAX_QUEUED_FIXES,
                 purge,
                 countDead,

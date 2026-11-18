@@ -6,6 +6,7 @@ import android.graphics.ImageDecoder
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import androidx.core.graphics.createBitmap
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -19,26 +20,43 @@ import kotlin.math.roundToInt
 class ScanPreview(private val folder: File) {
     /** A preview of [source] in the preview folder, or null when there is none to make. */
     fun render(source: File, mimetype: String): File? {
-        val bitmap = try {
-            when {
-                mimetype == ScanIntake.PDF -> firstPage(source)
-                mimetype.startsWith("image/") -> photo(source)
-                else -> null
+        return try {
+            val bitmap =
+                when {
+                    mimetype == ScanIntake.PDF -> firstPage(source)
+                    mimetype.startsWith("image/") -> photo(source)
+                    else -> null
+                } ?: return null
+            try {
+                save(bitmap)
+            } finally {
+                bitmap.recycle()
             }
         } catch (unreadable: IOException) {
-            Log.w(TAG, "No preview for ${source.name}", unreadable)
+            Log.w(TAG, "Could not make a document preview (${unreadable.javaClass.simpleName})")
             null
         } catch (unreadable: SecurityException) {
-            Log.w(TAG, "No preview for ${source.name}", unreadable)
+            Log.w(TAG, "Could not make a document preview (${unreadable.javaClass.simpleName})")
             null
         } catch (unreadable: IllegalArgumentException) {
-            Log.w(TAG, "No preview for ${source.name}", unreadable)
+            Log.w(TAG, "Could not make a document preview (${unreadable.javaClass.simpleName})")
             null
-        } ?: return null
+        }
+    }
+
+    private fun save(bitmap: Bitmap): File {
         folder.mkdirs()
         val target = File(folder, "${UUID.randomUUID()}.jpg")
-        target.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, it) }
-        bitmap.recycle()
+        try {
+            target.outputStream().use {
+                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, it)) {
+                    throw IOException("JPEG encoding failed")
+                }
+            }
+        } catch (failure: IOException) {
+            target.delete()
+            throw failure
+        }
         return target
     }
 
@@ -57,7 +75,7 @@ class ScanPreview(private val folder: File) {
                 if (pdf.pageCount == 0) return null
                 pdf.openPage(0).use { page ->
                     val (width, height) = fitted(page.width, page.height)
-                    Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+                    createBitmap(width, height).also {
                         it.eraseColor(Color.WHITE)
                         page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     }

@@ -14,7 +14,6 @@
     <color name="panel">#FFFFFF</color>
     <color name="tile">#EAF4F1</color>
     <color name="hairline">#D3E3E2</color>
-    <color name="logo_ink">#023E4C</color>
     <color name="alert_bg">#FFF4DB</color>
     <color name="alert_ink">#6E4A00</color>
 </resources>

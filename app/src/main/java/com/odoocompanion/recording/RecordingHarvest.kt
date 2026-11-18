@@ -20,13 +20,13 @@ class RecordingHarvest(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun queueNew(): Int = harvesting.withLock {
-        val alreadyQueued = dao.filesQueued(OutboxKind.RECORDING).toHashSet()
-        val fresh = mutableListOf<OutboxEntry>()
+        val alreadyQueued = dao.queuedRecordings().groupBy { it.filePath }
         val found = RecordingScanner(root, now).scan()
-        for (scanned in found) {
-            if (!alreadyQueued.add(scanned.file.absolutePath)) continue
-            fresh += entryFor(scanned)
-        }
+        val fresh = found.filterNot { scanned ->
+            alreadyQueued[scanned.file.absolutePath].orEmpty().any { queued ->
+                scanned.stamp.matchesQueuedMetadata(queued.source, queued.createdAt)
+            }
+        }.map(::entryFor)
         debug(TAG) { "found ${found.size} settled recording(s), ${fresh.size} not yet queued" }
         if (fresh.isNotEmpty()) {
             dao.insertAll(fresh)
@@ -37,7 +37,7 @@ class RecordingHarvest(
 
     private fun entryFor(scanned: ScannedRecording): OutboxEntry {
         val file = scanned.file
-        val parsed = RecordingFilename.of(file, scanned.modifiedAt)
+        val parsed = RecordingFilename.of(file, scanned.stamp.modifiedAt)
         return OutboxEntry(
             kind = OutboxKind.RECORDING,
             payload = WireJson.encodeToString(
@@ -50,6 +50,7 @@ class RecordingHarvest(
                 ),
             ),
             filePath = file.absolutePath,
+            source = scanned.stamp,
             createdAt = now(),
             enrollment = enrollment,
         )

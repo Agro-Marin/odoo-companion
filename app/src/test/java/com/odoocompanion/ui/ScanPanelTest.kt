@@ -2,8 +2,8 @@ package com.odoocompanion.ui
 
 import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.QueuedFileState
+import com.odoocompanion.data.UploadState
 import com.odoocompanion.scan.Scan
-import com.odoocompanion.whatsapp.UploadState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -11,7 +11,7 @@ class ScanPanelTest {
     private fun scan(path: String) = Scan(path, "$path.pdf", "Scanner", 1L)
 
     @Test
-    fun `a scan still in the queue is queued, set aside is failed, gone is delivered`() {
+    fun `a scan takes its queue status or a saved receipt`() {
         val queue = listOf(
             QueuedFileState("/a", null),
             QueuedFileState("/b", "refused"),
@@ -28,7 +28,7 @@ class ScanPanelTest {
             listOf(
                 UploadState.QUEUED,
                 UploadState.SET_ASIDE,
-                UploadState.DELIVERED,
+                UploadState.UNCONFIRMED,
                 UploadState.GONE,
                 UploadState.WITHDRAWN,
             ),

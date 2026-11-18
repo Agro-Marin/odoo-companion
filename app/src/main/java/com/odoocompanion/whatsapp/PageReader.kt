@@ -15,7 +15,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.odoocompanion.system.debug
-import java.io.File
+import java.io.FileDescriptor
 import java.io.IOException
 import java.util.concurrent.ExecutionException
 import kotlin.math.sqrt
@@ -28,19 +28,16 @@ class PageReader {
         )
     }
 
-    fun classify(file: File): Classification? {
-        if (file.extension.lowercase() != "pdf") return Classification(DocumentKind.OTHER)
-        return try {
-            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-                PdfRenderer(fd).use(::read)
-            }
-        } catch (e: IOException) {
-            Log.w(TAG, "Could not draw a document", e)
-            null
-        } catch (e: SecurityException) {
-            Log.w(TAG, "A document is locked", e)
-            Classification(DocumentKind.OTHER)
+    fun classify(descriptor: FileDescriptor): Classification? = try {
+        ParcelFileDescriptor.dup(descriptor).use { fd ->
+            PdfRenderer(fd).use(::read)
         }
+    } catch (e: IOException) {
+        Log.w(TAG, "Could not draw a document (${e.javaClass.simpleName})")
+        null
+    } catch (_: SecurityException) {
+        Log.w(TAG, "A document is locked")
+        Classification(DocumentKind.OTHER)
     }
 
     private fun read(pdf: PdfRenderer): Classification? {
@@ -55,11 +52,12 @@ class PageReader {
                 texts += Tasks.await(text.process(image)).text
                 codes += Tasks.await(qr.process(image)).mapNotNull { it.rawValue }
             } catch (e: ExecutionException) {
-                Log.w(TAG, "OCR failed; will try again", e.cause as? MlKitException ?: e)
+                val code = (e.cause as? MlKitException)?.errorCode
+                Log.w(TAG, "OCR failed (code $code), will retry")
                 return null
-            } catch (e: InterruptedException) {
+            } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                Log.w(TAG, "OCR interrupted", e)
+                Log.w(TAG, "OCR interrupted")
                 return null
             } finally {
                 bitmap.recycle()

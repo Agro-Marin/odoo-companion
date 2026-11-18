@@ -15,6 +15,7 @@ class CompanionPushService : PushService() {
             return
         }
         CompanionApp.from(this).reportPushEndpoint(
+            instance,
             PushRegistration(endpoint.url, keys.pubKey, keys.auth),
         )
     }
@@ -29,7 +30,7 @@ class CompanionPushService : PushService() {
             Log.w(TAG, "Ignoring a wake-up this build does not know")
             return
         }
-        CompanionApp.from(this).obey(command)
+        CompanionApp.from(this).obey(instance, command)
     }
 
     override fun onRegistrationFailed(reason: FailedReason, instance: String) {
@@ -37,7 +38,7 @@ class CompanionPushService : PushService() {
     }
 
     override fun onUnregistered(instance: String) {
-        CompanionApp.from(this).reportPushEndpoint(null)
+        CompanionApp.from(this).reportPushEndpoint(instance, null)
     }
 
     private companion object {

@@ -1,13 +1,12 @@
 package com.odoocompanion.system
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import androidx.work.testing.SynchronousExecutor
-import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.config.Settings
 import com.odoocompanion.sync.SyncScheduler
@@ -19,6 +18,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 class BootReceiverTest {
@@ -26,16 +27,29 @@ class BootReceiverTest {
 
     @Before
     fun setUp() = runTest {
-        WorkManagerTestInitHelper.initializeTestWorkManager(
-            app,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build(),
-        )
-        app.startup.join()
         app.config.clearEnrollment()
     }
 
     private fun receive(action: String) {
-        BootReceiver().onReceive(app, Intent(action))
+        val finished = CountDownLatch(1)
+        val result = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) = finished.countDown()
+        }
+        app.sendOrderedBroadcast(
+            Intent(app, BootReceiver::class.java).setAction(action),
+            null,
+            result,
+            null,
+            0,
+            null,
+            null,
+        )
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        do {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            if (finished.await(10, TimeUnit.MILLISECONDS)) return
+        } while (System.nanoTime() < deadline)
+        throw AssertionError("Broadcast did not finish: $action")
     }
 
     private fun states(name: String): List<WorkInfo.State> =
@@ -68,19 +82,11 @@ class BootReceiverTest {
         app.config.clearEnrollment()
 
         receive(Intent.ACTION_BOOT_COMPLETED)
-        settle()
 
         assertTrue(states(SyncScheduler.CALL_LOG_PERIODIC).all { it.isFinished })
         assertTrue(states(SyncScheduler.RECORDING_PERIODIC).all { it.isFinished })
 
         assertTrue(states(SyncScheduler.UPLOAD_PERIODIC).any { !it.isFinished })
-    }
-
-    private fun settle() {
-        repeat(50) {
-            Shadows.shadowOf(Looper.getMainLooper()).idle()
-            Thread.sleep(10)
-        }
     }
 
     @Test

@@ -1,13 +1,17 @@
 package com.odoocompanion
 
+import android.util.Log
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
 import androidx.work.NetworkType
 import androidx.work.WorkManager
-import androidx.work.testing.SynchronousExecutor
-import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.config.enrol
+import com.odoocompanion.push.PushBinding
+import com.odoocompanion.push.PushRegistration
 import com.odoocompanion.softphone.SoftphoneSettings
+import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -26,6 +30,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowLog
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
@@ -34,10 +40,7 @@ class CompanionAppTest {
 
     @Before
     fun setUp() {
-        WorkManagerTestInitHelper.initializeTestWorkManager(
-            app,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build(),
-        )
+        ShadowLog.setLoggable("CompanionApp", Log.DEBUG)
     }
 
     private fun periodicUploadNetwork(): NetworkType = WorkManager.getInstance(app)
@@ -55,7 +58,6 @@ class CompanionAppTest {
 
     @Test
     fun `a new enrolment does not wait out the backoff the old server earned`() = runTest {
-        app.startup.join()
         app.config.enrol("https://old.example.com", "phone-01", "t")
         app.applyConfiguration()
         SyncScheduler.uploadNow(app, wifiOnlyUploads = false)
@@ -77,7 +79,6 @@ class CompanionAppTest {
 
     @Test
     fun `startup keeps the stored wifi-only constraint`() = runTest {
-        app.startup.join()
         app.config.setWifiOnlyUploads(true)
 
         app.applyConfiguration()
@@ -87,7 +88,6 @@ class CompanionAppTest {
 
     @Test
     fun `startup applies a metered-allowed setting just as faithfully`() = runTest {
-        app.startup.join()
         app.config.setWifiOnlyUploads(false)
 
         app.applyConfiguration()
@@ -97,7 +97,6 @@ class CompanionAppTest {
 
     @Test
     fun `concurrent reconfigurations settle on the last word, not a stale one`() = runTest {
-        app.startup.join()
         app.config.setWifiOnlyUploads(false)
 
         val passes = (1..6).map { async { app.applyConfiguration() } }
@@ -119,7 +118,6 @@ class CompanionAppTest {
         }
         try {
             runBlocking {
-                app.startup.join()
                 app.config.enrol(server.url("/").toString(), "phone-01", "token")
 
                 val started = System.nanoTime()
@@ -144,8 +142,7 @@ class CompanionAppTest {
         }
         try {
             runBlocking {
-                app.startup.join()
-                app.softphones.save(null)
+                app.softphones.clear()
                 app.config.enrol(server.url("/").toString(), "phone-01", "token")
 
                 app.applyConfiguration()
@@ -163,6 +160,71 @@ class CompanionAppTest {
         } finally {
             server.close()
         }
+    }
+
+    @Test
+    fun `only the active distributor instance may register or clear an endpoint`() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            val posts = java.util.concurrent.CopyOnWriteArrayList<String>()
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.method == "POST") posts += request.target
+                    return MockResponse(
+                        body = """{"service":"remote_mobile","vapid_public_key":"v"}"""
+                    )
+                }
+            }
+            app.config.enrol(server.url("/").toString(), "phone", "token")
+            val owner = requireNotNull(app.config.current().enrollment)
+            val binding = PushBinding(app)
+            val old = binding.activate("old-enrollment") {}
+            val current = binding.activate(owner) {}
+            assertEquals(current, PushBinding(app).activate(owner) {})
+
+            val endpoint = PushRegistration("https://push.example/one", "test", "test")
+            app.reportPushEndpoint(old, endpoint).join()
+            app.reportPushEndpoint(old, null).join()
+            assertTrue(posts.isEmpty())
+
+            app.reportPushEndpoint(current, endpoint).join()
+            binding.disable {}
+            app.reportPushEndpoint(current, null).join()
+            assertEquals(listOf("/remote/mobile/phone/push"), posts)
+        }
+    }
+
+    @Test
+    fun `unscoped credentials from an older installation wait for a fresh lookup`() = runTest {
+        app.config.enrol("https://sip.example", "phone", "token")
+        val owner = app.config.current()
+        val data = PreferenceDataStoreFactory.create(scope = backgroundScope) {
+            File(app.cacheDir, "legacy.preferences_pb")
+        }
+        data.edit {
+            it[stringPreferencesKey("username")] = "201"
+            it[stringPreferencesKey("secret")] = "test"
+            it[stringPreferencesKey("domain")] = "pbx.example"
+        }
+        val store = SoftphoneStore(data, app.config)
+        assertEquals(null, store.current(owner))
+        val fresh = SoftphoneSettings("202", "test", "pbx.example")
+        store.save(owner, fresh)
+        assertEquals(fresh, store.current())
+    }
+
+    @Test
+    fun `a stored extension can only run under the enrollment that supplied it`() = runBlocking {
+        app.config.enrol("https://old.example", "phone", "token")
+        val old = app.config.current()
+        val credentials = SoftphoneSettings("201", "s", "pbx.example")
+        app.softphones.save(old, credentials)
+        app.config.enrol("https://old.example", "phone", "rotated")
+        assertEquals(credentials, app.softphones.current())
+
+        app.config.enrol("https://new.example", "phone", "token")
+        app.softphones.save(old, credentials)
+        assertEquals(null, app.softphones.current())
     }
 
     @Test
@@ -186,8 +248,7 @@ class CompanionAppTest {
         }
         try {
             runBlocking {
-                app.startup.join()
-                app.softphones.save(null)
+                app.softphones.clear()
                 app.config.enrol(first.url("/").toString(), "phone-01", "token")
                 app.applyConfiguration()
                 app.config.enrol(second.url("/").toString(), "phone-01", "token")

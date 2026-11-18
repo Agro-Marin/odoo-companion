@@ -1,8 +1,12 @@
 package com.odoocompanion.recording
 
+import com.odoocompanion.data.FileStamp
+import com.odoocompanion.system.debug
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
 
-data class ScannedRecording(val file: File, val modifiedAt: Long)
+data class ScannedRecording(val file: File, val stamp: FileStamp)
 
 class RecordingScanner(
     private val root: File,
@@ -10,19 +14,46 @@ class RecordingScanner(
 ) {
     fun scan(): List<ScannedRecording> {
         val settledBefore = now() - SETTLE_MILLIS
-        return CANDIDATE_DIRECTORIES
-            .map { File(root, it) }
-            .filter { it.isDirectory }
-            .flatMap { it.walkTopDown().maxDepth(MAX_DEPTH) }
-            .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
-            .filterNot { it.parentFile?.name?.lowercase() in NOT_CALL_DIRECTORIES }
+        return CANDIDATE_DIRECTORIES.asSequence()
+            .mapNotNull(::candidateDirectory)
+            .flatMap { directory ->
+                directory.walkTopDown().onEnter {
+                    !Files.isSymbolicLink(it.toPath()) &&
+                        it.name.lowercase() !in NOT_CALL_DIRECTORIES
+                }.maxDepth(MAX_DEPTH)
+            }
+            .filter { it.extension.lowercase() in AUDIO_EXTENSIONS }
             .distinctBy { it.absolutePath }
-            .map { ScannedRecording(it, it.lastModified()) }
-            .filter { it.modifiedAt <= settledBefore }
-            .sortedBy { it.modifiedAt }
+            .mapNotNull { file ->
+                try {
+                    FileStamp.read(file)?.let { ScannedRecording(file, it) }
+                } catch (failure: IOException) {
+                    debug(TAG) {
+                        "Could not read recording attributes (${failure.javaClass.simpleName})"
+                    }
+                    null
+                } catch (_: SecurityException) {
+                    debug(TAG) { "Permission to read recording attributes was denied" }
+                    null
+                }
+            }
+            .filter { it.stamp.modifiedAt <= settledBefore }
+            .sortedBy { it.stamp.modifiedAt }
+            .toList()
+    }
+
+    private fun candidateDirectory(relative: String): File? {
+        var directory = root
+        for (name in relative.split('/')) {
+            directory = File(directory, name)
+            if (Files.isSymbolicLink(directory.toPath())) return null
+        }
+        return directory.takeIf { it.isDirectory }
     }
 
     companion object {
+        private const val TAG = "RecordingScanner"
+
         val CANDIDATE_DIRECTORIES = listOf(
             "Recordings/Call",
             "Sounds/Call",

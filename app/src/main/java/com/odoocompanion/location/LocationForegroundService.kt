@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.sqlite.SQLiteException
 import android.location.Location
 import android.os.BatteryManager
 import android.os.Build
@@ -49,12 +50,17 @@ class LocationForegroundService : LifecycleService() {
             if (fixes.isEmpty()) return
             lifecycleScope.launch {
                 val settings = app.config.currentOrNull()
-                val due = queue.record(
-                    fixes,
-                    settings?.uploadWindowSeconds ?: DEFAULT_UPLOAD_WINDOW_SECONDS,
-                    settings?.minMoveMetres ?: DEFAULT_MIN_MOVE_METRES,
-                    settings?.enrollment,
-                )
+                val due = try {
+                    queue.record(
+                        fixes,
+                        settings?.uploadWindowSeconds ?: DEFAULT_UPLOAD_WINDOW_SECONDS,
+                        settings?.minMoveMetres ?: DEFAULT_MIN_MOVE_METRES,
+                        settings?.enrollment,
+                    )
+                } catch (failure: SQLiteException) {
+                    Log.w(TAG, "Could not queue location update (${failure.javaClass.simpleName})")
+                    return@launch
+                }
                 if (due && settings != null) {
                     SyncScheduler.uploadNow(applicationContext, settings.wifiOnlyUploads)
                 }

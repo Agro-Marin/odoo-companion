@@ -3,12 +3,14 @@ package com.odoocompanion.data
 import androidx.annotation.VisibleForTesting
 import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -49,6 +51,9 @@ data class OutboxEntry(
     val serverFault: Boolean = false,
     val retryAfter: Long = 0,
     val enrollment: String? = null,
+    @Embedded(prefix = "source_") val source: FileStamp? = null,
+    // Preserve the original history key when an older document first passes OCR on upload.
+    val recheckedSha256: String? = null,
 )
 
 const val CURRENT_PAYLOAD_VERSION = 1
@@ -59,6 +64,8 @@ object DeadReason {
     const val REFUSED = "refused"
 
     const val UNDECODABLE = "undecodable"
+
+    const val ACKNOWLEDGED = "acknowledged"
 
     const val KEPT_ON_DISK = "kept_on_disk"
 
@@ -79,7 +86,7 @@ private const val HELD_FOR =
         "ORDER BY createdAt DESC, id DESC LIMIT 1)"
 
 private const val NOT_ACTIONABLE =
-    "('${DeadReason.KEPT_ON_DISK}', '${DeadReason.GONE}', '${DeadReason.WITHDRAWN}')"
+    "('${DeadReason.ACKNOWLEDGED}', '${DeadReason.KEPT_ON_DISK}', '${DeadReason.GONE}', '${DeadReason.WITHDRAWN}')"
 
 @Dao
 interface OutboxDao {
@@ -103,6 +110,7 @@ interface OutboxDao {
         enrollment: String? = null,
     ): List<OutboxEntry>
 
+    @VisibleForTesting
     @Query(
         """
         SELECT COUNT(*) FROM outbox
@@ -113,15 +121,26 @@ interface OutboxDao {
 
     @Query(
         """
-        SELECT COUNT(*) AS queued, MIN(createdAt) AS oldestCreatedAt FROM outbox
-        WHERE kind = :kind AND deadAt IS NULL AND retryAfter <= :now AND $OWNED
+        SELECT EXISTS(SELECT 1 FROM outbox
+            WHERE kind IN (:kinds) AND deadAt IS NULL AND retryAfter <= :now AND $OWNED)
         """,
     )
-    suspend fun depthOf(
-        kind: String,
-        now: Long = Long.MAX_VALUE,
-        enrollment: String? = null,
-    ): QueueDepth
+    suspend fun hasReady(kinds: Set<String>, now: Long, enrollment: String?): Boolean
+
+    // Retention counts every position. Cadence only needs the oldest eligible
+    // position and whether the active enrollment has reached its threshold.
+    @Query(
+        """
+        SELECT (SELECT COUNT(*) FROM outbox WHERE kind = '${OutboxKind.LOCATION}') AS total,
+               COUNT(*) AS ready, MIN(createdAt) AS oldestCreatedAt
+        FROM (
+            SELECT createdAt FROM outbox
+            WHERE kind = '${OutboxKind.LOCATION}' AND deadAt IS NULL AND retryAfter <= :now AND $OWNED
+            ORDER BY createdAt LIMIT :threshold
+        )
+        """,
+    )
+    suspend fun locationDepth(enrollment: String?, threshold: Int, now: Long): LocationDepth
 
     @VisibleForTesting
     @Query("SELECT COUNT(*) FROM outbox WHERE deadAt IS NOT NULL")
@@ -207,6 +226,20 @@ interface OutboxDao {
 
     @Query(
         """
+        UPDATE outbox SET recheckedSha256 = :sha256
+        WHERE id = :id AND kind = '${OutboxKind.DOCUMENT}' AND deadAt IS NULL
+          AND source_sha256 IS NULL AND recheckedSha256 IS NULL
+        """
+    )
+    suspend fun pinRecheckedDocument(id: Long, sha256: String): Int
+
+    @Query(
+        "UPDATE outbox SET retryAfter = :retryAfter, lastError = :reason WHERE id = :id AND deadAt IS NULL"
+    )
+    suspend fun deferFile(id: Long, reason: String, retryAfter: Long)
+
+    @Query(
+        """
         UPDATE outbox SET deadAt = :now, deadReason = '${DeadReason.REFUSED}'
         WHERE deadAt IS NULL AND attempts >= :maxAttempts AND serverFault
             AND revivals >= :maxRevivals AND kind IN (:keptKinds)
@@ -282,18 +315,63 @@ interface OutboxDao {
 
     @Query(
         """
-        SELECT id, filePath FROM outbox
-        WHERE deadAt IS NOT NULL AND deadAt < :before AND filePath IS NOT NULL
-          AND kind IN ('${OutboxKind.RECORDING}', '${OutboxKind.SCAN}')
+        SELECT id, kind, filePath, createdAt, deadAt, deadReason, source_size, source_modifiedAt, source_sha256,
+               CASE WHEN kind = '${OutboxKind.SCAN}' THEN payload END AS scanPayload
+        FROM outbox
+        WHERE kind IN ('${OutboxKind.RECORDING}', '${OutboxKind.SCAN}', '${OutboxKind.DOCUMENT}')
+          AND filePath IS NOT NULL AND deadAt IS NOT NULL AND id > :afterId
+          AND (deadAt < :before OR deadReason = '${DeadReason.ACKNOWLEDGED}')
+        ORDER BY id LIMIT :limit
         """,
     )
-    suspend fun deadFilesBefore(before: Long): List<QueuedFile>
+    suspend fun filesForCleanup(before: Long, afterId: Long, limit: Int): List<QueuedFile>
 
-    @Query("UPDATE outbox SET deadAt = :now WHERE id IN (:ids)")
-    suspend fun restampDead(ids: List<Long>, now: Long)
+    @Query(
+        """
+        SELECT id, kind, filePath, createdAt, deadAt, deadReason, source_size, source_modifiedAt, source_sha256,
+               CASE WHEN kind = '${OutboxKind.SCAN}' THEN payload END AS scanPayload
+        FROM outbox
+        WHERE id IN (:ids) AND filePath IS NOT NULL AND deadAt IS NOT NULL
+        """,
+    )
+    suspend fun terminalFiles(ids: List<Long>): List<QueuedFile>
 
-    @Query("DELETE FROM outbox WHERE deadAt IS NOT NULL AND deadAt < :before")
-    suspend fun deleteDeadBefore(before: Long): Int
+    @Query(
+        """
+        UPDATE outbox SET deadAt = :now,
+            lastError = CASE WHEN deadReason = '${DeadReason.ACKNOWLEDGED}'
+                THEN 'uploaded, pending file cleanup' ELSE lastError END,
+            deadReason = CASE WHEN deadReason = '${DeadReason.ACKNOWLEDGED}'
+                THEN '${DeadReason.KEPT_ON_DISK}' ELSE deadReason END
+        WHERE id IN (:ids)
+        """,
+    )
+    suspend fun deferCleanup(ids: List<Long>, now: Long)
+
+    // Archive history before entering this transaction. An upgrade or an operator
+    // may have revived the row during that write. Hold the writer lock from the
+    // final comparison through unlink and row deletion so revival cannot slip in.
+    @Transaction
+    suspend fun finishFileCleanup(
+        expected: List<QueuedFile>,
+        now: Long,
+        removeFile: (QueuedFile) -> Boolean,
+    ): Int {
+        val candidates = expected.toHashSet()
+        val current = terminalFiles(expected.map { it.id }).filter { it in candidates }
+        val (removed, retained) = current.partition(removeFile)
+        if (retained.isNotEmpty()) deferCleanup(retained.map { it.id }, now)
+        if (removed.isNotEmpty()) delete(removed.map { it.id })
+        return removed.size
+    }
+
+    @Query(
+        """
+        DELETE FROM outbox WHERE deadAt < :before AND (filePath IS NULL OR
+            kind NOT IN ('${OutboxKind.RECORDING}', '${OutboxKind.SCAN}', '${OutboxKind.DOCUMENT}'))
+        """,
+    )
+    suspend fun deleteExpiredWithoutFiles(before: Long): Int
 
     @Query(
         """
@@ -304,19 +382,38 @@ interface OutboxDao {
     )
     suspend fun trimOldest(kind: String, keep: Int): Int
 
+    @Query(
+        "SELECT filePath, createdAt, source_size, source_modifiedAt, source_sha256 FROM outbox " +
+            "WHERE kind = '${OutboxKind.RECORDING}' AND filePath IS NOT NULL",
+    )
+    suspend fun queuedRecordings(): List<RecordingSource>
+
+    @Query(
+        "UPDATE outbox SET source_size = :size, source_modifiedAt = :modifiedAt " +
+            "WHERE id = :id AND source_size IS NULL AND deadAt IS NULL",
+    )
+    suspend fun stampLegacyRecording(id: Long, size: Long, modifiedAt: Long)
+
+    @VisibleForTesting
     @Query("SELECT filePath FROM outbox WHERE kind = :kind AND filePath IS NOT NULL")
     suspend fun filesQueued(kind: String): List<String>
 
     @Query(
-        "SELECT filePath, CASE WHEN deadAt IS NULL THEN NULL ELSE deadReason END AS deadReason " +
-            "FROM outbox WHERE kind = :kind AND filePath IS NOT NULL",
+        "SELECT filePath, createdAt, source_size, source_modifiedAt, source_sha256, " +
+            "CASE WHEN deadAt IS NULL THEN NULL ELSE deadReason END AS deadReason " +
+            "FROM outbox WHERE kind = :kind AND filePath IS NOT NULL ORDER BY id",
     )
     fun fileStates(kind: String): Flow<List<QueuedFileState>>
 }
 
-data class QueueDepth(val queued: Int, val oldestCreatedAt: Long?)
+data class LocationDepth(val total: Int, val ready: Int, val oldestCreatedAt: Long?)
 
-data class QueuedFileState(val filePath: String, val deadReason: String?)
+data class QueuedFileState(
+    val filePath: String,
+    val deadReason: String?,
+    @Embedded(prefix = "source_") val source: FileStamp? = null,
+    val createdAt: Long = 0,
+)
 
 data class OutboxCounts(
     val positions: Int,
@@ -328,9 +425,28 @@ data class OutboxCounts(
     val heldFor: String? = null,
 )
 
-data class QueuedFile(val id: Long, val filePath: String)
+data class RecordingSource(
+    val filePath: String,
+    val createdAt: Long,
+    @Embedded(prefix = "source_") val source: FileStamp?,
+)
+
+data class QueuedFile(
+    val id: Long,
+    val kind: String,
+    val filePath: String,
+    val createdAt: Long,
+    val deadAt: Long,
+    val deadReason: String?,
+    @Embedded(prefix = "source_") val source: FileStamp?,
+    val scanPayload: String?,
+) {
+    val outcome: UploadState get() = UploadState.fromDeadReason(deadReason)
+}
 
 object OutboxLimits {
+    const val MAX_FILE_BYTES = 36L * 1024 * 1024
+
     const val MAX_QUEUED_FIXES = 20_000
 
     const val TRIMMED_FIXES = 19_000
@@ -338,7 +454,7 @@ object OutboxLimits {
     const val DEAD_RETENTION_MILLIS = 90L * 24 * 60 * 60 * 1000
 }
 
-@Database(entities = [OutboxEntry::class], version = 8, exportSchema = true)
+@Database(entities = [OutboxEntry::class], version = 10, exportSchema = true)
 abstract class CompanionDatabase : RoomDatabase() {
     abstract fun outbox(): OutboxDao
 }
@@ -403,6 +519,18 @@ val COMPANION_MIGRATIONS: Array<Migration> = arrayOf(
     object : Migration(7, 8) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE `outbox` ADD COLUMN `enrollment` TEXT DEFAULT NULL")
+        }
+    },
+    object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE outbox ADD COLUMN source_size INTEGER")
+            db.execSQL("ALTER TABLE outbox ADD COLUMN source_modifiedAt INTEGER")
+        }
+    },
+    object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE outbox ADD COLUMN source_sha256 TEXT")
+            db.execSQL("ALTER TABLE outbox ADD COLUMN recheckedSha256 TEXT")
         }
     },
 )

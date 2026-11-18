@@ -30,11 +30,9 @@ import com.odoocompanion.update.UpdateManifest
 import com.odoocompanion.update.UpdateRelaunch
 import com.odoocompanion.update.UpdateStep
 import com.odoocompanion.update.Updater
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
@@ -55,14 +53,6 @@ class MainActivity : AppCompatActivity() {
     private var offered: UpdateManifest? = null
 
     private lateinit var scanCard: ScanCard
-
-    // The alert band says how long ago things happened, as Settings does.
-    private val minutes = flow {
-        while (true) {
-            emit(Unit)
-            delay(STATUS_TICK_MILLIS)
-        }
-    }
 
     // Settings, Sync now, Grant and the update check live behind the gear, so
     // the screen keeps to the one thing it is for; the alert band keeps a
@@ -89,7 +79,7 @@ class MainActivity : AppCompatActivity() {
                 combine(
                     app.config.settings,
                     StatusText.queueCounts(app),
-                    merge(healthChecks, minutes),
+                    merge(healthChecks, statusMinutes),
                     combine(
                         app.softphones.configured,
                         StatusText.localNetworkWanted(app, healthChecks),
@@ -265,7 +255,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun offer(manifest: UpdateManifest?) {
-        if (updater.progress.value != null && manifest != null) return
+        val step = updater.progress.value
+        if (step != null) {
+            if (offered == null) offered = manifest
+            binding.updateBanner.isVisible = offered != null
+            binding.updateInstall.isEnabled = false
+            showUpdateStep(step)
+            return
+        }
         offered = manifest
         binding.updateBanner.isVisible = manifest != null
         binding.updateInstall.isEnabled = true
@@ -288,7 +285,7 @@ class MainActivity : AppCompatActivity() {
 
                 // Android takes it from here: its confirmation, then a restart
                 // into the new build.
-                InstallStart.Started -> Unit
+                InstallStart.Started, InstallStart.AlreadyInProgress -> Unit
 
                 is InstallStart.Failed -> {
                     toast(R.string.update_download_failed)
@@ -356,7 +353,5 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "MainActivity"
-
-        const val STATUS_TICK_MILLIS = 60_000L
     }
 }

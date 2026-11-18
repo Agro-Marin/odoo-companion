@@ -33,6 +33,8 @@ sealed interface InstallStart {
     // it on a settings screen and taps Update again.
     data object NeedsPermission : InstallStart
 
+    data object AlreadyInProgress : InstallStart
+
     data object Started : InstallStart
 
     data class Failed(val reason: String) : InstallStart
@@ -50,14 +52,8 @@ sealed interface UpdateStep {
 // release. Android shows its own confirmation before installing -- always the
 // first time, and again on a handset where this app is not the installer of
 // record -- and refuses an APK not signed with the key of the installed one.
-class Updater(context: Context) {
+class Updater(context: Context, private val http: OkHttpClient = HTTP) {
     private val context = context.applicationContext
-
-    private val http = OkHttpClient.Builder()
-        .followRedirects(true)
-        .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .build()
 
     private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -83,7 +79,11 @@ class Updater(context: Context) {
                 if (!response.isSuccessful) {
                     return@withContext UpdateCheck.Failed("HTTP ${response.code}")
                 }
-                response.body.string()
+                val manifest = response.peekBody(MAX_MANIFEST_BYTES + 1)
+                if (manifest.contentLength() > MAX_MANIFEST_BYTES) {
+                    return@withContext UpdateCheck.Failed("oversized update manifest")
+                }
+                manifest.string()
             }
         } catch (e: IOException) {
             Log.w(TAG, "Could not reach the update feed", e)
@@ -108,41 +108,46 @@ class Updater(context: Context) {
 
     fun canInstall(): Boolean = context.packageManager.canRequestPackageInstalls()
 
-    suspend fun install(manifest: UpdateManifest): InstallStart {
-        if (!canInstall()) return InstallStart.NeedsPermission
-        step.value = UpdateStep.Downloading(0)
-        return withContext(Dispatchers.IO) {
-            val apk = try {
-                download(manifest)
-            } catch (e: IOException) {
-                Log.w(TAG, "Update ${manifest.versionName} could not be downloaded", e)
-                step.value = null
-                return@withContext InstallStart.Failed(e.message ?: e.javaClass.simpleName)
-            }
-            try {
-                step.value = UpdateStep.Installing
-                prefs.edit { putLong(KEY_RELAUNCH, manifest.versionCode) }
-                hand(apk)
-                InstallStart.Started
-            } catch (e: IOException) {
-                Log.w(TAG, "Android would not take update ${manifest.versionName}", e)
-                prefs.edit { remove(KEY_RELAUNCH) }
-                step.value = null
-                InstallStart.Failed(e.message ?: e.javaClass.simpleName)
-            } finally {
-                apk.delete()
-            }
+    suspend fun install(manifest: UpdateManifest): InstallStart = withContext(Dispatchers.IO) {
+        if (!canInstall()) return@withContext InstallStart.NeedsPermission
+        try {
+            if (!begin(context)) return@withContext InstallStart.AlreadyInProgress
+        } catch (failure: SecurityException) {
+            return@withContext failed(failure)
         }
+        var apk: File? = null
+        var committed = false
+        try {
+            val folder = File(context.cacheDir, FOLDER).apply { mkdirs() }
+            folder.listFiles()?.forEach(File::delete)
+            apk = File.createTempFile("release-", ".apk", folder)
+            download(manifest, apk)
+            step.value = UpdateStep.Installing
+            hand(apk, manifest.versionCode)
+            committed = true
+            InstallStart.Started
+        } catch (failure: IOException) {
+            failed(failure)
+        } catch (failure: SecurityException) {
+            failed(failure)
+        } catch (failure: IllegalStateException) {
+            failed(failure)
+        } finally {
+            apk?.delete()
+            if (!committed) clear(context, installed = false)
+        }
+    }
+
+    private fun failed(failure: Exception): InstallStart.Failed {
+        Log.w(TAG, "Update could not be installed", failure)
+        return InstallStart.Failed(failure.message ?: failure.javaClass.simpleName)
     }
 
     private fun fetch(url: String) = http.newCall(Request.Builder().url(url).build()).execute()
 
     // Into the app's cache, checked against the manifest's size and digest
     // before Android ever sees it.
-    private fun download(manifest: UpdateManifest): File {
-        val folder = File(context.cacheDir, FOLDER).apply { mkdirs() }
-        folder.listFiles()?.forEach(File::delete)
-        val target = File(folder, manifest.apk)
+    private fun download(manifest: UpdateManifest, target: File) {
         val digest = MessageDigest.getInstance("SHA-256")
         fetch(UpdateFeed.apkUrl(manifest)).use { response ->
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
@@ -153,6 +158,7 @@ class Updater(context: Context) {
                     while (true) {
                         val read = input.read(buffer)
                         if (read < 0) break
+                        if (read > manifest.size - done) throw IOException("oversized APK")
                         digest.update(buffer, 0, read)
                         output.write(buffer, 0, read)
                         done += read
@@ -164,13 +170,11 @@ class Updater(context: Context) {
         step.value = UpdateStep.Verifying
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
         if (target.length() != manifest.size || actual != manifest.sha256) {
-            target.delete()
             throw IOException("the download does not match the release's digest")
         }
-        return target
     }
 
-    private fun hand(apk: File) {
+    private fun hand(apk: File, versionCode: Long) {
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(
             PackageInstaller.SessionParams.MODE_FULL_INSTALL
@@ -185,27 +189,78 @@ class Updater(context: Context) {
                 }
             }
         val id = installer.createSession(params)
-        installer.openSession(id).use { session ->
-            session.openWrite(apk.name, 0, apk.length()).use { out ->
-                apk.inputStream().use { it.copyTo(out) }
-                session.fsync(out)
+        var committed = false
+        try {
+            prefs.edit(commit = true) {
+                putLong(KEY_RELAUNCH, versionCode)
+                putInt(KEY_SESSION, id)
             }
-            // Mutable: the installer writes its status and, when it needs the
-            // person to confirm, the intent to show them into this broadcast.
-            val status = PendingIntent.getBroadcast(
-                context,
-                id,
-                Intent(context, UpdateReceiver::class.java),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-            )
-            session.commit(status.intentSender)
+            installer.openSession(id).use { session ->
+                session.openWrite(apk.name, 0, apk.length()).use { out ->
+                    apk.inputStream().use { it.copyTo(out) }
+                    session.fsync(out)
+                }
+                // Mutable: the installer writes its status and, when it needs the
+                // person to confirm, the intent to show them into this broadcast.
+                val status = PendingIntent.getBroadcast(
+                    context,
+                    id,
+                    Intent(
+                        context,
+                        UpdateReceiver::class.java
+                    ).putExtra(PackageInstaller.EXTRA_SESSION_ID, id),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                )
+                session.commit(status.intentSender)
+                committed = true
+            }
+        } finally {
+            if (!committed) installer.abandonSession(id)
         }
     }
 
     companion object {
         private val step = MutableStateFlow<UpdateStep?>(null)
 
-        fun settled() {
+        @Synchronized
+        private fun begin(context: Context): Boolean {
+            if (step.value != null) return false
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val id = prefs.getInt(KEY_SESSION, NO_SESSION)
+            if (id != NO_SESSION) {
+                val installer = context.packageManager.packageInstaller
+                val session = installer.getSessionInfo(id)
+                if (session?.isSealed == true) {
+                    step.value = UpdateStep.Installing
+                    return false
+                }
+                // An unsealed session cannot deliver an install callback. The old
+                // process stopped while staging it and this attempt can replace it.
+                if (session != null) installer.abandonSession(id)
+                prefs.edit {
+                    remove(KEY_SESSION)
+                    remove(KEY_RELAUNCH)
+                }
+            }
+            step.value = UpdateStep.Downloading(0)
+            return true
+        }
+
+        internal fun owns(context: Context, session: Int): Boolean =
+            session != NO_SESSION && context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_SESSION, NO_SESSION) == session
+
+        @Synchronized
+        internal fun finish(context: Context, session: Int, installed: Boolean) {
+            if (owns(context, session)) clear(context, installed)
+        }
+
+        @Synchronized
+        private fun clear(context: Context, installed: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+                remove(KEY_SESSION)
+                if (!installed) remove(KEY_RELAUNCH)
+            }
             step.value = null
         }
 
@@ -223,6 +278,8 @@ class Updater(context: Context) {
         }
 
         private const val TAG = "Updater"
+        private const val KEY_SESSION = "install_session"
+        internal const val NO_SESSION = -1
         private const val KEY_RELAUNCH = "relaunch_after"
         private const val PERCENT = 100
 
@@ -234,6 +291,14 @@ class Updater(context: Context) {
         private const val CHECK_EVERY_MILLIS = 6L * 60 * 60 * 1000
         private const val CONNECT_TIMEOUT_SECONDS = 15L
         private const val READ_TIMEOUT_SECONDS = 60L
+        private const val MAX_MANIFEST_BYTES = 64L * 1024
+
+        private val HTTP = OkHttpClient.Builder()
+            .followSslRedirects(false)
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
+
         private const val BUFFER_BYTES = 64 * 1024
     }
 }

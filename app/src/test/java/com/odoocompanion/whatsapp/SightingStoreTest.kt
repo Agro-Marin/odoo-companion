@@ -1,6 +1,9 @@
 package com.odoocompanion.whatsapp
 
 import android.app.Application
+import com.odoocompanion.data.DeadReason
+import com.odoocompanion.data.QueuedFileState
+import com.odoocompanion.data.UploadState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -15,6 +18,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -50,6 +54,64 @@ class SightingStoreTest {
         assertEquals(1, store.record(listOf(notice("CSF.pdf"))))
         assertEquals(0, store.record(listOf(notice("CSF.pdf"))))
         assertEquals(1, store.sightings.value?.size)
+    }
+
+    @Test
+    fun `unchanged sightings are saved again after storage recovers`() = runTest {
+        val parent = folder.newFile("blocked")
+        val file = File(parent, "history.json")
+        val store = SightingStore(file) { emptyList() }
+        store.record(listOf(notice("one.pdf")))
+        assertTrue(parent.delete())
+        assertTrue(parent.mkdir())
+
+        store.rematch()
+
+        val reopened = SightingStore(file) { emptyList() }
+        reopened.open()
+        assertEquals("one.pdf", reopened.sightings.value!!.single().label)
+    }
+
+    @Test
+    fun `a failed history rename retains the receipt for another write`() = runTest {
+        onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000, 16))
+        val store = store()
+        store.record(listOf(notice("CSF.pdf")))
+        val saved = File(folder.root, "saved.json")
+        assertTrue(storeFile.renameTo(saved))
+        assertTrue(storeFile.mkdir())
+        val blocker = File(storeFile, "occupied").apply { writeText("test") }
+        val receipt = listOf(QueuedFileState("/w/CSF.pdf", DeadReason.ACKNOWLEDGED))
+
+        assertTrue(runCatching { store.remember(receipt) }.exceptionOrNull() is IOException)
+        assertTrue(blocker.delete())
+        assertTrue(storeFile.delete())
+        assertTrue(saved.renameTo(storeFile))
+        store.remember(receipt)
+
+        val reopened = store().apply { open() }
+        assertEquals(UploadState.DELIVERED, reopened.sightings.value!!.single().outcome)
+    }
+
+    @Test
+    fun `a cold store retries an unreadable history before recording a receipt`() = runTest {
+        onDisk = listOf(DocumentFile("/w/CSF.pdf", "CSF.pdf", 1_000, 16))
+        store().record(listOf(notice("CSF.pdf"), notice("other.pdf")))
+        val saved = File(folder.root, "saved.json")
+        assertTrue(storeFile.renameTo(saved))
+        assertTrue(storeFile.mkdir())
+        val reopened = store()
+        reopened.open()
+        assertEquals(null, reopened.sightings.value)
+        val receipt = listOf(QueuedFileState("/w/CSF.pdf", DeadReason.ACKNOWLEDGED))
+        assertTrue(runCatching { reopened.remember(receipt) }.exceptionOrNull() is IOException)
+        assertTrue(storeFile.delete())
+        assertTrue(saved.renameTo(storeFile))
+        reopened.remember(receipt)
+
+        val restored = store().apply { open() }.sightings.value!!.associateBy { it.label }
+        assertEquals(setOf("CSF.pdf", "other.pdf"), restored.keys)
+        assertEquals(UploadState.DELIVERED, restored.getValue("CSF.pdf").outcome)
     }
 
     @Test
@@ -367,10 +429,15 @@ class SightingStoreTest {
 
     @Test
     fun `a classification survives the process`() = runTest {
-        onDisk = listOf(DocumentFile("/w/INE.pdf", "INE.pdf", 1_000L, 16))
+        val file = folder.newFile("INE.pdf").apply { writeText("identity") }
+        onDisk = listOf(DocumentFile(file.path, file.name, file.lastModified(), file.length()))
         store().apply {
-            record(listOf(notice("INE.pdf")))
-            classifyPending { Classification(DocumentKind.INE) }
+            record(listOf(notice(file.name, at = file.lastModified())))
+            classifyPending(
+                DocumentReader(folder.root) {
+                    Classification(DocumentKind.INE)
+                }::classify
+            )
         }
 
         val reopened = store()

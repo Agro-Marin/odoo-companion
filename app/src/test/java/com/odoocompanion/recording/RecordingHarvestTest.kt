@@ -140,6 +140,23 @@ class RecordingHarvestTest {
     }
 
     @Test
+    fun `reusing a path with a retained row queues only the new recording`() = runTest {
+        val file = recording("a.m4a")
+        assertEquals(1, harvest().queueNew())
+        val old = dao.take(OutboxKind.RECORDING, 1).single()
+        dao.markDeadIds(listOf(old.id), clock, "refused")
+        file.writeBytes(ByteArray(64) { 7 })
+        assertTrue(file.setLastModified(clock - RecordingScanner.SETTLE_MILLIS))
+
+        assertEquals(1, harvest().queueNew())
+        assertEquals(0, harvest().queueNew())
+        assertEquals(1, dao.countDead())
+        val fresh = dao.take(OutboxKind.RECORDING, 1).single()
+        assertEquals(file.lastModified(), fresh.source!!.modifiedAt)
+        assertTrue(fresh.source != old.source)
+    }
+
+    @Test
     fun `a recording set aside as undeliverable is not harvested again`() = runTest {
         recording("a.m4a")
         harvest().queueNew()

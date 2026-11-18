@@ -132,7 +132,7 @@ class DeviceConfigTest {
     fun `what was learned about one server does not carry to another`() = runTest {
         val config = config()
         config.enrol("https://one.example.com", "phone-01", "token")
-        config.learnServerNamesItself()
+        config.learnServerNamesItself(config.current().baseUrl)
         assertTrue(config.current().serverNamesItself)
 
         config.enrol("https://one.example.com", "phone-02", "token")
@@ -146,7 +146,7 @@ class DeviceConfigTest {
     fun `a base url spelled another way is the same server and the same enrolment`() = runTest {
         val config = config()
         config.enrol("https://odoo.example.com", "phone-01", "token")
-        config.learnServerNamesItself()
+        config.learnServerNamesItself(config.current().baseUrl)
         val before = config.current().enrollment
 
         config.enrol("HTTPS://Odoo.Example.com:443/", "phone-01", "token")
@@ -215,9 +215,14 @@ class DeviceConfigTest {
     @Test
     fun `a successful upload is timestamped and clears the previous error`() = runTest {
         val config = config()
-        config.recordUpload(at = 100L, delivered = false, error = "network unreachable")
+        config.recordUpload(
+            config.current(),
+            at = 100L,
+            delivered = false,
+            error = "network unreachable"
+        )
 
-        config.recordUpload(at = 500L, delivered = true, error = null)
+        config.recordUpload(config.current(), at = 500L, delivered = true, error = null)
 
         val settings = config.current()
         assertEquals(500L, settings.lastUploadAt)
@@ -227,9 +232,14 @@ class DeviceConfigTest {
     @Test
     fun `a failed upload records why without claiming a successful upload time`() = runTest {
         val config = config()
-        config.recordUpload(at = 100L, delivered = true, error = null)
+        config.recordUpload(config.current(), at = 100L, delivered = true, error = null)
 
-        config.recordUpload(at = 900L, delivered = false, error = "server 500")
+        config.recordUpload(
+            config.current(),
+            at = 900L,
+            delivered = false,
+            error = "server 500"
+        )
 
         val settings = config.current()
         assertEquals(100L, settings.lastUploadAt)
@@ -239,9 +249,14 @@ class DeviceConfigTest {
     @Test
     fun `a drain that delivered is an upload even when another row failed in it`() = runTest {
         val config = config()
-        config.recordUpload(at = 100L, delivered = true, error = null)
+        config.recordUpload(config.current(), at = 100L, delivered = true, error = null)
 
-        config.recordUpload(at = 900L, delivered = true, error = "server 500")
+        config.recordUpload(
+            config.current(),
+            at = 900L,
+            delivered = true,
+            error = "server 500"
+        )
 
         val settings = config.current()
         assertEquals(900L, settings.lastUploadAt)
@@ -249,10 +264,42 @@ class DeviceConfigTest {
     }
 
     @Test
+    fun `a refusal of a replaced token cannot overwrite the current upload status`() = runTest {
+        val config = config()
+        config.enrol("https://odoo.example", "phone", "first")
+        val old = config.current()
+        config.enrol("https://odoo.example", "phone", "second")
+        config.recordUpload(config.current(), 40, delivered = true, error = null)
+        config.recordUpload(old, 50, delivered = false, error = "auth rejected (401)")
+        assertEquals(40, config.current().lastAttemptAt)
+        assertNull(config.current().lastUploadError)
+    }
+
+    @Test
+    fun `a late reply from a former enrollment cannot change the new enrollment`() = runTest {
+        val config = config()
+        config.enrol("https://old.example", "phone", "token")
+        val old = config.current()
+        config.recordUpload(old, 30, delivered = true, error = null)
+        config.enrol("https://new.example", "phone", "token")
+        config.learnPayloadLimit(config.current().enrollment, 4096, at = 42)
+
+        config.learnServerNamesItself(old.baseUrl)
+        config.learnPayloadLimit(old.enrollment, 0, at = 43)
+        config.recordUpload(old, 44, delivered = false, error = "stale failure")
+
+        assertFalse(config.current().serverNamesItself)
+        assertEquals(4096L, config.current().maxPayloadBytes)
+        assertEquals(0L, config.current().lastUploadAt)
+        assertEquals(0L, config.current().lastAttemptAt)
+        assertNull(config.current().lastUploadError)
+    }
+
+    @Test
     fun `a cap learned for one device does not carry to another`() = runTest {
         val config = config()
         config.enrol("https://one.example.com", "phone-01", "token")
-        config.learnPayloadLimit(1024L * 1024, at = 5_000L)
+        config.learnPayloadLimit(config.current().enrollment, 1024L * 1024, at = 5_000L)
 
         config.enrol("https://one.example.com", "phone-01", "rotated")
         assertEquals(
@@ -264,7 +311,7 @@ class DeviceConfigTest {
         config.enrol("https://one.example.com", "phone-02", "rotated")
         assertEquals(0L, config.current().maxPayloadBytes)
 
-        config.learnPayloadLimit(1024L * 1024, at = 5_000L)
+        config.learnPayloadLimit(config.current().enrollment, 1024L * 1024, at = 5_000L)
         config.applyManaged(ManagedValues(identifier = "phone-03", policyPresent = true))
         assertEquals(0L, config.current().maxPayloadBytes)
     }
@@ -272,9 +319,9 @@ class DeviceConfigTest {
     @Test
     fun `a drain with nothing to send does not claim an upload`() = runTest {
         val config = config()
-        config.recordUpload(at = 100L, delivered = true, error = null)
+        config.recordUpload(config.current(), at = 100L, delivered = true, error = null)
 
-        config.recordUpload(at = 900L, delivered = false, error = null)
+        config.recordUpload(config.current(), at = 900L, delivered = false, error = null)
 
         val settings = config.current()
         assertEquals(100L, settings.lastUploadAt)
@@ -299,7 +346,7 @@ class DeviceConfigTest {
     fun `the cap the server declared is remembered, and forgettable`() = runTest {
         val config = config()
 
-        config.learnPayloadLimit(1024L * 1024, at = 5_000L)
+        config.learnPayloadLimit(config.current().enrollment, 1024L * 1024, at = 5_000L)
         assertEquals(1024L * 1024, config.current().maxPayloadBytes)
         assertEquals(1024L * 1024, config.current().payloadLimit(now = 65_000L))
         assertEquals(
@@ -308,7 +355,7 @@ class DeviceConfigTest {
             config.current().payloadLimit(now = 5_000L + PAYLOAD_LIMIT_TTL_MILLIS),
         )
 
-        config.learnPayloadLimit(0, at = 6_000L)
+        config.learnPayloadLimit(config.current().enrollment, 0, at = 6_000L)
         assertEquals(
             "a revival re-probes, so the cap has to be droppable",
             0L,

@@ -1,55 +1,89 @@
 package com.odoocompanion.net
 
+import com.odoocompanion.data.FileStamp
 import kotlinx.serialization.json.JsonObject
 import okhttp3.MediaType
 import okhttp3.RequestBody
 import okio.BufferedSink
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.util.Base64
 
-internal class FileBody(
-    metadata: JsonObject,
-    private val file: File,
+internal class FileBody private constructor(
+    private val prefix: ByteArray,
     private val contentType: MediaType,
-    private val fileKey: String = AUDIO_KEY,
+    private val sourceBytes: Long,
+    private val open: () -> InputStream,
+    private val unchanged: () -> Boolean,
 ) : RequestBody() {
-    private val prefix = buildPrefix(metadata)
+    constructor(
+        metadata: JsonObject,
+        file: File,
+        contentType: MediaType,
+        fileKey: String = AUDIO_KEY,
+        stamp: FileStamp? = null,
+    ) : this(
+        buildPrefix(metadata, fileKey),
+        contentType,
+        stamp?.size ?: file.length(),
+        { Files.newInputStream(file.toPath(), LinkOption.NOFOLLOW_LINKS) },
+        { stamp == null || FileStamp.read(file) == stamp },
+    )
+
+    fun fromVerifiedCopy(input: InputStream): FileBody =
+        FileBody(prefix, contentType, sourceBytes, { input }, { true })
 
     override fun contentType(): MediaType = contentType
 
     override fun isOneShot(): Boolean = true
 
-    override fun contentLength(): Long = prefix.size + base64Length(file.length()) + SUFFIX.size
+    override fun contentLength(): Long = prefix.size + base64Length(sourceBytes) + SUFFIX.size
 
     override fun writeTo(sink: BufferedSink) {
         sink.write(prefix)
-        file.inputStream().use { input ->
-            val chunk = ByteArray(CHUNK_BYTES)
-            while (true) {
-                val read = fill(input, chunk)
-                if (read == 0) break
-                sink.write(BASE64.encode(if (read == CHUNK_BYTES) chunk else chunk.copyOf(read)))
-                if (read < CHUNK_BYTES) break
+        fromFile(open).use { input ->
+            val chunk = ByteArray(minOf(sourceBytes, CHUNK_BYTES.toLong()).toInt())
+            val encoded = ByteArray(base64Length(chunk.size.toLong()).toInt())
+            var remaining = sourceBytes
+            while (remaining > 0) {
+                val read = minOf(chunk.size.toLong(), remaining).toInt()
+                fromFile { readFully(input, chunk, read) }
+                val source = if (read == chunk.size) chunk else chunk.copyOf(read)
+                sink.write(encoded, 0, BASE64.encode(source, encoded))
+                remaining -= read
             }
+            val trailingByte = fromFile { input.read() }
+            if (trailingByte != -1) {
+                throw UploadSourceUnavailable("file grew during upload")
+            }
+        }
+        if (!fromFile(unchanged)) {
+            throw UploadSourceUnavailable("file changed during upload")
         }
         sink.write(SUFFIX)
     }
 
-    private fun fill(input: InputStream, buffer: ByteArray): Int {
+    private fun readFully(input: InputStream, buffer: ByteArray, size: Int) {
         var total = 0
-        while (total < buffer.size) {
-            val read = input.read(buffer, total, buffer.size - total)
-            if (read < 0) break
+        while (total < size) {
+            val read = input.read(buffer, total, size - total)
+            if (read < 0) throw java.io.EOFException()
             total += read
         }
-        return total
     }
 
-    private fun buildPrefix(metadata: JsonObject): ByteArray {
-        val separator = if (metadata.isEmpty()) "" else ","
-        val opened = metadata.toString().dropLast(1)
-        return """$opened$separator"$fileKey":"""".toByteArray(Charsets.UTF_8)
+    private inline fun <T> fromFile(read: () -> T): T = try {
+        read()
+    } catch (failure: IOException) {
+        throw UploadSourceUnavailable(
+            "could not read upload file (${failure.javaClass.simpleName})",
+            failure
+        )
+    } catch (_: SecurityException) {
+        throw UploadSourceUnavailable("permission to read upload file was denied")
     }
 
     companion object {
@@ -62,6 +96,15 @@ internal class FileBody(
 
         private const val CHUNK_BYTES = 3 * 16 * 1024
 
+        private fun buildPrefix(metadata: JsonObject, fileKey: String): ByteArray {
+            val separator = if (metadata.isEmpty()) "" else ","
+            val opened = metadata.toString().dropLast(1)
+            return """$opened$separator"$fileKey":"""".toByteArray(Charsets.UTF_8)
+        }
+
         private fun base64Length(bytes: Long): Long = 4 * ((bytes + 2) / 3)
     }
 }
+
+internal class UploadSourceUnavailable(reason: String, cause: Throwable? = null) :
+    IOException(reason, cause)

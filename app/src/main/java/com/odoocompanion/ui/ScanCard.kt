@@ -3,7 +3,6 @@ package com.odoocompanion.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.provider.OpenableColumns
 import android.text.format.DateUtils
 import android.util.Log
 import android.view.LayoutInflater
@@ -27,12 +26,14 @@ import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.databinding.ActivityMainBinding
 import com.odoocompanion.databinding.DialogScanPreviewBinding
 import com.odoocompanion.databinding.ItemScanBinding
+import com.odoocompanion.scan.ImportResult
 import com.odoocompanion.scan.ScanIntake
 import com.odoocompanion.scan.ScanPreview
+import com.odoocompanion.scan.importDocument
 import com.odoocompanion.sync.SyncScheduler
-import com.odoocompanion.whatsapp.UploadState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -51,15 +52,14 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
         val pdf = GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.pdf
-        if (pdf != null) send(pdf.uri, scannedName(), PDF, ScanIntake.SOURCE_SCAN)
+        if (pdf != null) send(pdf.uri, ScanIntake.SOURCE_SCAN, scannedName())
     }
 
     private val picker = activity.registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@registerForActivityResult
-        val mimetype = activity.contentResolver.getType(uri) ?: PDF
-        send(uri, displayName(uri), mimetype, ScanIntake.SOURCE_FILE)
+        send(uri, ScanIntake.SOURCE_FILE)
     }
 
     fun start() {
@@ -70,8 +70,9 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
                 launch(Dispatchers.IO) { app.scans.open() }
                 combine(
                     app.scans.scans,
-                    app.database.outbox().fileStates(OutboxKind.SCAN),
-                ) { scans, queue ->
+                    app.database.outbox().fileStates(OutboxKind.SCAN).distinctUntilChanged(),
+                    statusMinutes,
+                ) { scans, queue, _ ->
                     ScanPanel.items(scans.orEmpty(), queue.associateBy { it.filePath })
                 }.collect(::show)
             }
@@ -97,46 +98,22 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
 
     // Copies and queues off the main thread, then asks for an upload on the
     // network the phone is set to send on.
-    private fun send(uri: Uri, fileName: String, mimetype: String, source: String) {
+    private fun send(uri: Uri, source: String, fileName: String? = null) {
         activity.lifecycleScope.launch {
-            val queued = runCatching {
-                withContext(Dispatchers.IO) {
-                    val input = requireNotNull(activity.contentResolver.openInputStream(uri)) {
-                        "nothing to read at the chosen document"
+            when (app.importDocument(uri, source, fileName, fallbackType = PDF)) {
+                ImportResult.UNREADABLE -> toast(R.string.scan_unreadable)
+
+                ImportResult.TOO_LARGE -> toast(R.string.scan_too_large)
+
+                ImportResult.QUEUED -> {
+                    app.config.currentOrNull()?.takeIf { it.isEnrolled }?.let { settings ->
+                        SyncScheduler.uploadNow(activity, settings.wifiOnlyUploads)
                     }
-                    val file = input.use {
-                        intake().copy(it, ScanIntake.extensionFor(mimetype, fileName))
-                    }
-                    val preview = ScanPreview(File(activity.filesDir, ScanPreview.FOLDER))
-                        .render(file, mimetype)
-                    val enrollment = app.config.currentOrNull()?.enrollment
-                    intake().queue(
-                        file,
-                        fileName,
-                        mimetype,
-                        source,
-                        enrollment,
-                        preview?.absolutePath,
-                    )
+                    toast(R.string.scan_queued)
                 }
             }
-            if (queued.isFailure) {
-                Log.w(TAG, "Could not queue a document", queued.exceptionOrNull())
-                toast(R.string.scan_unreadable)
-                return@launch
-            }
-            app.config.currentOrNull()?.takeIf { it.isEnrolled }?.let { settings ->
-                SyncScheduler.uploadNow(activity, settings.wifiOnlyUploads)
-            }
-            toast(R.string.scan_queued)
         }
     }
-
-    private fun intake() = ScanIntake(
-        File(activity.filesDir, ScanIntake.FOLDER),
-        app.database.outbox(),
-        app.scans,
-    )
 
     private fun show(items: List<ScanItem>) {
         binding.scanState.text = activity.getString(
@@ -160,25 +137,17 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
     private fun meta(item: ScanItem): String = activity.getString(
         R.string.scan_item_meta,
         DateUtils.getRelativeTimeSpanString(minOf(item.scan.at, System.currentTimeMillis())),
-        activity.getString(
-            when (item.state) {
-                UploadState.QUEUED, UploadState.WAITING -> R.string.whatsapp_upload_queued
-                UploadState.DELIVERED -> R.string.whatsapp_upload_done
-                UploadState.SET_ASIDE -> R.string.whatsapp_upload_failed
-                UploadState.GONE -> R.string.whatsapp_upload_gone
-                UploadState.WITHDRAWN -> R.string.whatsapp_upload_withdrawn
-            },
-        ),
+        activity.getString(item.state.labelResource),
     )
 
     // Decoded off the main thread at the thumbnail's own size, and kept, so
     // the list redrawing on every outbox change does not decode them again.
     private fun thumbnail(view: ImageView, preview: File) {
-        thumbnails[preview.path]?.let { return show(view, it) }
+        thumbnails.get(preview.path)?.let { return show(view, it) }
         val size = view.layoutParams.width
         activity.lifecycleScope.launch {
             val bitmap = withContext(Dispatchers.IO) { decode(preview, size) } ?: return@launch
-            thumbnails[preview.path] = bitmap
+            thumbnails.put(preview.path, bitmap)
             show(view, bitmap)
         }
     }
@@ -215,16 +184,10 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
         SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.ROOT).format(Date()),
     )
 
-    private fun displayName(uri: Uri): String = activity.contentResolver
-        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-        ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-        ?.takeIf { it.isNotBlank() }
-        ?: activity.getString(R.string.scan_file_fallback)
-
     private fun toast(@StringRes message: Int) =
         Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
 
-    private val thumbnails = mutableMapOf<String, Bitmap>()
+    private val thumbnails = android.util.LruCache<String, Bitmap>(ScanPanel.SHOWN)
 
     private companion object {
         const val TAG = "ScanCard"

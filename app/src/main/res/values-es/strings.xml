@@ -137,6 +137,7 @@
     <string name="whatsapp_item_no_notice">sin número: no hubo aviso</string>
     <string name="whatsapp_upload_waiting">se subirá a Odoo</string>
     <string name="whatsapp_upload_queued">⏳ en cola para Odoo</string>
+    <string name="upload_unconfirmed">Entrega sin confirmar</string>
     <string name="whatsapp_upload_done">✅ subido a Odoo</string>
     <string name="whatsapp_upload_failed">⚠️ Odoo no lo aceptó</string>
     <string name="whatsapp_upload_gone">⚠️ el archivo salió de WhatsApp antes de enviarse</string>
@@ -146,6 +147,7 @@
     <string name="scan_none_yet">Escanea un documento o elige un PDF o una foto: llega a Documentos de Odoo como subido por quien tiene este teléfono.</string>
     <string name="scan_recent">Enviados desde este teléfono</string>
     <string name="scan_queued">Documento en cola para Odoo</string>
+    <string name="scan_too_large">El tamaño máximo por documento es de 36 MiB</string>
     <string name="scan_unreadable">No se pudo leer el documento</string>
     <string name="scan_unavailable">El escáner de documentos no está disponible en este teléfono</string>
     <string name="scan_file_name">Escaneo %1$s.pdf</string>
@@ -213,7 +215,7 @@
     <string name="new_admin_body">La configuración del engrane ahora pide la contraseña de administrador. Tu versión aparece abajo en Inicio.</string>
     <string name="new_lock_widget_title">Escanea desde la pantalla de bloqueo</string>
     <string name="new_lock_widget_body">El widget Escanear ya funciona en la pantalla de inicio y se puede poner en la de bloqueo: mantén presionada la pantalla de bloqueo, elige Widgets y agrega Companion. Al tocarlo te pide desbloquear y abre el escáner.</string>
-    <string name="share_partly_queued">%1$d de %2$d en cola para Odoo; los demás no se pudieron leer</string>
+    <string name="share_partly_queued">%1$d de %2$d elementos en cola para Odoo</string>
     <string name="new_share_title">Comparte a Odoo</string>
     <string name="new_share_body">Ya puedes mandar fotos y archivos desde cualquier app: toca Compartir y elige Odoo Companion. Llegan a Documentos de Odoo a tu nombre.</string>
     <plurals name="share_queued">

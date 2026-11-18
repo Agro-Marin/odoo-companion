@@ -221,8 +221,8 @@ class OutboxTest {
         val id = dao.take(OutboxKind.LOCATION, 1).first().id
         dao.markDeadIds(listOf(id), now = 1_000L, reason = "gone")
 
-        assertEquals(0, dao.deleteDeadBefore(500L))
-        assertEquals(1, dao.deleteDeadBefore(2_000L))
+        assertEquals(0, dao.deleteExpiredWithoutFiles(500L))
+        assertEquals(1, dao.deleteExpiredWithoutFiles(2_000L))
     }
 
     @Test
@@ -231,7 +231,7 @@ class OutboxTest {
         dao.markFailed(dao.take(OutboxKind.CALL_LOG, 2_000).map { it.id }, "x")
         assertEquals(2_000, dao.markDead(OutboxKind.IRREPLACEABLE, 1, now = 1_000L))
 
-        assertEquals(2_000, dao.deleteDeadBefore(2_000L))
+        assertEquals(2_000, dao.deleteExpiredWithoutFiles(2_000L))
         assertEquals(0, database.rowsOf(OutboxKind.CALL_LOG))
     }
 
@@ -252,7 +252,7 @@ class OutboxTest {
 
         assertEquals(
             listOf("/sdcard/Recordings/Call/a.m4a"),
-            dao.deadFilesBefore(2_000L).map { it.filePath },
+            dao.filesForCleanup(2_000L, 0, 64).map { it.filePath },
         )
     }
 

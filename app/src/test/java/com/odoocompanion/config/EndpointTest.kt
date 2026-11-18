@@ -51,6 +51,13 @@ class EndpointTest {
     }
 
     @Test
+    fun `a previously stored dot segment cannot change the route`() {
+        for (identifier in listOf(".", "..")) {
+            assertTrue(runCatching { settings(identifier).endpoint("document") }.isFailure)
+        }
+    }
+
+    @Test
     fun `a fragment or query in the identifier cannot truncate the path`() {
         assertTrue(settings("a#f").endpoint("location").endsWith("/location"))
         assertTrue(settings("a?x=1").endpoint("location").endsWith("/location"))
@@ -71,7 +78,10 @@ class EndpointTest {
 
     @Test
     fun `identifiers that would rewrite the request are refused`() {
-        listOf("", "  ", "../admin", "a/b", "a#f", "a?x=1", "phone 01", "a%2Fb").forEach {
+        val invalid = listOf(
+            "", "  ", ".", "..", "../admin", "a/b", "a#f", "a?x=1", "phone 01", "a%2Fb",
+        )
+        invalid.forEach {
             assertFalse(it, isUsableIdentifier(it))
         }
     }

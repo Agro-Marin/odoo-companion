@@ -1,14 +1,15 @@
 package com.odoocompanion.location
 
 import android.app.Application
+import android.util.Log
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.data.CompanionDatabase
+import com.odoocompanion.data.LocationDepth
 import com.odoocompanion.data.OutboxDao
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.OutboxLimits
-import com.odoocompanion.data.QueueDepth
 import com.odoocompanion.net.LocationFix
 import com.odoocompanion.sync.UploadCadence
 import kotlinx.coroutines.test.runTest
@@ -21,6 +22,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
@@ -31,6 +33,7 @@ class LocationQueueTest {
 
     @Before
     fun setUp() {
+        ShadowLog.setLoggable("LocationQueue", Log.DEBUG)
         database = Room.inMemoryDatabaseBuilder(
             ApplicationProvider.getApplicationContext(),
             CompanionDatabase::class.java,
@@ -49,7 +52,7 @@ class LocationQueueTest {
         timestamp = clock,
     )
 
-    private suspend fun fill(count: Int) {
+    private suspend fun fill(count: Int, enrollment: String? = null) {
         (0 until count).chunked(2_000).forEach { chunk ->
             dao.insertAll(
                 chunk.map {
@@ -57,6 +60,7 @@ class LocationQueueTest {
                         kind = OutboxKind.LOCATION,
                         payload = """{"latitude":1.0,"longitude":2.0,"timestamp":$it}""",
                         createdAt = it.toLong(),
+                        enrollment = enrollment,
                     )
                 },
             )
@@ -77,6 +81,42 @@ class LocationQueueTest {
         queue.record(listOf(nudged(1.0)), windowSeconds = 0)
 
         assertEquals(2, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
+    fun `a failed insert does not suppress the same position on retry`() = runTest {
+        var first = true
+        val flaky = object : OutboxDao by dao {
+            override suspend fun insertAll(entries: List<OutboxEntry>) {
+                if (first) {
+                    first = false
+                    throw android.database.sqlite.SQLiteException("temporary test failure")
+                }
+                dao.insertAll(entries)
+            }
+        }
+        val queue = LocationQueue(flaky) { clock }
+        val fixes = listOf(fix())
+        assertTrue(runCatching { queue.record(fixes, 0, 25) }.isFailure)
+        assertTrue(queue.record(fixes, 0, 25))
+        assertEquals(1, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
+    fun `a new enrollment has its own movement baseline`() = runTest {
+        val queue = queue()
+        queue.record(listOf(fix()), 0, 25, "first")
+        queue.record(listOf(fix()), 0, 25, "second")
+        assertEquals(1, dao.countOf(OutboxKind.LOCATION, enrollment = "second"))
+    }
+
+    @Test
+    fun `held positions count toward retention and do not trigger an upload`() = runTest {
+        fill(OutboxLimits.MAX_QUEUED_FIXES, enrollment = "first")
+        assertFalse(queue().record(listOf(fix()), 180, enrollment = "second"))
+        val old = dao.countOf(OutboxKind.LOCATION, enrollment = "first")
+        assertEquals(OutboxLimits.TRIMMED_FIXES - 1, old)
+        assertEquals(1, dao.countOf(OutboxKind.LOCATION, enrollment = "second"))
     }
 
     @Test
@@ -157,6 +197,22 @@ class LocationQueueTest {
     }
 
     @Test
+    fun `an old position in backoff cannot make a fresh position due`() = runTest {
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.LOCATION,
+                payload = "{}",
+                createdAt = 1L,
+                retryAfter = clock + 100_000L,
+            )
+        )
+        val queue = queue()
+        assertFalse(queue.record(listOf(fix()), windowSeconds = 60L))
+        clock += 100_000L
+        assertTrue(queue.record(listOf(fix(1)), windowSeconds = 60L, minMoveMetres = 0))
+    }
+
+    @Test
     fun `a fresh fix waits and an aged queue goes`() = runTest {
         assertFalse(queue().record(listOf(fix(1)), windowSeconds = 180))
 
@@ -207,7 +263,7 @@ class LocationQueueTest {
 
         queue().record(listOf(fix()), windowSeconds = 180)
 
-        val oldest = dao.depthOf(OutboxKind.LOCATION).oldestCreatedAt!!
+        val oldest = dao.locationDepth(null, UploadCadence.BATCH_THRESHOLD, clock).oldestCreatedAt!!
         assertTrue(
             "kept the wrong end of the queue",
             oldest >= (OutboxLimits.MAX_QUEUED_FIXES - OutboxLimits.TRIMMED_FIXES).toLong(),
@@ -219,9 +275,13 @@ class LocationQueueTest {
         val counted = object : OutboxDao by dao {
             var depths = 0
             var counts = 0
-            override suspend fun depthOf(kind: String, now: Long, enrollment: String?): QueueDepth {
+            override suspend fun locationDepth(
+                enrollment: String?,
+                threshold: Int,
+                now: Long
+            ): LocationDepth {
                 depths++
-                return dao.depthOf(kind, now, enrollment)
+                return dao.locationDepth(enrollment, threshold, now)
             }
 
             override suspend fun countOf(kind: String, now: Long, enrollment: String?): Int {
@@ -232,7 +292,7 @@ class LocationQueueTest {
 
         repeat(10) { LocationQueue(counted) { 5_000L }.record(listOf(fix(it)), 180) }
 
-        assertEquals("a fix arrives every interval; it pays for one scan", 10, counted.depths)
+        assertEquals("each fix reads depth once", 10, counted.depths)
         assertEquals("and not for a second one", 0, counted.counts)
     }
 

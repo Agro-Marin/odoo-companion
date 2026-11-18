@@ -7,9 +7,6 @@ import android.os.PowerManager
 import android.view.View
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
-import androidx.work.testing.SynchronousExecutor
-import androidx.work.testing.WorkManagerTestInitHelper
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.ManagedConfig
@@ -18,10 +15,18 @@ import com.odoocompanion.config.enrol
 import com.odoocompanion.config.form
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -40,12 +45,6 @@ class StatusScreenTest {
 
     @Before
     fun setUp() = runTest {
-        WorkManagerTestInitHelper.initializeTestWorkManager(
-            app,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build(),
-        )
-        app.startup.join()
-
         app.config.clearEnrollment()
         app.config.applyManaged(ManagedValues())
         app.config.setFeature(callLog = true, recordings = false)
@@ -71,15 +70,13 @@ class StatusScreenTest {
 
     private fun status(): String {
         val activity = open()
-        var last = ""
-        repeat(60) {
+        val lastUpload = activity.findViewById<TextView>(R.id.lastUpload)
+        repeat(200) {
             Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
-            val now = panelOf(activity)
-            if (now.isNotBlank() && now == last) return now
-            last = now
-            Thread.sleep(20)
+            if (lastUpload.text.isNotEmpty()) return panelOf(activity)
+            Thread.sleep(10)
         }
-        return last
+        error("The status panel never received its first update")
     }
 
     private fun panelOf(activity: SettingsActivity): String = listOf(R.id.alerts, R.id.statusPanel)
@@ -178,6 +175,23 @@ class StatusScreenTest {
     }
 
     @Test
+    fun `the panel can render before the first local network check finishes`() = runBlocking {
+        app.config.enrol("https://192.168.1.2", "phone-01", "t".repeat(64))
+        val rendered = CompletableDeferred<Unit>()
+        val checks = flow {
+            rendered.await()
+            emit(Unit)
+        }
+        val wanted = withTimeout(5_000) {
+            StatusText.localNetworkWanted(app, checks)
+                .onEach { rendered.complete(Unit) }
+                .take(2)
+                .toList()
+        }
+        assertEquals(listOf(false, true), wanted)
+    }
+
+    @Test
     fun `a healthy enrolled device says so without a blocker line`() = runTest {
         Shadows.shadowOf(app).grantPermissions(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -185,7 +199,7 @@ class StatusScreenTest {
             Manifest.permission.READ_CALL_LOG,
         )
         batteryExemption(true)
-        app.config.enrol("https://odoo.example.com", "phone-01", "t".repeat(64))
+        app.config.enrol("https://192.0.2.1", "phone-01", "t".repeat(64))
 
         val shown = status()
 
@@ -329,7 +343,12 @@ class StatusScreenTest {
         settle()
 
         activity.type(R.id.identifier, "phone-07")
-        app.config.recordUpload(at = 1_000L, delivered = false, error = "offline")
+        app.config.recordUpload(
+            app.config.current(),
+            at = 1_000L,
+            delivered = false,
+            error = "offline"
+        )
         settle()
 
         assertTrue(
@@ -404,6 +423,7 @@ class StatusScreenTest {
         Shadows.shadowOf(android.os.Looper.getMainLooper())
             .idleFor(java.time.Duration.ofHours(1))
         app.config.recordUpload(
+            app.config.current(),
             org.robolectric.shadows.ShadowSystem.currentTimeMillis() - 2 * 60_000,
             delivered = true,
             error = null,

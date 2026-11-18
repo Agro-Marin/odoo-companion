@@ -19,7 +19,7 @@ enum class PushCommand(val wire: String) {
 }
 
 data class PushRegistration(val endpoint: String, val p256dh: String, val auth: String) {
-    override fun toString(): String = "PushRegistration(endpoint=$endpoint)"
+    override fun toString(): String = "PushRegistration(redacted)"
 }
 
 sealed interface PushKeyLookup {
