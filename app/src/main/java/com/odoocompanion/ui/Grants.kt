@@ -39,8 +39,6 @@ class Grants(private val activity: AppCompatActivity, private val onChanged: () 
             onChanged()
         }
 
-    // The gear's "Grant permissions": the runtime grants, then the two that
-    // live on a settings screen of their own.
     fun requestAll() {
         activity.lifecycleScope.launch {
             val settings = app.config.current()

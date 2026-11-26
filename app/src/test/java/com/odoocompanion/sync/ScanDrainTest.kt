@@ -42,9 +42,6 @@ import java.io.File
 import java.io.IOException
 import java.util.Base64
 
-// A scan rides the WhatsApp document's route, but its file is the app's own
-// copy: delivered, the copy goes with the row, and a set-aside one is purged
-// with its row after the retention period.
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
 class ScanDrainTest {
