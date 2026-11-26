@@ -124,7 +124,6 @@ class UpdaterTest {
         val session = installer.createSession(
             PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL),
         )
-        // Robolectric does not seal its SessionInfo when a shadow session commits.
         ReflectionHelpers.setField(installer.getSessionInfo(session), "sealed", true)
         val prefs = context.getSharedPreferences("updates", Context.MODE_PRIVATE)
         prefs.edit().putInt("install_session", session).apply()
@@ -194,7 +193,6 @@ class UpdaterTest {
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             val manual = async(start = CoroutineStart.UNDISPATCHED) { update.check() }
             try {
-                // Both coroutines started on IO. An overlapping call would already be enqueued.
                 assertEquals(1, network.runningCallsCount() + network.queuedCallsCount())
             } finally {
                 release.countDown()

@@ -32,8 +32,6 @@ sealed interface UpdateCheck {
 }
 
 sealed interface InstallStart {
-    // Android asks once whether this app may install apps; the person grants
-    // it on a settings screen and taps Update again.
     data object NeedsPermission : InstallStart
 
     data object AlreadyInProgress : InstallStart
@@ -51,10 +49,6 @@ sealed interface UpdateStep {
     data object Installing : UpdateStep
 }
 
-// Finds, downloads and hands to Android a newer build published as a GitHub
-// release. Android shows its own confirmation before installing -- always the
-// first time, and again on a handset where this app is not the installer of
-// record -- and refuses an APK not signed with the key of the installed one.
 class Updater(context: Context, private val http: OkHttpClient = HTTP) {
     private val context = context.applicationContext
 
@@ -67,8 +61,6 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
             context.packageManager.getPackageInfo(context.packageName, 0),
         )
 
-    // The newer build the last check found, kept so Home offers it again
-    // without asking GitHub on every visit.
     fun known(): UpdateManifest? = prefs.getString(KEY_AVAILABLE, null)
         ?.let(UpdateFeed::parse)
         ?.takeIf { UpdateFeed.isNewer(it, installedVersionCode) }
@@ -150,8 +142,6 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
 
     private fun call(url: String) = http.newCall(Request.Builder().url(url).build())
 
-    // Into the app's cache, checked against the manifest's size and digest
-    // before Android ever sees it.
     private fun download(manifest: UpdateManifest, target: File) {
         val digest = MessageDigest.getInstance("SHA-256")
         call(UpdateFeed.apkUrl(manifest)).execute().use { response ->
@@ -187,8 +177,6 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
             .apply {
                 setAppPackageName(context.packageName)
                 setSize(apk.length())
-                // Once this app is the installer of record, Android 12+ may
-                // update it without asking; the first time it always asks.
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
                 }
@@ -205,8 +193,6 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
                     apk.inputStream().use { it.copyTo(out) }
                     session.fsync(out)
                 }
-                // Mutable: the installer writes its status and, when it needs the
-                // person to confirm, the intent to show them into this broadcast.
                 val status = PendingIntent.getBroadcast(
                     context,
                     id,
@@ -241,8 +227,6 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
                     step.value = UpdateStep.Installing
                     return false
                 }
-                // An unsealed session cannot deliver an install callback. The old
-                // process stopped while staging it and this attempt can replace it.
                 if (session != null) installer.abandonSession(id)
                 prefs.edit {
                     remove(KEY_SESSION)

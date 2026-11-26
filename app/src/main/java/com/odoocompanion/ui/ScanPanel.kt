@@ -4,7 +4,6 @@ import com.odoocompanion.data.QueuedFileState
 import com.odoocompanion.data.UploadState
 import com.odoocompanion.scan.Scan
 
-// What the Documents card lists: the last scans, each with where it stands.
 data class ScanItem(val scan: Scan, val state: UploadState)
 
 object ScanPanel {

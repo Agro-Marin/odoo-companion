@@ -1,8 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home: what the person holding the phone came to do, send a document,
-     and nothing else. Whether the phone is enrolled stays in the header, an
-     alert that needs a hand keeps its band, and everything that configures
-     the phone lives behind the gear, in Settings. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -23,8 +19,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- The symbol and the name, whether this phone is enrolled, and
-                 the gear. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -67,7 +61,6 @@
                 android:id="@+id/alerts"
                 layout="@layout/alert_band" />
 
-            <!-- A newer build published on GitHub, offered once it is known. -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/updateBanner"
                 android:layout_width="match_parent"
@@ -128,8 +121,6 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- A phone that is not enrolled sends nothing: the way to fix that
-                 comes first. -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/enrollPrompt"
                 android:layout_width="match_parent"
@@ -175,8 +166,6 @@
                 android:textColor="@color/ink_muted"
                 android:textSize="15sp" />
 
-            <!-- The two ways in: scan a page, or pick a file already on the
-                 phone. Big icons, one word each. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -291,8 +280,6 @@
         android:layout_marginBottom="12dp"
         android:textAllCaps="false" />
 
-    <!-- The actions, behind the gear: a scrim that closes the menu on any tap
-         outside it, and the menu itself under the gear. -->
     <View
         android:id="@+id/actionsScrim"
         android:layout_width="match_parent"

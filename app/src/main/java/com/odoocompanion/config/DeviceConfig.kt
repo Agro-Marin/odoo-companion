@@ -181,8 +181,6 @@ class DeviceConfig(
         null
     }
 
-    // Serialize the outbox decision with form saves and managed enrolment changes.
-    // The action only touches Room. Scheduling the upload happens after this edit.
     suspend fun withCurrentEnrollment(expected: String, action: suspend () -> Unit): Settings? =
         withCurrentSettings({ it.enrollment == expected }, action)
 

@@ -158,7 +158,6 @@ open class CompanionApp : Application() {
 
     fun reportPushEndpoint(instance: String, registration: PushRegistration?) =
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            // Enter in callback order, so an earlier endpoint cannot finish after its replacement.
             reportingPush.withLock {
                 val settings = pushOwner(instance) ?: return@withLock
                 when (val reply = client.registerPush(settings, registration)) {

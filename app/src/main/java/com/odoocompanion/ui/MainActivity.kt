@@ -36,9 +36,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
-// Home: send a document, scanned or picked. Whether the phone is enrolled and
-// what needs a hand stay in sight; configuring it is behind the gear, in
-// Settings.
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
@@ -54,9 +51,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var scanCard: ScanCard
 
-    // Settings, Sync now, Grant and the update check live behind the gear, so
-    // the screen keeps to the one thing it is for; the alert band keeps a
-    // shortcut to Grant while one is due.
     private val closeActionsOnBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = showActions(false)
     }
@@ -237,8 +231,6 @@ class MainActivity : AppCompatActivity() {
         closeActionsOnBack.isEnabled = open
     }
 
-    // The automatic check says nothing unless it found something; the one
-    // asked for from the menu always answers.
     private fun checkForUpdate(quiet: Boolean) {
         lifecycleScope.launch {
             when (val check = updater.check()) {
@@ -283,8 +275,6 @@ class MainActivity : AppCompatActivity() {
                     offer(manifest)
                 }
 
-                // Android takes it from here: its confirmation, then a restart
-                // into the new build.
                 InstallStart.Started, InstallStart.AlreadyInProgress -> Unit
 
                 is InstallStart.Failed -> {
@@ -314,12 +304,8 @@ class MainActivity : AppCompatActivity() {
         alerts.show(panel.alerts, panel.blocked)
     }
 
-    // targetSdk 36 means Android draws this window edge to edge and does not
-    // ask: without this the header sits under the clock and the battery icon.
     private fun keepContentOutFromUnderTheSystemBars() {
         val scroll = binding.formScroll
-        // Captured once. The listener runs again on rotation, and padding added
-        // to whatever is currently set would grow a little further each time.
         val menuOffset =
             (binding.actionsMenu.layoutParams as ViewGroup.MarginLayoutParams).topMargin
         val versionOffset =

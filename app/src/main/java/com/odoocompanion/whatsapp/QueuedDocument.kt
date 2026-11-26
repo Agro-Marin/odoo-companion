@@ -10,17 +10,11 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-// A WhatsApp document waiting in the outbox: what Odoo is sent about it, and
-// the tax identifier the handset read off it. The identifier is for the
-// notice on this phone; it is kept beside the metadata, which never names it,
-// so it does not travel.
 data class QueuedDocument(val metadata: DocumentMetadata, val rfc: String?) {
     fun agreesWith(verdict: Classification): Boolean = verdict.kind.uploads &&
         (metadata.kind == null || metadata.kind == verdict.kind.name.lowercase()) &&
         (rfc == null || rfc == verdict.rfc)
 
-    // A row queued by an older matcher may name a chat from the other app.
-    // Such a file has the same provenance as a download seen without a notice.
     fun fromInbox(path: String, modifiedAt: Long): QueuedDocument {
         val inbox = WhatsAppInbox.containing(path) ?: return this
         if (metadata.source == inbox.source) return this

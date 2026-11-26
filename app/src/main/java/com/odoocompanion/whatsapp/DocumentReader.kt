@@ -15,8 +15,6 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.security.MessageDigest
 
-// Unlink the empty scratch file before copying any private bytes. Both OCR and the HTTP
-// writer can then use a stable descriptor, even if WhatsApp replaces its file during either.
 internal object DocumentSnapshot {
     inline fun <T> use(
         file: File,
@@ -65,7 +63,6 @@ class DocumentReader(
         if (!file.isPdf()) return Classification(DocumentKind.OTHER)
         return try {
             val source = FileStamp.read(file) ?: return null
-            // The outbox holds oversized rows for its existing size-limit handling.
             if (source.size > OutboxLimits.MAX_FILE_BYTES) {
                 return FileInputStream(file).use { readPdf(it.fd)?.copy(source = source) }
             }
@@ -92,8 +89,6 @@ class DocumentReader(
         if (sha256 != null) {
             if (actual != sha256) return null
         } else {
-            // Old rows cannot prove their original bytes. Check the current copy against
-            // the queued verdict and any recorded tax identifier before sending that copy.
             if (!file.isPdf()) return null
             val read = readPdf(copy.fd) ?: throw IOException("Document reading unavailable")
             if (!document.agreesWith(read)) return null

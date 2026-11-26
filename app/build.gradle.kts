@@ -107,7 +107,6 @@ android {
             isIncludeAndroidResources = true
             all {
                 it.maxHeapSize = "256m"
-                // Release Robolectric's per-process Android resources between groups of test classes.
                 it.forkEvery = 24
                 it.jvmArgs("--add-exports", "java.base/jdk.internal.access=ALL-UNNAMED")
             }

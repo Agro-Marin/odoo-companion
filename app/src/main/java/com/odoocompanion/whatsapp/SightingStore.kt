@@ -71,8 +71,6 @@ data class Sighting(
             (receiptsAwaitingClassification + receipts).distinct()
         }
         if (candidates.isEmpty()) return this
-        // Cleanup can run before OCR, including while shared storage is unavailable.
-        // Keep the receipt until we can compare it with the classified bytes.
         val source = classification?.source
         val deferred = if (source?.sha256 == null) {
             candidates.filter { it.source?.sha256 != null || it.recheckedSha256 != null }
@@ -154,8 +152,6 @@ class SightingStore(
                 added++
             } else {
                 val prior = rows[index]
-                // A replay can supply the message clock that an earlier notification omitted.
-                // Keep that clock so the fallback window cannot absorb the next real message.
                 val timed = notice.hasMessageTime && !prior.hasMessageTime
                 if (timed || (prior.phone == null && notice.phone != null)) {
                     rows[index] = prior.copy(
@@ -225,8 +221,6 @@ class SightingStore(
             val known = requireNotNull(state.value)
             val classified = known.map { sighting ->
                 val path = sighting.filePath
-                // OCR runs outside the history lock. A later notice may now refer to
-                // different bytes at this path, even with the same size and timestamp.
                 val notice = noticeOf(sighting)
                 val observed = pending[path]?.any {
                     it.at == sighting.at && it.loose == sighting.loose &&
@@ -245,8 +239,6 @@ class SightingStore(
         reads
     }
 
-    // Cleanup records its receipt under this same lock before removing the Room
-    // row. Keep eligibility, enqueue and the history marker in that order.
     internal suspend fun enqueuePending(enqueue: suspend (List<Sighting>) -> Int): Int =
         lock.withLock {
             val known = load() ?: return@withLock 0
@@ -288,7 +280,6 @@ class SightingStore(
         for (simultaneous in sightings.groupBy { it.at }.toSortedMap().values) {
             val (found, pending) = simultaneous.partition { it.found }
             result += found
-            // Score notices with the same timestamp before any of them claims a file.
             val choices = pending.map { sighting ->
                 val notice = noticeOf(sighting)
                 val candidates = DocumentMatcher.closest(notice, files, claimed)
@@ -391,7 +382,6 @@ class SightingStore(
                 verdict?.kind?.uploads == true && verdict.source?.sha256 == null &&
                 (verdict.source?.size ?: 0) <= OutboxLimits.MAX_FILE_BYTES
             ) {
-                // Older history never tied its verdict to the bytes being queued.
                 sighting.copy(classification = null, readFailures = 0)
             } else {
                 sighting
@@ -425,7 +415,6 @@ class SightingStore(
             rows.firstOrNull { it.outcome == UploadState.DELIVERED }
                 ?: rows.firstOrNull { it.outcome != null } ?: rows.firstOrNull { it.queued }
         }
-        // Keep every notice. A loose download stands in only while no notice owns its version.
         val represented = aliases.filterValues { rows ->
             rows.any { !it.loose }
         }.keys.toMutableSet()
@@ -445,8 +434,6 @@ class SightingStore(
         if (owner == null || owner.app == sighting.app) return listOf(sighting)
         if (sighting.loose) return listOf(sighting.copy(app = owner.app))
 
-        // Let the original notice find its own download. A queued file keeps its receipt
-        // and provenance even when the notification that first claimed it was unrelated.
         val notice = sightingOf(noticeOf(sighting))
         val modifiedAt = sighting.classification?.source?.modifiedAt
         if (!sighting.queued && sighting.outcome == null &&

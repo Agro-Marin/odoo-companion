@@ -10,8 +10,6 @@ import android.widget.Toast
 import androidx.core.content.IntentCompat
 import com.odoocompanion.R
 
-// What Android answers about an update this app handed it: the confirmation
-// to show the person, or how it ended.
 class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val session = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, Updater.NO_SESSION)
@@ -31,7 +29,6 @@ class UpdateReceiver : BroadcastReceiver() {
                 } catch (_: SecurityException) {
                     Log.w(TAG, "The installer confirmation activity could not be opened")
                 }
-                // Android still owns a pending session if its confirmation failed to open.
                 try {
                     context.packageManager.packageInstaller.abandonSession(session)
                 } catch (_: SecurityException) {
@@ -47,15 +44,11 @@ class UpdateReceiver : BroadcastReceiver() {
                 Log.i(TAG, "Update installed")
             }
 
-            // The person said no to Android's confirmation: Home offers it again.
             PackageInstaller.STATUS_FAILURE_ABORTED -> {
                 Log.i(TAG, "Update declined")
                 Updater.finish(context, session, installed = false)
             }
 
-            // A key that is not the installed build's lands here, as
-            // STATUS_FAILURE_CONFLICT or _INCOMPATIBLE: say it, since nothing
-            // else on the phone would.
             else -> {
                 Log.w(TAG, "Update not installed: status $status")
                 Updater.finish(context, session, installed = false)

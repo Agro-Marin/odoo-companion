@@ -16,11 +16,6 @@ import com.odoocompanion.system.DeviceHealth
 import com.odoocompanion.whatsapp.WhatsAppNotificationListener
 import kotlinx.coroutines.launch
 
-// Every grant the app asks for, for Home's "Grant permissions" and for what
-// Settings asks after a save and from the WhatsApp card. Built in the
-// activity's construction, since its launchers have to be registered before
-// the activity starts. onChanged runs once a grant may have changed what the
-// screen shows.
 class Grants(private val activity: AppCompatActivity, private val onChanged: () -> Unit) {
     private val app get() = CompanionApp.from(activity)
 

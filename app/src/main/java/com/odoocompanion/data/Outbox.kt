@@ -23,8 +23,6 @@ object OutboxKind {
 
     const val DOCUMENT = "document"
 
-    // A document someone scanned or picked on the handset, in a copy the app
-    // made for it: the outbox's to delete once delivered, like a recording.
     const val SCAN = "scan"
 
     val IRREPLACEABLE = setOf(CALL_LOG, RECORDING, DOCUMENT, SCAN)
@@ -53,7 +51,6 @@ data class OutboxEntry(
     val retryAfter: Long = 0,
     val enrollment: String? = null,
     @Embedded(prefix = "source_") val source: FileStamp? = null,
-    // Preserve the original history key when an older document first passes OCR on upload.
     val recheckedSha256: String? = null,
 )
 
@@ -140,8 +137,6 @@ interface OutboxDao {
     )
     suspend fun hasReady(kinds: Set<String>, now: Long, enrollment: String?): Boolean
 
-    // Retention counts every position. Cadence only needs the oldest eligible
-    // position and whether the active enrollment has reached its threshold.
     @Query(
         """
         SELECT (SELECT COUNT(*) FROM outbox WHERE kind = '${OutboxKind.LOCATION}') AS total,
@@ -189,8 +184,6 @@ interface OutboxDao {
     @Query("UPDATE outbox SET enrollment = :enrollment WHERE enrollment IS NULL")
     suspend fun claimUnstamped(enrollment: String): Int
 
-    // A new destination has its own retry budget. Only a build that can read a
-    // previously undecodable payload may revive it.
     @Query(
         """
         UPDATE outbox SET enrollment = :enrollment, attempts = 0, revivals = 0,
@@ -203,8 +196,6 @@ interface OutboxDao {
     )
     suspend fun adoptHeld(enrollment: String, from: String): Int
 
-    // Keep the retention check indexed by (kind, deadAt, createdAt). Combining the
-    // live and legacy dead cases with OR scans every queued fix on each drain.
     @Query(
         """
         DELETE FROM outbox WHERE $HELD AND (:from IS NULL OR enrollment = :from)
@@ -386,9 +377,6 @@ interface OutboxDao {
     )
     suspend fun deferCleanup(ids: List<Long>, now: Long)
 
-    // Archive history before entering this transaction. An upgrade or an operator
-    // may have revived the row during that write. Hold the writer lock from the
-    // final comparison through unlink and row deletion so revival cannot slip in.
     @Transaction
     suspend fun finishFileCleanup(
         expected: List<QueuedFile>,
@@ -480,8 +468,6 @@ internal fun List<QueuedFileState>.rowFor(source: FileStamp?): QueuedFileState? 
         matching.lastOrNull { UploadState.fromDeadReason(it.deadReason) == UploadState.DELIVERED }
             ?.let { return it }
     }
-    // Old histories may lack a digest too. Keep their collection-time fallback,
-    // but never use a timestamp to override two known, different digests.
     return matching.lastOrNull() ?: lastOrNull {
         it.source == null && source != null &&
             (source.sha256 == null || it.recheckedSha256 == null) &&

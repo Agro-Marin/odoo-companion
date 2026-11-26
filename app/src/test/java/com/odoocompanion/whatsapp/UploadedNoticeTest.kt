@@ -36,7 +36,6 @@ class UploadedNoticeTest {
         assertNull(UploadedNotice.of(metadata(null)).kind)
     }
 
-    // The same document twice replaces its notice; two documents are two.
     @Test
     fun `one notice id per document`() {
         assertEquals(UploadedNotice.idOf(metadata("csf")), UploadedNotice.idOf(metadata("csf")))

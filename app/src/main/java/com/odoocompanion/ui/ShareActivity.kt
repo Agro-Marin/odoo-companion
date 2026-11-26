@@ -22,15 +22,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Companion in the system's share sheet: whatever photos or files are shared
-// to it go to Odoo's Documents the way a picked file does. It has no screen of
-// its own; it copies while it still holds the sender's read grant, says how it
-// went, and closes.
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // A restored instance has lost the copy it was running; the share
-        // sheet's grant went with it.
         if (savedInstanceState != null) {
             finish()
             return
@@ -71,8 +65,6 @@ class ShareActivity : ComponentActivity() {
     private fun canReadShare(uri: Uri, grants: Set<Uri>): Boolean {
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
         val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
-        // MediaStore ownership can be invisible to Android 15's caller snapshot.
-        // An explicit read grant on this launch also authorizes the shared item.
         if (uri in grants && checkUriPermission(uri, Process.myPid(), Process.myUid(), read) ==
             PackageManager.PERMISSION_GRANTED
         ) {

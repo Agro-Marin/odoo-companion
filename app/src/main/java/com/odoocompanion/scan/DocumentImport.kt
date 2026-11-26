@@ -34,7 +34,6 @@ internal suspend fun CompanionApp.importDocument(
     } catch (_: DocumentTooLarge) {
         ImportResult.TOO_LARGE
     } catch (failure: Exception) {
-        // Provider exception messages can contain the original URI or display name.
         Log.w("DocumentImport", "Could not queue a document (${failure.javaClass.simpleName})")
         ImportResult.UNREADABLE
     }

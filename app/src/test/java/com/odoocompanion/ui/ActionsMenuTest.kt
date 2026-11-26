@@ -130,7 +130,6 @@ class ActionsMenuTest {
         .digest(text.toByteArray())
         .joinToString("") { "%02x".format(it) }
 
-    // Home sends documents and nothing else: no field of the form is on it.
     @Test
     fun `home carries the two ways to send a document and none of the form`() {
         val screen = open()

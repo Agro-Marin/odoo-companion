@@ -1,15 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Settings: everything that configures the phone and reports on it, out of
-     Home's way. Status first (the first thing anyone reads when a phone
-     stopped reporting), then the connection, the reporting cadence, what is
-     sent, the appearance and the WhatsApp documents report. Save sits in the
-     bar, since it writes this whole form at once.
-
-     Every field is wrapped in a TextInputLayout rather than carrying a hint of
-     its own. A hint is only drawn while the field is empty, so the moment a
-     phone is enrolled the whole form turns into five unlabelled values, two of
-     them bare numbers whose unit lives only in the string the user can no
-     longer see. A floating label survives the field being filled in. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/settingsRoot"
@@ -406,8 +395,6 @@
                     android:text="@string/restriction_wifi_only_title"
                     android:textSize="15sp" />
 
-                <!-- Light, dark, or whatever the system says; applied at once
-                     and kept on this phone only, never sent to Odoo. -->
                 <TextView
                     style="@style/Text.Companion.Label"
                     android:layout_width="wrap_content"
@@ -448,9 +435,6 @@
                         android:text="@string/appearance_dark" />
                 </com.google.android.material.button.MaterialButtonToggleGroup>
 
-                <!-- The WhatsApp documents report: what the notices announced
-                     and whether the file was found, read on the handset before
-                     anything is uploaded. -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -521,7 +505,6 @@
         </ScrollView>
     </LinearLayout>
 
-    <!-- The enrolment guide, docked over the bottom of the form. -->
     <FrameLayout
         android:id="@+id/guideDock"
         android:layout_width="match_parent"

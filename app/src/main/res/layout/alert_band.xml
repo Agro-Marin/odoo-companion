@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- What needs a hand, folded into one band: the first item and how many
-     follow; a tap unfolds the rest. A shortcut to the permission request
-     rides on it while a permission is missing. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"

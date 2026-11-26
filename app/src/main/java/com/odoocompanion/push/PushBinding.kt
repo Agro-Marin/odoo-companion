@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.core.content.edit
 import java.util.UUID
 
-// The connector echoes the instance in each callback, even after a process restart.
 internal class PushBinding(context: Context) {
     private val prefs = context.getSharedPreferences("push_binding", Context.MODE_PRIVATE)
 
@@ -13,8 +12,6 @@ internal class PushBinding(context: Context) {
         return enrollment != null && binding[OWNER] == enrollment && binding[INSTANCE] == instance
     }
 
-    // Called under the configuration mutex, before saving the distributor. Releasing
-    // its last instance can clear the connector's distributor selection.
     fun activate(enrollment: String, release: (String) -> Unit): String {
         val previous = prefs.getString(INSTANCE, LEGACY).orEmpty()
         if (owns(enrollment, previous)) return previous

@@ -29,8 +29,6 @@ object ContactNumbers {
         val lines = numbers.filter { it.length >= SAME_LINE_DIGITS }
             .groupBy { it.takeLast(SAME_LINE_DIGITS) }
         val sameSuffix = lines.values.singleOrNull() ?: return null
-        // A local ten-digit number can accompany its international spelling. Two
-        // explicit country codes still distinguish lines with identical local digits.
         val prefixes = sameSuffix.map { it.dropLast(SAME_LINE_DIGITS) }
             .filter { it.isNotEmpty() }.map { if (it == "521") "52" else it }.distinct()
         return sameSuffix.maxBy { it.length }.takeIf { prefixes.size <= 1 }

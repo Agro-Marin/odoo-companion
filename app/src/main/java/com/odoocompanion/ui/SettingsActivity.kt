@@ -48,9 +48,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
-// Everything that configures the phone and reports on it: the status, the
-// connection, the reporting cadence, what is sent, the appearance and the
-// WhatsApp documents report. Home opens it from the gear.
 class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
 
@@ -64,16 +61,12 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var alerts: AlertBand
 
-    // The steps the person closed with "Got it": each comes back once its
-    // field has been filled in and emptied again.
     private val dismissedSteps = mutableSetOf<GuideField>()
 
     private var governedKeys: Set<String> = emptySet()
 
-    // The grant the WhatsApp card's button opens, as the card last said.
     private var whatsappMissing: WhatsAppGrant? = null
 
-    // Each document file in the outbox, and whether it was set aside.
     private var documentQueue: Map<String, List<QueuedFileState>> = emptyMap()
 
     private var shownHeld: HeldQueue? = null
@@ -81,9 +74,6 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         healthChecks.value++
-        // The screen does the listener's looking too, so what arrived is shown
-        // whether or not the system kept the listener bound: a document
-        // downloaded since its notice, and one that came with no notice at all.
         val whatsapp = CompanionApp.from(this).whatsapp
         val contacts = ContactBook(this)
         WhatsAppNotificationListener.reconnect(this)
@@ -94,7 +84,6 @@ class SettingsActivity : AppCompatActivity() {
             }
             if (contacts.granted) whatsapp.fillNumbers(contacts::numberOf)
             WhatsAppIntake.process(this@SettingsActivity)
-            // A rebind takes a moment; the card asks again once it may be done.
             delay(REBIND_GRACE_MILLIS)
             healthChecks.value++
         }
@@ -113,10 +102,6 @@ class SettingsActivity : AppCompatActivity() {
         binding.back.setOnClickListener { finish() }
         binding.appVersion.text = versionText()
 
-        // Every field once, then only the ones a policy governs: the store
-        // re-emits on every write -- each upload records its attempt -- and
-        // repainting the whole form put the stored values back over whatever
-        // was being typed into the fields the policy leaves to the user.
         var populated = false
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -126,12 +111,6 @@ class SettingsActivity : AppCompatActivity() {
                         populated = true
                     }
                 }
-                // Redrawn from what it shows: the settings, the queue -- which
-                // changes on every fix and every upload without touching a
-                // setting -- a refused save, the softphone, and two plain
-                // triggers: the permissions, which change behind a dialog that
-                // only pauses this screen, and the minute, which ages "Last
-                // upload: 2 minutes ago" on a phone nothing else redraws.
                 combine(
                     app.config.settings,
                     StatusText.queueCounts(app),
@@ -219,23 +198,15 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    // targetSdk 36 means Android draws this window edge to edge and does not
-    // ask: the bar goes under the clock without this, and the form's last
-    // switch under the navigation bar.
     private fun keepContentOutFromUnderTheSystemBars() {
         val bar = binding.settingsBar
         val scroll = binding.formScroll
-        // Captured once. The listener runs again on rotation and whenever the
-        // keyboard opens, and padding added to whatever is currently set would
-        // grow a little further each time.
         val barTop = bar.paddingTop
         val scrollBottom = scroll.paddingBottom
         val sides = bar.paddingStart to scroll.paddingStart
         val dock = binding.guideDock
         var bottom = 0
 
-        // The guide floats over the end of the form; the form ends that much
-        // higher while it is shown, or the last sections could not be reached.
         fun padScroll() = scroll.updatePadding(
             bottom = scrollBottom + if (dock.isVisible) dock.height else bottom,
         )
@@ -245,15 +216,10 @@ class SettingsActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
-            // The keyboard is taller than the navigation bar it covers, so the
-            // larger of the two is what keeps the guide reachable while a
-            // field is being typed into.
             bottom = maxOf(bars.bottom, keyboard.bottom)
             bar.updatePadding(top = barTop + bars.top, left = sides.first + bars.left)
             scroll.updatePadding(left = sides.second + bars.left, right = sides.second + bars.right)
             dock.updatePadding(bottom = bottom)
-            // Typing, the keyboard and the guide together would cover the very
-            // field being filled in: the guide steps aside until it closes.
             dock.isVisible = !insets.isVisible(WindowInsetsCompat.Type.ime())
             padScroll()
             insets
@@ -283,9 +249,6 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
-    // Both fields are read back with toLongOrNull(), so the digits have to stay
-    // machine-parseable: a locale-formatted number is what SetTextI18n asks for
-    // and is exactly what would fail to parse on a handset with non-Latin digits.
     @SuppressLint("SetTextI18n")
     private fun EditText.showSeconds(value: Long) = setText(value.toString())
 
@@ -342,8 +305,6 @@ class SettingsActivity : AppCompatActivity() {
             kind,
             sighting.label,
             who,
-            // A message's own time can run a few seconds ahead of this clock,
-            // which read "in 0 minutes".
             DateUtils.getRelativeTimeSpanString(minOf(sighting.at, System.currentTimeMillis())),
             file,
             phone,
@@ -406,8 +367,6 @@ class SettingsActivity : AppCompatActivity() {
         listOf(binding.baseUrl, binding.identifier, binding.token).forEach { field ->
             field.doAfterTextChanged { refreshGuide() }
         }
-        // The labels are short so both fit on one row; the range and what 0
-        // means are said while the field is being edited.
         explainWhileEditing(binding.locationIntervalLayout, R.string.config_location_interval)
         explainWhileEditing(binding.uploadWindowLayout, R.string.config_upload_window)
     }
@@ -433,20 +392,8 @@ class SettingsActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // A field is locked when the policy is managing THAT field, not merely
-    // when a policy exists. A console that publishes the declared defaults of
-    // app_restrictions.xml -- and several do, whether or not an administrator
-    // filled anything in -- sends the five non-text keys and none of the three
-    // that enrol. Locking the whole form on that leaves a phone nobody can
-    // configure: not the MDM, which never supplied an identity, and not the
-    // person holding it, whose fields are greyed out. A key that arrived and
-    // turned out unusable is still managed, because the administrator is
-    // plainly setting it; that is why this reads the keys the bundle carried
-    // rather than the values that survived parsing.
     private fun applyManagedLock(settings: Settings) {
         val keys = settings.governedKeys
-        // Both halves of each field: disabling only the inner edit text leaves
-        // the box and its label drawn as though they were still editable.
         val governed = listOf(
             ManagedKey.BASE_URL to listOf(binding.baseUrl, binding.baseUrlLayout),
             ManagedKey.IDENTIFIER to listOf(binding.identifier, binding.identifierLayout),
@@ -462,8 +409,6 @@ class SettingsActivity : AppCompatActivity() {
         for ((key, views) in governed) {
             views.forEach { it.isEnabled = key !in keys }
         }
-        // Save writes every field at once, so it belongs to the form rather
-        // than to any one key: it goes only when there is nothing left to save.
         binding.save.isEnabled = governed.any { (key, _) -> key !in keys }
     }
 
@@ -548,7 +493,6 @@ class SettingsActivity : AppCompatActivity() {
         isVisible = value != null
     }
 
-    // The figure is the number alone; what it counts is read aloud whole.
     @SuppressLint("SetTextI18n")
     private fun TextView.showFigure(value: Int, @StringRes spoken: Int) {
         text = value.toString()

@@ -6,10 +6,8 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.attribute.BasicFileAttributes
 
-// External apps can replace a document or recording while its upload is pending.
 @Serializable
 data class FileStamp(val size: Long, val modifiedAt: Long, val sha256: String? = null) {
-    // Older rows have no stamp. Their source had already been written when the row was queued.
     fun matchesQueuedMetadata(queued: FileStamp?, queuedAt: Long): Boolean = if (queued ==
         null
     ) {

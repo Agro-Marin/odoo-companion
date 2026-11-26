@@ -235,7 +235,6 @@ class DocumentQueueTest {
                 dao.delete(listOf(row.id))
                 removed.complete(Unit)
             }
-            // If history was unlocked, let cleanup remove its row before the intake reads Room.
             if (recorded.isCompleted) cleanup.join()
         }
         val overlapping = object : OutboxDao by dao {
@@ -260,7 +259,6 @@ class DocumentQueueTest {
         store.remember(listOf(QueuedFileState(path, DeadReason.ACKNOWLEDGED, row.source)))
         dao.delete(listOf(row.id))
 
-        // The directory listing still names the download while its bytes are unavailable.
         val file = File(path)
         val saved = File(folder.root, "saved")
         assertTrue(file.renameTo(saved))

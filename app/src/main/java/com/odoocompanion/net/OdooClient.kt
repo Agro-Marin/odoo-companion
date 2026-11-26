@@ -58,8 +58,6 @@ class OdooClient(
 ) {
     private var unpersistedServiceUrl: String? = null
 
-    // One sequential drain talks to a fixed destination. A named reply tightens
-    // the contract immediately for every subsequent batch and file in that drain.
     fun uploads(settings: Settings): Uploads {
         val baseUrl = canonicalBaseUrl(settings.baseUrl)
         if (unpersistedServiceUrl != baseUrl || settings.serverNamesItself) {

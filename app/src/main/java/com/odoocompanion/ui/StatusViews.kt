@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 
-// Relative times also advance while the outbox and settings are idle.
 internal val statusMinutes: Flow<Unit> = flow {
     while (true) {
         emit(Unit)
@@ -38,9 +37,6 @@ internal val statusMinutes: Flow<Unit> = flow {
     }
 }
 
-// The status panel as text, formatted before it is compared, so the minute
-// tick redraws "2 minutes ago" while an unchanged panel draws nothing. Home
-// reads the enrolment and the alerts from it; Settings reads all of it.
 data class PanelText(
     val enrolled: Boolean,
     val managed: Boolean,
@@ -97,7 +93,6 @@ object StatusText {
     ) { baseUrl, domain, _ -> baseUrl to domain }
         .mapLatest { (baseUrl, domain) -> LocalNetwork.anyLocal(baseUrl, domain) }
         .flowOn(Dispatchers.IO)
-        // Show enrollment and queue counts while DNS resolves the optional permission warning.
         .onStart { emit(false) }
         .distinctUntilChanged()
 
@@ -124,8 +119,6 @@ object StatusText {
     }
 }
 
-// Whether this phone is enrolled: the dot in the accent, or in the alert's
-// ink while it is not.
 fun StatePillBinding.show(enrolled: Boolean) {
     stateText.setText(if (enrolled) R.string.status_enrolled else R.string.status_not_enrolled)
     val dot = if (enrolled) R.color.brand_accent else R.color.alert_ink
@@ -135,9 +128,6 @@ fun StatePillBinding.show(enrolled: Boolean) {
     )
 }
 
-// One band however many alerts there are, so the screen keeps its shape: the
-// first one and how many follow, unfolded on a tap. Every one of them is read
-// aloud either way.
 class AlertBand(private val band: AlertBandBinding, onGrant: () -> Unit) {
     private var shown: List<String> = emptyList()
     private var blocked = false

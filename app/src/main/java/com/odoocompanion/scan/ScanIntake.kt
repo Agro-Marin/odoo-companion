@@ -18,17 +18,12 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.UUID
 
-// A document chosen on the phone goes into the app's own storage first: the
-// picker's grant on a file can lapse, and the scanner's output is a cache the
-// system may clear before the upload runs. Then it is queued for the same
-// route a WhatsApp document takes, and remembered for the Documents card.
 class ScanIntake(
     private val folder: File,
     private val dao: OutboxDao,
     private val log: ScanLog,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    /** Takes ownership of [input] and closes it before publishing the scan. */
     suspend fun receive(
         input: InputStream,
         fileName: String,
@@ -50,7 +45,6 @@ class ScanIntake(
             picture = preview(file, mimetype)
             val scan = Scan(file.absolutePath, fileName, source, at, picture?.absolutePath)
             currentCoroutineContext().ensureActive()
-            // The committed row owns the copy even if the activity goes away during the insert.
             val saved = withContext(NonCancellable) {
                 try {
                     log.add(scan) {
@@ -116,17 +110,12 @@ class ScanIntake(
 
         const val FOLDER = "scans"
 
-        // What the note on the document in Odoo says it came through.
         const val SOURCE_SCAN = "Scanner"
         const val SOURCE_FILE = "File"
         const val SOURCE_SHARE = "Shared"
 
         const val PDF = "application/pdf"
 
-        /**
-         * The extension the stored copy gets: the shared name's own when it has
-         * one, else one read from [mimetype].
-         */
         fun extensionFor(mimetype: String, fileName: String? = null): String {
             val named = fileName?.substringAfterLast('.', "")?.lowercase()
             if (!named.isNullOrEmpty() && named.length <= MAX_EXTENSION &&

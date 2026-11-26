@@ -19,8 +19,6 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 
-// A document someone scanned or picked on the handset and handed to the outbox.
-// The saved outcome outlives the queue row while the scan remains in history.
 @Serializable
 data class Scan(
     val filePath: String,
@@ -31,8 +29,6 @@ data class Scan(
     val outcome: UploadState? = null,
 )
 
-// The last few scans, newest first, kept in the app's private storage: a window
-// onto what was sent from this handset, not a record of it.
 class ScanLog(private val file: File) {
     private val lock = Mutex()
 
@@ -51,7 +47,6 @@ class ScanLog(private val file: File) {
     }
 
     suspend fun add(scan: Scan, enqueue: suspend () -> Unit = {}) = lock.withLock {
-        // A worker can acknowledge the row as soon as it is inserted.
         enqueue()
         save(listOf(scan) + (state.value ?: read()))
     }
@@ -61,7 +56,6 @@ class ScanLog(private val file: File) {
         if (kept == state.value) return
         file.writeHistory(json.encodeToString(kept))
         state.value = kept
-        // A preview outlives its scan only as long as the list shows it.
         all.drop(KEPT).mapNotNull { it.previewPath }.forEach { File(it).delete() }
     }
 
@@ -71,7 +65,6 @@ class ScanLog(private val file: File) {
         val updated = known.map { scan ->
             receipts.remove(scan.filePath)?.let { scan.copy(outcome = it.outcome) } ?: scan
         }
-        // Intake commits the outbox row first. Its metadata can rebuild a missing history entry.
         val recovered = receipts.values.mapNotNull { row ->
             val payload = row.scanPayload ?: return@mapNotNull null
             val metadata = try {

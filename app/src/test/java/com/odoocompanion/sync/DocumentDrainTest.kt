@@ -229,7 +229,6 @@ class DocumentDrainTest {
             assertTrue(report.delivered)
             assertEquals(0, dao.countOf(OutboxKind.DOCUMENT))
             assertTrue("WhatsApp's file is not the outbox's to delete", pdf.exists())
-            // what the notice will say reached Documents
             val noticed = report.deliveredDocuments.single()
             assertEquals("CSF PCA221013LF1.pdf", noticed.metadata.fileName)
             assertEquals("Yop", noticed.metadata.chat)

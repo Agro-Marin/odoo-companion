@@ -41,10 +41,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// The Documents card: scan a page with the system's document scanner, or pick
-// a PDF or a photo, and send it to Odoo's Documents as uploaded by whoever
-// holds the phone. It is built in the activity's onCreate, since its result
-// launchers have to be registered before the activity starts.
 class ScanCard(private val activity: AppCompatActivity, private val binding: ActivityMainBinding,) {
     private val app = CompanionApp.from(activity)
 
@@ -96,8 +92,6 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
             }
     }
 
-    // Copies and queues off the main thread, then asks for an upload on the
-    // network the phone is set to send on.
     private fun send(uri: Uri, source: String, fileName: String? = null) {
         activity.lifecycleScope.launch {
             when (app.importDocument(uri, source, fileName, fallbackType = PDF)) {
@@ -140,8 +134,6 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
         activity.getString(item.state.labelResource),
     )
 
-    // Decoded off the main thread at the thumbnail's own size, and kept, so
-    // the list redrawing on every outbox change does not decode them again.
     private fun thumbnail(view: ImageView, preview: File) {
         thumbnails.get(preview.path)?.let { return show(view, it) }
         val size = view.layoutParams.width
@@ -177,8 +169,6 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
         }
     }
 
-    // A fixed pattern: the locale's own ("3-11, 5:12 p.m.") ended in a dot
-    // that met the extension's.
     private fun scannedName(): String = activity.getString(
         R.string.scan_file_name,
         SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.ROOT).format(Date()),
@@ -192,7 +182,6 @@ class ScanCard(private val activity: AppCompatActivity, private val binding: Act
     private companion object {
         const val TAG = "ScanCard"
 
-        // Sampled down by powers of two until the longest side is within [size].
         fun decode(file: File, size: Int): Bitmap? {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.path, bounds)

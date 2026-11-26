@@ -6,7 +6,6 @@ import okhttp3.Callback
 import okhttp3.Response
 import java.io.IOException
 
-// Keep cancellation attached to the call until the response body has been consumed.
 internal suspend fun <T> Call.readResponse(read: (Response) -> T): T =
     suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { cancel() }

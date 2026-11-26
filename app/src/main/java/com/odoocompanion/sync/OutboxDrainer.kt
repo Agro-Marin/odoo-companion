@@ -56,9 +56,6 @@ data class DrainReport(
     val purged: Int = 0,
     val revived: Int = 0,
     val delivered: Boolean = false,
-    // The WhatsApp documents Odoo took for the first time this pass, for the
-    // notice that says what reached Documents. A duplicate is not one: Odoo
-    // already had it, and its notice went the first time.
     val deliveredDocuments: List<QueuedDocument> = emptyList(),
     val deferred: Boolean = false,
     val moreWorkPending: Boolean = false,
@@ -347,8 +344,6 @@ class OutboxDrainer(
     ): UploadOutcome = coroutineScope {
         lateinit var request: Deferred<UploadOutcome>
         val confirmed = withCurrentCredentials(settings) {
-            // post enqueues its OkHttp call before its first suspension. Release the
-            // settings transaction before waiting for the reply or recording capabilities.
             request = async(start = CoroutineStart.UNDISPATCHED) { send() }
         }
         if (!confirmed) return@coroutineScope UploadOutcome.CredentialsUnavailable
@@ -864,7 +859,6 @@ class OutboxDrainer(
 
         private val drainLock = Mutex()
 
-        // A held-row decision must observe the outcome of requests already using those rows.
         private val ownershipLock = Mutex()
 
         internal suspend fun <T> withQueueOwnership(action: suspend () -> T): T =

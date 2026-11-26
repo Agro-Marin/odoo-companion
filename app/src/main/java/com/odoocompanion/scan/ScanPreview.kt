@@ -13,12 +13,7 @@ import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-// A picture of what was sent, kept beside the scan log: the copy that is
-// uploaded is deleted once Odoo has it, so the Documents card would otherwise
-// have nothing left to show. A photo is shrunk as it is; a PDF shows its first
-// page. Anything else has no picture.
 class ScanPreview(private val folder: File) {
-    /** A preview of [source] in the preview folder, or null when there is none to make. */
     fun render(source: File, mimetype: String): File? {
         return try {
             val bitmap =
@@ -60,8 +55,6 @@ class ScanPreview(private val folder: File) {
         return target
     }
 
-    // ImageDecoder turns the photo upright from its EXIF orientation and reads
-    // HEIC, which BitmapFactory does neither of.
     private fun photo(source: File): Bitmap =
         ImageDecoder.decodeBitmap(ImageDecoder.createSource(source)) { decoder, info, _ ->
             val (width, height) = fitted(info.size.width, info.size.height)
@@ -92,7 +85,6 @@ class ScanPreview(private val folder: File) {
 
         private const val TAG = "ScanPreview"
 
-        /** [width] by [height] brought within [LONGEST_SIDE], never enlarged. */
         fun fitted(width: Int, height: Int): Pair<Int, Int> {
             val longest = max(width, height)
             if (longest <= LONGEST_SIDE || longest <= 0) return max(width, 1) to max(height, 1)

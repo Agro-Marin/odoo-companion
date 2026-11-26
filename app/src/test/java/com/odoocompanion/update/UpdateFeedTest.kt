@@ -37,8 +37,6 @@ class UpdateFeedTest {
         assertFalse(UpdateFeed.isNewer(read, installedVersionCode = 8))
     }
 
-    // The asset name is joined onto the release's URL: anything but a bare
-    // .apk file name could fetch something the release never published.
     @Test
     fun `an asset that is not a bare apk name is refused`() {
         for (apk in listOf("../evil.apk", "sub/odoo.apk", "odoo.zip", "https://x/odoo.apk", "")) {

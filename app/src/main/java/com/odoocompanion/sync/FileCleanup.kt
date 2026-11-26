@@ -17,8 +17,6 @@ internal class FileCleanup(
     private val remember: suspend (String, List<QueuedFile>) -> Unit,
 ) {
     suspend fun acknowledge(id: Long, now: Long) {
-        // The database owns the fingerprint pinned just before the request.
-        // Reading its receipt here also gives crash recovery the same file identity.
         finish(dao.acknowledgeFile(id, now), now)
     }
 

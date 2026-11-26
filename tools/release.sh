@@ -1,22 +1,4 @@
 #!/usr/bin/env bash
-# Publish a signed release on GitHub, the one the app's updater reads.
-#
-# Usage: tools/release.sh [--notes "what changed"] [--draft]
-#
-# Builds the signed release APK, checks its wire format, and creates the GitHub
-# release v<versionName> with two assets: the APK and update.json, the manifest
-# the handset reads from releases/latest/download/ (see update/UpdateFeed.kt).
-# Handsets offer it as soon as the release is published and is not a draft or
-# a pre-release, so --draft is how a build is checked before the fleet sees it.
-#
-# It refuses to publish what the fleet could not install or would not offer:
-#   - an unsigned build (no keystore.properties): Android installs nothing else;
-#   - a versionCode the latest release already carries: no handset would see it;
-#   - a tag that already exists;
-#   - a build of uncommitted or unpushed code: the tag has to name the commit
-#     the APK was built from, and GitHub can only tag a commit it has.
-# Every published build has to be signed with the same key as the one on the
-# handsets, or Android refuses it as an update (README, "Signing a release").
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

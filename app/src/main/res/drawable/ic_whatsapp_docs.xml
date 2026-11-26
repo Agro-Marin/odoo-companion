@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A chat bubble carrying a page: the documents WhatsApp brought. A line
-     icon in the brandbook style (section 14): one stroke weight, rounded
-     ends, Noche for the form and Fértil for the part that acts. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="28dp"
     android:height="28dp"

@@ -23,8 +23,6 @@ import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-// Robolectric selects Test<manifest application> before constructing the tests.
-// Workers and application startup must see the same scheduler from the outset.
 class TestCompanionApp : CompanionApp() {
     private val workers = Executors.newSingleThreadExecutor()
 
@@ -66,8 +64,6 @@ class TestCompanionApp : CompanionApp() {
                 }
             }
         }
-        // A worker can publish its final state before its completion callback reschedules work.
-        // Drain that executor and its main-thread callbacks before releasing either database.
         workers.submit {}.get(10, TimeUnit.SECONDS)
         main.idle()
         manager.cancelAllWork().result.get(10, TimeUnit.SECONDS)

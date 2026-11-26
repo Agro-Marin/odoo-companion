@@ -15,8 +15,6 @@ import com.odoocompanion.R
 import com.odoocompanion.ui.MainActivity
 import com.odoocompanion.ui.labelResource
 
-// What a notice says about a WhatsApp document that reached Odoo: what it
-// is, which file, and the chat it came from.
 data class UploadedDocument(
     val kind: DocumentKind?,
     val fileName: String,
@@ -24,8 +22,6 @@ data class UploadedDocument(
     val chat: String?,
 )
 
-// The notice posted once Odoo took a document the handset read in WhatsApp,
-// so the person holding the phone knows it went without opening the app.
 object UploadedNotice {
     const val CHANNEL_ID = "documents_uploaded"
 
@@ -41,8 +37,6 @@ object UploadedNotice {
         chat = document.metadata.chat,
     )
 
-    // One id per document, the same however often it is computed, so a
-    // notice is replaced rather than stacked if the same one comes again.
     fun idOf(document: QueuedDocument): Int =
         (document.metadata.fileName + document.metadata.receivedAt).hashCode() and Int.MAX_VALUE
 
@@ -111,8 +105,6 @@ object UploadedNotice {
         } ?: what
     }
 
-    // Android 13+ asks for the permission, and every version lets the person
-    // switch the app's notices off: either way nothing is posted.
     private fun permissionGranted(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -127,7 +119,6 @@ object UploadedNotice {
         try {
             manager.notify(id, notice)
         } catch (_: SecurityException) {
-            // revoked between the check and the post
         }
     }
 
