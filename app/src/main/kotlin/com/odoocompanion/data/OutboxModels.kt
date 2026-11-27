@@ -1,3 +1,5 @@
+@file:JvmName("OutboxKt")
+
 package com.odoocompanion.data
 
 import androidx.room.Embedded

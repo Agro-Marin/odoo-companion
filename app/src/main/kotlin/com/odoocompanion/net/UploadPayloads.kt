@@ -1,3 +1,5 @@
+@file:JvmName("PayloadsKt")
+
 package com.odoocompanion.net
 
 import kotlinx.serialization.SerialName

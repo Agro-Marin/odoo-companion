@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SRC=app/src/main/java/com/odoocompanion
+SRC=app/src/main/kotlin/com/odoocompanion
 MAPPING=app/build/outputs/mapping/release/mapping.txt
 DEX_DIR=app/build/outputs/apk/release
 

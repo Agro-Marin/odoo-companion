@@ -44,10 +44,10 @@ else
 fi
 
 echo "== detekt $DETEKT_VERSION =="
-"$DETEKT" --input app/src/main/java,app/src/test/java --config config/detekt.yml || status=1
+"$DETEKT" --input app/src/main/kotlin,app/src/test/kotlin --config config/detekt.yml || status=1
 
 echo "== cancellation-safe suspend calls =="
-bare=$(grep -rn 'runCatching' app/src/main/java/com/odoocompanion/sync || true)
+bare=$(grep -rn 'runCatching' app/src/main/kotlin/com/odoocompanion/sync || true)
 if [ -n "$bare" ]; then
     echo "$bare" >&2
     echo "runCatching swallows CancellationException; use attempt {} in the upload path" >&2

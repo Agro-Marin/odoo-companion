@@ -251,7 +251,8 @@ handset.
 
 Two screens, drawn with the Xiuman brandbook (v1.0): its palette (Noche, Fértil, Mineral,
 Rocío), Special Gothic Expanded for titles, Archivo Narrow for text, and two-tone line
-icons. Both fonts are OFL, in `third_party/fonts/`.
+icons. The bundled fonts use the SIL Open Font License. Their license texts are in
+[`third_party/font-licenses/`](third_party/font-licenses/).
 
 - **Home** (`MainActivity`) is for sending a document: the *Scan* and *Upload* tiles,
   the documents sent from this phone, whether it is enrolled, and the alert band when

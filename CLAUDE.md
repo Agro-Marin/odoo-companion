@@ -25,10 +25,10 @@ token and talks to whatever Odoo those point at.
 
 ## Layout
 
-Code lives under `app/src/main/java/com/odoocompanion/`, one package per
+Code lives under `app/src/main/kotlin/com/odoocompanion/`, one package per
 concern (`config`, `location`, `calllog`, `recording`, `softphone`, `push`, `data`,
 `sync`, `net`, `system`, `ui`, `whatsapp`, `scan`, `update`); JVM unit tests
-mirror the packages under `app/src/test/`.
+mirror the packages under `app/src/test/kotlin/com/odoocompanion/`.
 
 **Policy is extracted from the Android component that triggers it**, in every
 package that has one: `CallLogReader` from `CallLogSyncWorker`, `RecordingHarvest`
@@ -43,11 +43,11 @@ without WorkManager, a `LifecycleService` or a fused location provider — a rul
 worth keeping the next time something is added to a callback because that is
 where the data arrives.
 
-The outbox spans two packages under `app/src/main/java/com/odoocompanion/`.
+The outbox spans two packages under `app/src/main/kotlin/com/odoocompanion/`.
 
 | When changing | Start in |
 | --- | --- |
-| Stored rows, file receipts, or queue counts | `data/Outbox.kt` |
+| Stored rows, file receipts, or queue counts | `data/OutboxModels.kt` |
 | Queue queries or atomic row updates | `data/OutboxDao.kt` |
 | Room schema version or migrations | `data/CompanionDatabase.kt` |
 | Delivery order, retention, or coordination with re-enrollment | `sync/OutboxDrainer.kt` |

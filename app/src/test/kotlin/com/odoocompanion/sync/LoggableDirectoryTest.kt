@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 
-class LoggablePathTest {
+class LoggableDirectoryTest {
     private val realNames = listOf(
         "/storage/emulated/0/Recordings/Call/Call recording +525512345678_251028_143501.m4a",
         "/storage/emulated/0/Recordings/Call/call_5512345678.m4a",
