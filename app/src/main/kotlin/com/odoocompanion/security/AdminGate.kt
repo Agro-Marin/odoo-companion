@@ -19,6 +19,10 @@ class AdminGate(
         return clock() - at < UNLOCKED_MILLIS
     }
 
+    fun renew() {
+        if (required) unlockedAt = clock()
+    }
+
     fun unlock(password: String): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest("$salt:$password".toByteArray())

@@ -4,7 +4,7 @@ import com.odoocompanion.sync.OutboxDrainer.Outcome
 import com.odoocompanion.whatsapp.QueuedDocument
 
 data class DrainReport(
-    val outcome: OutboxDrainer.Outcome,
+    val outcome: Outcome,
     val lastError: String? = null,
     val accepted: Map<String, Int> = emptyMap(),
     val skipped: Map<String, Int> = emptyMap(),
@@ -52,7 +52,7 @@ internal class DrainTally(val readyAt: Long) {
         counter[kind] = (counter[kind] ?: 0) + count
     }
 
-    fun report(outcome: OutboxDrainer.Outcome) = DrainReport(
+    fun report(outcome: Outcome) = DrainReport(
         outcome = outcome,
         lastError = lastError,
         accepted = accepted.toMap(),

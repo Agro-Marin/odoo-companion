@@ -15,6 +15,7 @@
     <string name="status_bad_base_url">No se guardó: la URL base debe empezar con http:// o https://</string>
     <string name="status_bad_identifier">No se guardó: el identificador del dispositivo solo admite letras, dígitos y - _ . ~</string>
     <string name="status_cleartext_refused">No se guardó: esta compilación solo habla con servidores https://</string>
+    <string name="status_save_failed">No se guardó: el teléfono no pudo escribir su configuración (¿está llena su memoria?)</string>
     <string name="status_enrolled">Dado de alta</string>
     <string name="status_not_enrolled">Sin dar de alta</string>
     <string name="status_small_cap">El servidor solo acepta %1$s por envío: en Odoo, pon este dispositivo en la categoría Mobile Phone</string>
@@ -197,6 +198,10 @@
     <string name="update_installing">Instalando… la app se vuelve a abrir al terminar</string>
     <string name="update_installed_title">Companion se actualizó a la %1$s</string>
     <string name="update_installed_text">Toca para abrirla y ver lo nuevo</string>
+    <string name="update_confirm_title">Termina de actualizar Companion</string>
+    <string name="update_confirm_text">Android necesita que confirmes la actualización. Toca para continuar.</string>
+    <string name="update_confirm">Confirmar</string>
+    <string name="update_awaiting_confirmation">Android espera que confirmes la actualización</string>
     <string name="notification_channel_updates">Actualizaciones</string>
     <string name="widget_scan_label">Escanear documento</string>
     <string name="widget_scan_description">Abre el escáner de documentos con un toque</string>

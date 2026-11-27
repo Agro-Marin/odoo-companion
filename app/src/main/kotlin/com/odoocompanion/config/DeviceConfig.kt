@@ -274,14 +274,20 @@ class DeviceConfig(
 
     suspend fun applyManaged(values: ManagedValues): Boolean {
         val baseUrl = values.baseUrl?.takeUnless { refusesCleartext(it, cleartextPermitted) }
+        val enrollmentRejected = values.enrollmentRejected || baseUrl != values.baseUrl
+        if (enrollmentRejected) {
+            Log.w(TAG, "Ignoring the managed enrolment: one of its keys is unusable")
+        }
         var changed = false
         store.edit { prefs ->
             val before = prefs.toSettings().managedFacet()
 
             prefs[MANAGED] = values.policyPresent
             prefs[MANAGED_KEYS] = values.presentKeys
-            prefs.moveTo(baseUrl, values.identifier)
-            values.token?.let { prefs[TOKEN] = it }
+            if (!enrollmentRejected) {
+                prefs.moveTo(baseUrl, values.identifier)
+                values.token?.let { prefs[TOKEN] = it }
+            }
             values.callLogEnabled?.let { prefs[CALL_LOG_ENABLED] = it }
             values.recordingsEnabled?.let { prefs[RECORDINGS_ENABLED] = it }
             values.wifiOnlyUploads?.let { prefs[WIFI_ONLY] = it }

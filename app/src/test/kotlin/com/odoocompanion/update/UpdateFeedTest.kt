@@ -12,17 +12,19 @@ class UpdateFeedTest {
     private fun manifest(
         apk: String = "odoo-companion-7.apk",
         sha256: String = digest,
-        size: Long = 10
-    ) = """{"version_code":7,"version_name":"0.6.0","apk":"$apk","sha256":"$sha256","size":$size}"""
+        size: Long = 10,
+        versionName: String = "0.6.0",
+    ) = """{"version_code":7,"version_name":"$versionName","apk":"$apk",""" +
+        """"sha256":"$sha256","size":$size}"""
 
     @Test
-    fun `a release's manifest names the build and the asset to fetch`() {
+    fun `the apk is fetched from its own release, which outlives a newer one`() {
         val read = UpdateFeed.parse(manifest())!!
 
         assertEquals(7L, read.versionCode)
         assertEquals("0.6.0", read.versionName)
         assertEquals(
-            "https://github.com/Agro-Marin/odoo-companion/releases/latest/download/" +
+            "https://github.com/Agro-Marin/odoo-companion/releases/download/v0.6.0/" +
                 "odoo-companion-7.apk",
             UpdateFeed.apkUrl(read),
         )
@@ -41,6 +43,13 @@ class UpdateFeedTest {
     fun `an asset that is not a bare apk name is refused`() {
         for (apk in listOf("../evil.apk", "sub/odoo.apk", "odoo.zip", "https://x/odoo.apk", "")) {
             assertNull(apk, UpdateFeed.parse(manifest(apk = apk)))
+        }
+    }
+
+    @Test
+    fun `a version name that is not a bare tag segment is refused`() {
+        for (name in listOf("../0.6.0", "0.6/0", "..", "0.6.0?x=1", "")) {
+            assertNull(name, UpdateFeed.parse(manifest(versionName = name)))
         }
     }
 

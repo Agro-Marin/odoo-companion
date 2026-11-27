@@ -1,6 +1,8 @@
 package com.odoocompanion.update
 
+import android.Manifest
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
@@ -10,6 +12,7 @@ import com.odoocompanion.net.WireJson
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import okhttp3.Call
 import okhttp3.Dispatcher
@@ -17,6 +20,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -49,6 +53,14 @@ class UpdaterTest {
     fun setUp() {
         ShadowLog.setLoggable("Updater", Log.DEBUG)
         shadowOf(context.packageManager).setCanRequestPackageInstalls(true)
+    }
+
+    @After
+    fun releaseTheInstaller() {
+        @Suppress("UNCHECKED_CAST")
+        val step = ReflectionHelpers.getStaticField<Any>(Updater::class.java, "step")
+            as MutableStateFlow<UpdateStep?>
+        step.value = null
     }
 
     private fun updater(
@@ -117,6 +129,43 @@ class UpdaterTest {
         reply(session, PackageInstaller.STATUS_SUCCESS)
         assertNull(update.progress.value)
     }
+
+    @Test
+    fun `a confirmation Android asks for stays reachable from a notification until it settles`() =
+        runBlocking {
+            shadowOf(context as Application)
+                .grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+            val update = updater { byteArrayOf(1) }
+            assertEquals(InstallStart.Started, update.install(valid))
+            val session = context.packageManager.packageInstaller.mySessions.single().sessionId
+            val confirm = Intent("android.content.pm.action.CONFIRM_INSTALL")
+            val notices = shadowOf(context.getSystemService(NotificationManager::class.java))
+
+            UpdateReceiver().onReceive(
+                context,
+                Intent().putExtra(PackageInstaller.EXTRA_SESSION_ID, session)
+                    .putExtra(
+                        PackageInstaller.EXTRA_STATUS,
+                        PackageInstaller.STATUS_PENDING_USER_ACTION,
+                    )
+                    .putExtra(Intent.EXTRA_INTENT, confirm),
+            )
+
+            val notice = notices.allNotifications.single()
+            val tap = shadowOf(notice.contentIntent).savedIntent
+            assertEquals(confirm.action, tap.action)
+            val waiting = update.progress.value as UpdateStep.AwaitingConfirmation
+            assertEquals("Home can offer it too", confirm.action, waiting.confirm.action)
+
+            UpdateReceiver().onReceive(
+                context,
+                Intent().putExtra(PackageInstaller.EXTRA_SESSION_ID, session)
+                    .putExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_SUCCESS),
+            )
+
+            assertTrue(notices.allNotifications.isEmpty())
+            assertNull(update.progress.value)
+        }
 
     @Test
     fun `a restarted process respects a pending Android installer session`() = runBlocking {

@@ -2,6 +2,7 @@ package com.odoocompanion.config
 
 import android.app.Application
 import android.content.Context
+import android.os.Bundle
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -95,6 +96,66 @@ class DeviceConfigTest {
         val settings = config.current()
         assertEquals("https://odoo.example.com", settings.baseUrl)
         assertTrue("the key is still the policy's", "base_url" in settings.governedKeys)
+    }
+
+    @Test
+    fun `a policy whose new server is refused does not send its new credentials to the old one`() =
+        runTest {
+            val file = File.createTempFile("companion", ".preferences_pb").apply { delete() }
+            temporaryFiles += file
+            val config = DeviceConfig(
+                PreferenceDataStoreFactory.create { file },
+                cleartextPermitted = { false },
+            )
+            config.enrol("https://odoo.example.com", "phone-01", "token")
+
+            config.applyManaged(
+                ManagedValues(
+                    baseUrl = "http://new.example.com",
+                    identifier = "phone-77",
+                    token = "new-token",
+                    policyPresent = true,
+                    presentKeys = setOf("base_url", "identifier", "token"),
+                ),
+            )
+
+            val settings = config.current()
+            assertEquals("https://odoo.example.com", settings.baseUrl)
+            assertEquals("phone-01", settings.identifier)
+            assertEquals("token", settings.token)
+        }
+
+    @Test
+    fun `a policy whose server is unusable keeps the working enrolment whole`() = runTest {
+        val config = config()
+        config.enrol("https://odoo.example.com", "phone-01", "token")
+        val values = ManagedConfig.fromBundle(
+            Bundle().apply {
+                putString("base_url", "odoo.example.com")
+                putString("identifier", "phone-77")
+                putString("token", "new-token")
+                putBoolean("wifi_only_uploads", true)
+            },
+        )
+
+        config.applyManaged(values)
+
+        val settings = config.current()
+        assertEquals("phone-01", settings.identifier)
+        assertEquals("token", settings.token)
+        assertTrue("the rest of the policy still applies", settings.wifiOnlyUploads)
+    }
+
+    @Test
+    fun `a policy that rotates only the token still applies it`() = runTest {
+        val config = config()
+        config.enrol("https://odoo.example.com", "phone-01", "token")
+
+        config.applyManaged(
+            ManagedConfig.fromBundle(Bundle().apply { putString("token", "rotated") }),
+        )
+
+        assertEquals("rotated", config.current().token)
     }
 
     @Test

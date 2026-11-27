@@ -360,14 +360,21 @@ class CallLogReaderTest {
             Call(number = "+52unsent", date = 3_000, modified = 3_000),
         )
 
-        assertEquals(2, reader().idAt(2_000))
+        assertEquals(2L, reader().idAt(2_000))
+    }
+
+    @Test
+    fun `a provider that cannot be read carries no cursor across`() {
+        FakeCallLogProvider.returnsNull = true
+
+        assertEquals(null, reader().idAt(2_000))
     }
 
     @Test
     fun `an untouched timestamp cursor carries across to the beginning`() {
         FakeCallLogProvider.calls = listOf(Call(number = "+52", date = 1_000))
 
-        assertEquals(0, reader().idAt(0))
+        assertEquals(0L, reader().idAt(0))
     }
 
     @Test

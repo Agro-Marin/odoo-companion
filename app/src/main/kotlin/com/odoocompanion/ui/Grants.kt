@@ -41,7 +41,7 @@ class Grants(private val activity: AppCompatActivity, private val onChanged: () 
 
     fun requestAll() {
         activity.lifecycleScope.launch {
-            val settings = app.config.current()
+            val settings = app.config.currentOrNull() ?: return@launch
             requestPermissions(
                 settings,
                 softphoneWanted = app.softphones.current() != null,
@@ -120,7 +120,7 @@ class Grants(private val activity: AppCompatActivity, private val onChanged: () 
 
     private fun startIfEnrolled() {
         activity.lifecycleScope.launch {
-            app.applyConfiguration()
+            app.reconcile().join()
             onChanged()
         }
     }

@@ -43,6 +43,7 @@ class UploadWorker(context: Context, params: WorkerParameters) :
             report.lastError,
         )
         UploadedNotice.post(applicationContext, report.deliveredDocuments)
+        if (report.delivered) app.retryLookupsAfterDelivery(System.currentTimeMillis())
 
         if (report.deadLettered > 0 ||
             report.skipped.isNotEmpty() ||

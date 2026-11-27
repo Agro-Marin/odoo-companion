@@ -539,11 +539,16 @@ A handset updates itself from this repository's releases, without an MDM.
   *Check for updates*. GitHub points `latest` at the newest release that is neither a
   draft nor a pre-release, so `--draft` keeps a build away from the fleet until it is
   published. Only a higher `versionCode` is offered.
-- **Installing it.** *Update* downloads the APK into the app's cache, checks its size and
+- **Installing it.** *Update* downloads the APK from the release that published it
+  (`releases/download/v<version_name>/<apk>`), not from `latest`: a handset offers the
+  manifest it read last, and `latest` stops serving that APK the moment a newer release is
+  published, so the download 404'd until the next check. It checks its size and
   SHA-256 against the manifest, and hands it to `PackageInstaller`. The first time,
   Android asks to allow this app to install apps (*Install unknown apps*), then shows its
-  own confirmation. On Android 12 and later, once this app is the installer of record,
-  later updates may go through without asking.
+  own confirmation. Android does not show that confirmation to an app the user has left
+  during the download, so it also waits in a *Finish updating Companion* notification
+  and behind *Confirm* on Home's update banner. On Android 12 and later, once this app is
+  the installer of record, later updates may go through without asking.
 - **The key.** Android installs an update only if it is signed with the same key as the
   installed build. Every release must be signed with the fleet's keystore (*Signing a
   release*). A handset that carries a build signed with another key, a debug build
@@ -826,7 +831,7 @@ re-derives them.
   a log line carrying the path carries a phone number into logcat, into every bug
   report, and into whatever the OEM ships logs to. The **directory** is the useful
   diagnostic (it names the per-OEM folder that `CANDIDATE_DIRECTORIES` is a knob
-  for) and holds nothing personal. `asLoggableDirectory` does that, the path is
+  for) and holds nothing personal. `loggableDirectory` does that, the path is
   resolved into a local *before* the `Log` call so the rule needs no exemption, and
   `tools/lint.sh` fails on `absolutePath` or `filePath` -- and on a member naming a
   person (`chat`, `sender`, `phone`, `senderPhone`, `rfc`, `label`, `number`,

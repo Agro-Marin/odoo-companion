@@ -1,5 +1,6 @@
 package com.odoocompanion.update
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -13,7 +14,7 @@ import androidx.core.content.pm.PackageInfoCompat
 import com.odoocompanion.R
 import com.odoocompanion.ui.MainActivity
 
-object UpdateRelaunch {
+object UpdateNotices {
     fun afterReplace(context: Context) {
         if (Updater.takeRelaunch(context) == null) return
         val open = Intent(context, MainActivity::class.java)
@@ -25,12 +26,33 @@ object UpdateRelaunch {
         } catch (e: SecurityException) {
             Log.w(TAG, "Android would not reopen the app after its update", e)
         }
-        notify(context, open)
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        post(
+            context,
+            INSTALLED_ID,
+            open,
+            context.getString(R.string.update_installed_title, info.versionName.orEmpty()),
+            context.getString(R.string.update_installed_text),
+        )
+        Log.i(TAG, "Updated to ${PackageInfoCompat.getLongVersionCode(info)}")
     }
 
-    fun dismiss(context: Context) = NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+    fun dismiss(context: Context) = NotificationManagerCompat.from(context).cancel(INSTALLED_ID)
 
-    private fun notify(context: Context, open: Intent) {
+    fun askToConfirm(context: Context, confirm: Intent) {
+        post(
+            context,
+            CONFIRM_ID,
+            confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            context.getString(R.string.update_confirm_title),
+            context.getString(R.string.update_confirm_text),
+        )
+    }
+
+    fun withdrawConfirmation(context: Context) =
+        NotificationManagerCompat.from(context).cancel(CONFIRM_ID)
+
+    private fun post(context: Context, id: Int, open: Intent, title: String, text: String) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -40,33 +62,30 @@ object UpdateRelaunch {
                 NotificationManager.IMPORTANCE_HIGH,
             ),
         )
-        val info = context.packageManager.getPackageInfo(context.packageName, 0)
         val tap = PendingIntent.getActivity(
             context,
-            NOTIFICATION_ID,
+            id,
             open,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification: Notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_update)
-            .setContentTitle(
-                context.getString(R.string.update_installed_title, info.versionName.orEmpty()),
-            )
-            .setContentText(context.getString(R.string.update_installed_text))
+            .setContentTitle(title)
+            .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setContentIntent(tap)
             .build()
         try {
-            manager.notify(NOTIFICATION_ID, notification)
+            manager.notify(id, notification)
         } catch (e: SecurityException) {
-            Log.w(TAG, "No permission to say the update is done", e)
+            Log.w(TAG, "No permission to post an update notification", e)
         }
-        Log.i(TAG, "Updated to ${PackageInfoCompat.getLongVersionCode(info)}")
     }
 
-    private const val TAG = "UpdateRelaunch"
+    private const val TAG = "UpdateNotices"
     private const val CHANNEL_ID = "updates"
-    private const val NOTIFICATION_ID = 7_301
+    private const val INSTALLED_ID = 7_301
+    private const val CONFIRM_ID = 7_302
 }

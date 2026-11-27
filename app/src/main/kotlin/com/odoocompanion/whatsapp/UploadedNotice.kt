@@ -54,11 +54,21 @@ object UploadedNotice {
         val documents = delivered.map { idOf(it) to of(it) }
         documents.forEach { (id, document) ->
             val message = detail(context, document)
+            val title = title(context, document)
             val notice = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_document)
                 .setColor(ContextCompat.getColor(context, R.color.xiuman_fertil))
-                .setContentTitle(title(context, document))
+                .setContentTitle(title)
                 .setContentText(message)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(
+                    NotificationCompat.Builder(context, CHANNEL_ID)
+                        .setSmallIcon(R.drawable.ic_stat_document)
+                        .setColor(ContextCompat.getColor(context, R.color.xiuman_fertil))
+                        .setContentTitle(title)
+                        .setGroup(GROUP)
+                        .build(),
+                )
                 .setStyle(NotificationCompat.BigTextStyle().bigText(message))
                 .setContentIntent(open)
                 .setAutoCancel(true)

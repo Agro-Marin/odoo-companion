@@ -57,6 +57,19 @@ class RecordingFilenameTest {
     }
 
     @Test
+    fun `a digit run longer than any phone number yields no slice of itself`() {
+        val written = at(2025, 10, 28, 14, 35)
+
+        assertNull(RecordingFilename.of(file("Call_20251028143501123.m4a"), written).number)
+        assertNull(RecordingFilename.of(file("rec_1761683701123456.m4a"), written).number)
+        assertNull(RecordingFilename.of(file("+5255123456781234567.m4a"), written).number)
+        assertEquals(
+            "5512345678",
+            RecordingFilename.of(file("Call_20251028143501123_5512345678.m4a"), written).number,
+        )
+    }
+
+    @Test
     fun `a number that merely starts like a year still parses`() {
         assertEquals(
             "2012345678",

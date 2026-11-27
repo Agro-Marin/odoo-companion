@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
@@ -70,8 +71,11 @@ class SettingsActivity : AppCompatActivity() {
 
     private var shownHeld: HeldQueue? = null
 
+    private var admitted = false
+
     override fun onResume() {
         super.onResume()
+        if (!admit()) return
         healthChecks.value++
         val whatsapp = CompanionApp.from(this).whatsapp
         val contacts = ContactBook(this)
@@ -88,8 +92,20 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        if (admitted) CompanionApp.from(this).adminGate.renew()
+        super.onPause()
+    }
+
+    private fun admit(): Boolean {
+        admitted = CompanionApp.from(this).adminGate.isOpen()
+        if (!admitted) finish()
+        return admitted
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!admit()) return
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         keepContentOutFromUnderTheSystemBars()
@@ -101,7 +117,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.back.setOnClickListener { finish() }
         binding.appVersion.text = versionText(packageManager.getPackageInfo(packageName, 0))
 
-        var populated = false
+        var populated = savedInstanceState != null
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
@@ -151,15 +167,21 @@ class SettingsActivity : AppCompatActivity() {
         binding.save.setOnClickListener {
             val form = formValues()
             lifecycleScope.launch {
-                refusal.value = when (app.config.saveForm(form)) {
+                val saved = try {
+                    app.saveForm(form).await()
+                } catch (failure: IOException) {
+                    Log.w(TAG, "Could not write the settings", failure)
+                    null
+                }
+                refusal.value = when (saved) {
                     EnrollmentResult.InvalidBaseUrl -> R.string.status_bad_base_url
                     EnrollmentResult.InvalidIdentifier -> R.string.status_bad_identifier
                     EnrollmentResult.CleartextRefused -> R.string.status_cleartext_refused
                     EnrollmentResult.Saved -> null
+                    null -> R.string.status_save_failed
                 }
                 if (refusal.value != null) return@launch
-                app.applyConfiguration()
-                val settings = app.config.current()
+                val settings = app.config.currentOrNull() ?: return@launch
                 val softphone = app.softphones.current() != null
                 val localNetwork = StatusText.localNetworkWanted(app, settings)
                 val health = DeviceHealth.report(this@SettingsActivity)

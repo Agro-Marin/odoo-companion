@@ -26,7 +26,7 @@ import com.odoocompanion.sync.SyncScheduler
 import com.odoocompanion.update.InstallStart
 import com.odoocompanion.update.UpdateCheck
 import com.odoocompanion.update.UpdateManifest
-import com.odoocompanion.update.UpdateRelaunch
+import com.odoocompanion.update.UpdateNotices
 import com.odoocompanion.update.UpdateStep
 import com.odoocompanion.update.Updater
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,7 +70,12 @@ class MainActivity : AppCompatActivity() {
                 StatusText.panels(this@MainActivity, healthChecks).collect(::showPanel)
             }
         }
-        binding.updateInstall.setOnClickListener { offered?.let(::install) }
+        binding.updateInstall.setOnClickListener {
+            when (val step = updater.progress.value) {
+                is UpdateStep.AwaitingConfirmation -> confirm(step.confirm)
+                else -> offered?.let(::install)
+            }
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 updater.progress.collect(::showUpdateStep)
@@ -96,7 +101,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun showUpdateStep(step: UpdateStep?) {
         val manifest = offered ?: return
-        binding.updateProgress.isVisible = step != null
+        val awaiting = step is UpdateStep.AwaitingConfirmation
+        binding.updateProgress.isVisible = step != null && !awaiting
+        binding.updateInstall.isEnabled = step == null || awaiting
+        binding.updateInstall.setText(
+            if (awaiting) R.string.update_confirm else R.string.update_install,
+        )
         when (step) {
             is UpdateStep.Downloading -> {
                 binding.updateProgress.isIndeterminate = false
@@ -115,6 +125,9 @@ class MainActivity : AppCompatActivity() {
                 binding.updateText.setText(R.string.update_installing)
             }
 
+            is UpdateStep.AwaitingConfirmation ->
+                binding.updateText.setText(R.string.update_awaiting_confirmation)
+
             null -> offer(manifest)
         }
     }
@@ -122,7 +135,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         healthChecks.value++
-        UpdateRelaunch.dismiss(this)
+        UpdateNotices.dismiss(this)
         offer(updater.known())
         if (updater.dueForCheck()) checkForUpdate(quiet = true)
     }
@@ -141,11 +154,9 @@ class MainActivity : AppCompatActivity() {
         binding.syncNow.setOnClickListener {
             showActions(false)
             lifecycleScope.launch {
-                val app = CompanionApp.from(this@MainActivity)
-                SyncScheduler.collectAndUploadNow(
-                    this@MainActivity,
-                    app.config.current().wifiOnlyUploads,
-                )
+                val settings = CompanionApp.from(this@MainActivity).config.currentOrNull()
+                    ?: return@launch
+                SyncScheduler.collectAndUploadNow(this@MainActivity, settings.wifiOnlyUploads)
             }
         }
         binding.grantPermissions.setOnClickListener {
@@ -219,7 +230,6 @@ class MainActivity : AppCompatActivity() {
         if (step != null) {
             if (offered == null) offered = manifest
             binding.updateBanner.isVisible = offered != null
-            binding.updateInstall.isEnabled = false
             showUpdateStep(step)
             return
         }
@@ -250,6 +260,15 @@ class MainActivity : AppCompatActivity() {
                     offer(manifest)
                 }
             }
+        }
+    }
+
+    private fun confirm(request: Intent) {
+        try {
+            startActivity(Intent(request).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "The installer confirmation activity is unavailable", e)
+            toast(R.string.update_install_failed)
         }
     }
 

@@ -47,6 +47,8 @@ sealed interface UpdateStep {
     data object Verifying : UpdateStep
 
     data object Installing : UpdateStep
+
+    data class AwaitingConfirmation(val confirm: Intent) : UpdateStep
 }
 
 class Updater(context: Context, private val http: OkHttpClient = HTTP) {
@@ -242,6 +244,11 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
                 .getInt(KEY_SESSION, NO_SESSION) == session
 
         @Synchronized
+        internal fun awaitConfirmation(context: Context, session: Int, confirm: Intent) {
+            if (owns(context, session)) step.value = UpdateStep.AwaitingConfirmation(confirm)
+        }
+
+        @Synchronized
         internal fun finish(context: Context, session: Int, installed: Boolean) {
             if (owns(context, session)) clear(context, installed)
         }
@@ -252,6 +259,7 @@ class Updater(context: Context, private val http: OkHttpClient = HTTP) {
                 remove(KEY_SESSION)
                 if (!installed) remove(KEY_RELAUNCH)
             }
+            UpdateNotices.withdrawConfirmation(context)
             step.value = null
         }
 

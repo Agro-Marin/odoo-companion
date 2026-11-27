@@ -21,6 +21,8 @@ class UpdateReceiver : BroadcastReceiver() {
                     IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
                 try {
                     if (confirm != null) {
+                        Updater.awaitConfirmation(context, session, Intent(confirm))
+                        UpdateNotices.askToConfirm(context, Intent(confirm))
                         context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         return
                     }

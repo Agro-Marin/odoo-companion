@@ -1,13 +1,17 @@
 package com.odoocompanion.ui
 
+import android.content.Context
+import android.content.Intent
 import android.os.Looper
 import android.view.View
+import android.widget.Button
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.ManagedValues
 import com.odoocompanion.security.AdminGate
+import com.odoocompanion.update.Updater
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -128,6 +132,59 @@ class ActionsMenuTest {
         Shadows.shadowOf(Looper.getMainLooper()).idle()
         val started = Shadows.shadowOf(screen).nextStartedActivity
         assertEquals(SettingsActivity::class.java.name, started.component?.className)
+    }
+
+    @Test
+    fun `Settings reached without the password closes instead of showing the form`() {
+        var now = 0L
+        val gate = AdminGate(expectedSha256 = sha256("salt:secret"), salt = "salt", clock = { now })
+        app.adminGate = gate
+
+        val restored = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        assertTrue("a task restored after the process died", restored.get().isFinishing)
+        restored.destroy()
+
+        assertTrue(gate.unlock("secret"))
+        val settings = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        assertFalse(settings.get().isFinishing)
+        now += AdminGate.UNLOCKED_MILLIS - 1
+        settings.pause().stop()
+        now += AdminGate.UNLOCKED_MILLIS - 1
+        settings.restart().resume()
+        assertFalse("time spent in Settings does not count against it", settings.get().isFinishing)
+
+        settings.pause().stop()
+        now += AdminGate.UNLOCKED_MILLIS
+        settings.restart().resume()
+        assertTrue("reopened from recents after the unlock lapsed", settings.get().isFinishing)
+        settings.destroy()
+    }
+
+    @Test
+    fun `an update Android wants confirmed can be confirmed from Home`() {
+        val digest = "0".repeat(64)
+        app.getSharedPreferences("updates", Context.MODE_PRIVATE).edit()
+            .putString(
+                "available",
+                """{"version_code":999,"version_name":"9.9.9","apk":"odoo-companion-999.apk",""" +
+                    """"sha256":"$digest","size":1}""",
+            )
+            .putLong("checked_at", System.currentTimeMillis())
+            .putInt("install_session", 41)
+            .commit()
+        val confirm = Intent("android.content.pm.action.CONFIRM_INSTALL")
+        Updater.awaitConfirmation(app, 41, confirm)
+        try {
+            val screen = open()
+            val button = screen.findViewById<Button>(R.id.updateInstall)
+
+            assertTrue(button.isEnabled)
+            assertEquals(screen.getString(R.string.update_confirm), button.text.toString())
+            button.performClick()
+            assertEquals(confirm.action, Shadows.shadowOf(screen).nextStartedActivity.action)
+        } finally {
+            Updater.finish(app, 41, installed = false)
+        }
     }
 
     private fun sha256(text: String) = java.security.MessageDigest.getInstance("SHA-256")

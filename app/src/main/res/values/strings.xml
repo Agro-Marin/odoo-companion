@@ -15,6 +15,7 @@
     <string name="status_managed">Configured by your organization</string>
     <string name="status_bad_base_url">Not saved: the base URL must start with http:// or https://</string>
     <string name="status_cleartext_refused">Not saved: this build only talks to https:// servers</string>
+    <string name="status_save_failed">Not saved: the phone could not write its settings (is its storage full?)</string>
     <string name="status_bad_identifier">Not saved: the device identifier may contain only letters, digits, and - _ . ~</string>
     <string name="status_enrolled">Enrolled</string>
     <string name="status_not_enrolled">Not enrolled</string>
@@ -196,6 +197,10 @@
     <string name="update_installing">Installing… the app reopens when it is done</string>
     <string name="update_installed_title">Companion updated to %1$s</string>
     <string name="update_installed_text">Tap to open it and see what is new</string>
+    <string name="update_confirm_title">Finish updating Companion</string>
+    <string name="update_confirm_text">Android needs you to confirm the update. Tap to continue.</string>
+    <string name="update_confirm">Confirm</string>
+    <string name="update_awaiting_confirmation">Android is waiting for you to confirm the update</string>
     <string name="notification_channel_updates">Updates</string>
     <string name="widget_scan_label">Scan a document</string>
     <string name="widget_scan_description">Opens the document scanner in one tap</string>

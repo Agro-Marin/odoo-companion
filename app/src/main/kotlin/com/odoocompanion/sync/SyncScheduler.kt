@@ -137,12 +137,7 @@ object SyncScheduler {
                     ).build(),
                 ),
             )
-            .then(
-                OneTimeWorkRequestBuilder<UploadWorker>()
-                    .setConstraints(networkConstraints(wifiOnlyUploads))
-                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                    .build(),
-            )
+            .then(uploadRequest(wifiOnlyUploads))
             .enqueue()
     }
 

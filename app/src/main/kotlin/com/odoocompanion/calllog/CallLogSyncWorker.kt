@@ -24,12 +24,11 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         if (!settings.isEnrolled || !settings.callLogEnabled) return@withContext Result.success()
         if (!hasPermission()) return@withContext Result.success()
         reading.withLock { collect(app, settings) }
-        Result.success()
     }
 
-    private suspend fun collect(app: CompanionApp, settings: Settings) {
+    private suspend fun collect(app: CompanionApp, settings: Settings): Result {
         val reader = CallLogReader(applicationContext.contentResolver)
-        val since = startingId(app, reader)
+        val since = startingId(app, reader) ?: return Result.retry()
         val batch = reader.readSince(since)
         debug(TAG) {
             "read after id $since: ${batch.entries.size} call(s), cursor now ${batch.cursor}, " +
@@ -47,12 +46,16 @@ class CallLogSyncWorker(context: Context, params: WorkerParameters) :
         if (batch.cursor > since) app.config.setCallLogIdCursor(batch.cursor)
 
         if (batch.moreWaiting) SyncScheduler.collectCallLogNow(applicationContext)
+        return Result.success()
     }
 
-    private suspend fun startingId(app: CompanionApp, reader: CallLogReader): Long {
+    private suspend fun startingId(app: CompanionApp, reader: CallLogReader): Long? {
         val stored = app.config.callLogIdCursor()
         if (stored == null) {
-            val seeded = reader.idAt(app.config.callLogCursor())
+            val seeded = reader.idAt(app.config.callLogCursor()) ?: run {
+                Log.w(TAG, "The call log could not be read to carry the old cursor across")
+                return null
+            }
             app.config.setCallLogIdCursor(seeded)
             Log.i(TAG, "Carried the call-log cursor across to row id $seeded")
             return seeded

@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.net.DocumentMetadata
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,6 +53,21 @@ class UploadedNoticePostTest {
         val notice = notices.single()
         assertEquals("Constancia de Situación Fiscal uploaded to Documents", notice.title())
         assertEquals("RFC PCA221013LF1 · CSF PCA221013LF1.pdf · from Yop", notice.text())
+    }
+
+    @Test
+    fun `a lock screen that hides sensitive content shows what arrived, not whose it is`() {
+        Shadows.shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+
+        UploadedNotice.post(app, listOf(csf))
+
+        val notice = notices.single()
+        assertEquals(Notification.VISIBILITY_PRIVATE, notice.visibility)
+        val public = notice.publicVersion
+        assertEquals("Constancia de Situación Fiscal uploaded to Documents", public.title())
+        val shown = public.extras.keySet().joinToString { public.extras.get(it).toString() }
+        assertFalse("the RFC stays off the lock screen", "PCA221013LF1" in shown)
+        assertFalse("the chat stays off the lock screen", "Yop" in shown)
     }
 
     @Test

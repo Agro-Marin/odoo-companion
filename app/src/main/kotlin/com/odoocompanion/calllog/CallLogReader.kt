@@ -45,7 +45,7 @@ class CallLogReader(
         return cursor.use { if (it.moveToFirst()) it.getLong(0) else null }
     }
 
-    fun idAt(moment: Long): Long {
+    fun idAt(moment: Long): Long? {
         if (moment <= 0) return 0
         val cursor = resolver.query(
             CallLog.Calls.CONTENT_URI.buildUpon()
@@ -55,7 +55,7 @@ class CallLogReader(
             "${CallLog.Calls.LAST_MODIFIED} <= ?",
             arrayOf(moment.toString()),
             "${CallLog.Calls._ID} DESC",
-        ) ?: return 0
+        ) ?: return null
         return cursor.use { if (it.moveToFirst()) it.getLong(0) else 0 }
     }
 

@@ -174,15 +174,16 @@ machine at `http://10.0.2.2:<port>`.
   delivered file that will not delete stays as a `kept_on_disk` row, and why the
   90-day purge re-stamps a dead row whose audio it still cannot delete instead
   of forgetting it. A `kept_on_disk` row was delivered, so the status screen's
-  undeliverable count (`countUndeliverable`) leaves it out; `countDead` still
+  undeliverable count (`OutboxDao.counts`'s `undeliverable`) leaves it out; `countDead` still
   counts every dead row. On Android 10 without `WRITE_EXTERNAL_STORAGE` that is
   every uploaded recording, each of which used to read as a failure with a hint
   to go and fix the device in Odoo.
 - **A document's file is never the outbox's.** A `document` row points at a file in
   WhatsApp's own folder, where a customer's constancia or INE lives. So delivery
-  deletes only the row (`FileKind.ownsFile = false`), and the 90-day purge of dead rows
-  (`deadFilesBefore`) reads recording rows only. Before that query was scoped, purging
-  a set-aside document would have deleted the customer's PDF from WhatsApp.
+  deletes only the row: `FileCleanup.finish` unlinks a recording's or a scan's file and
+  never a `document`'s, on delivery and in the 90-day purge of dead rows
+  (`filesForCleanup`) alike. Before the purge was scoped, purging a set-aside document
+  would have deleted the customer's PDF from WhatsApp.
   **And its row outlives a lost file.** A recording whose file is gone is deleted --
   there is nothing for the harvest to queue again -- but a document's row is the
   WhatsApp card's only memory of it, and once deleted the card read the empty queue as
@@ -239,7 +240,10 @@ machine at `http://10.0.2.2:<port>`.
   then swallowed **`2025102814`, which is the real NANP number 202-510-2814** — 9
   assigned area codes (201–209) sit inside `(19|20)\d{2}`. Only the mtime
   separates the two, and it is already a parameter. Verified against a 19-name
-  corpus of OEM shapes.
+  corpus of OEM shapes. **A digit run is a token whole or not at all**: E.164 stops
+  at 15 digits, so a longer run is discarded rather than cut, which the `\d{6,15}`
+  token did — `Call_20251028143501123.m4a` (a stamp with milliseconds) uploaded
+  `202510281435011`, a slice no stamp guard recognises.
 - **A local fault never costs a record, and being stopped is a local fault.** A
   configuration the app cannot read is reported and retried; it does not touch the
   queue. The earlier spelling charged `markFailed` against the head of each kind, so
@@ -495,8 +499,8 @@ machine at `http://10.0.2.2:<port>`.
   **The limit is also stored, because not sending is the whole point.** A 2 MB
   recording against a 1 MB cap pushed **74 MB** before it settled — 28 attempts, each
   streaming the full base64 body, because nothing remembered what the server had
-  already said. `DeviceConfig.learnPayloadLimit` keeps it, `drainRecordings` asks
-  `client.wireSize` before posting and declines to send what the server has
+  already said. `DeviceConfig.learnPayloadLimit` keeps it, `drainFiles` compares
+  `FileBody.contentLength` with it before posting and declines to send what the server has
   declared it will not take, and `learnPayloadLimit(0)` on any revival drops it so a
   raised cap is discovered — and **it expires after a day** (`PAYLOAD_LIMIT_TTL_MILLIS`),
   because on an emulator with no positions flowing a cap raised in Odoo was never
@@ -573,7 +577,7 @@ machine at `http://10.0.2.2:<port>`.
   only respelled the URL forgot both facts, and would have held the queue.
   **And so does a queued row.** `OutboxEntry.enrollment` is `Settings.enrollment`
   (identifier and base URL) when the row was queued, and every live-queue read --
-  `take`, `countOf`, `depthOf`, the revivals, the status counts -- names the
+  `take`, `countOf`, `locationDepth`, the revivals, the status counts -- names the
   enrolment it reads for; a null row (an upgrade's backlog, or a row queued while the
   settings could not be read) is the current one's until the enrolment changes, when
   `DeviceConfig`'s `leaving` callback, inside the same edit, stamps it with the one being
@@ -630,7 +634,7 @@ machine at `http://10.0.2.2:<port>`.
   restriction as a string — integers *and* booleans. `Bundle.getBoolean` on a
   String returns `false`, so `wifi_only_uploads: "true"` sent call audio over
   metered cellular while `managed` locked the form. Both `booleanOrNull` and
-  `secondsOrNull` accept the type the console chose; an unparseable value leaves
+  `boundedOrNull` accept the type the console chose; an unparseable value leaves
   the stored one alone rather than switching a working device off.
 - **The app must start on `minSdk`, and only one test proves it.** `ContextCompat`
   implements `RECEIVER_NOT_EXPORTED` on **API 26–32** by registering the receiver
@@ -693,6 +697,81 @@ machine at `http://10.0.2.2:<port>`.
   **does not chunk** (see the generated `OutboxDao_Impl`), so any unbounded id
   list is a crash on `minSdk` that no test here can reproduce. Keep `DELETE`s
   predicate-shaped rather than id-shaped.
+- **The call screen is over the lock screen only while there is a call.**
+  `InCallActivity` declared `showWhenLocked` in the manifest and never closed, so the
+  dialer it shows once the line is free stayed over the keyguard after every call.
+  Measured on an API 35 emulator with a PIN, `voip_device` and `tools/sip-stub.py`: a
+  call answered and hung up by the far end left the dialer over the keyguard, and it
+  sent `INVITE sip:5512345678@…` with the keyguard still showing. Where the lock
+  screen shows silent notifications (off by default), tapping "Company line" opened it
+  too, with no PIN asked. `guardLockScreen` sets both flags from
+  `SoftphoneCalls.book.idle` on create, on every new intent and on every redraw, and
+  closes the screen when no call is left and the keyguard is up; the same run after
+  the change: the call still rang over the keyguard, the screen closed on the far
+  end's BYE, and the notification asked for the PIN (`InCallLockScreenTest`). Do not
+  put the flags back in the manifest.
+- **The call controls keep clear of the system bars.** At `targetSdk` 35+ the window
+  is edge to edge; `InCallActivity` padded for nothing, so on the emulator *Answer*
+  spanned y 2142–2274 under a navigation bar from 2208, and a tap on its centre did
+  not answer — the call rang out and the phone declined it busy. Its root is padded
+  by the system-bar and cutout insets, as Home and Settings are.
+- **The administrator password guards the Settings screen, not the path to it.**
+  Only `MainActivity.openSettings` asked, so after an unlock lapsed recents went
+  straight back to Settings, and after the process died (`kill -9` on the emulator)
+  recents restored Settings, token field and all, on top of a fresh, closed gate. `SettingsActivity` checks
+  the gate on create and on every resume and finishes when it is closed; each pause
+  renews the unlock, so the five minutes count from when the screen was last in use.
+- **A managed enrolment is applied whole or not at all.** `base_url`, `identifier`
+  and `token` describe one link: a policy whose `base_url` or `identifier` is
+  unusable or cleartext-refused used to keep the old server and take the new
+  identifier and token, which is a 401 or 404 on every upload, from a policy, on a
+  working device. `ManagedValues.enrollmentRejected` holds all three back; the keys
+  stay governed and the rest of the policy still applies.
+- **New credentials do not inherit the old ones' backoff.** A rotated token's 401s
+  walk the upload toward WorkManager's five-hour backoff; the reconcile compared only
+  `enrollment`, so the corrected token waited it out. `applyConfiguration` compares
+  `sameCredentialsAs`, and a token change re-enqueues the periodic upload and
+  replaces the pending one like a new server does. Learned server facts still
+  follow the enrolment, not the token.
+- **A save and its reconcile outlive the screen that asked for them.** *Save* awaits
+  `CompanionApp.saveForm`, which stores the form and reconciles on the app scope as one
+  unit: run on `lifecycleScope`, leaving Settings while the write was in flight let
+  DataStore finish the write and cancelled the reconcile behind it. A write the phone
+  cannot make (`IOException`, e.g. a full disk) is shown as `status_save_failed`.
+- **An update the system wants confirmed stays reachable.** From the background,
+  `startActivity` of the installer's confirmation is dropped without an exception, so
+  the session stayed sealed and every *Update* answered "already in progress".
+  Measured on the emulator with the real v0.6.5 release: `Background activity launch
+  blocked!` for `CONFIRM_INSTALL`, and Home stuck at "Installing…". `UpdateReceiver`
+  also posts the confirmation as a notification (`UpdateNotices.askToConfirm`) and
+  sets `UpdateStep.AwaitingConfirmation`, which turns Home's banner button into
+  *Confirm*: Android groups the notice with the app's ongoing ones, and a tap on the
+  group opens the app, not the installer. `Updater.clear` withdraws both on every
+  outcome.
+  The APK is fetched from its own release, `releases/download/v<version_name>/`, not
+  from `latest`, which stops serving it the moment a newer release is published.
+- **A call-log cursor is never seeded from a provider that did not answer.**
+  `CallLogReader.idAt` returns null for a provider that returned no cursor, and the
+  worker retries without writing one: seeding 0 re-sent the whole call history.
+- **A lookup the link failed is asked again once the link works.** The push key and
+  the softphone extension are asked of Odoo on a reconcile, and an `Unavailable`
+  answer (Odoo unreachable at boot, say) left them unasked until the next boot, save or
+  policy push -- no wake-ups, or no extension, for days. `StaleLookup` remembers the
+  failure; `UploadWorker` calls `retryLookupsAfterDelivery` after a drain that
+  delivered, which asks at once and then at most every 15 minutes while the endpoint
+  keeps failing, so a broken endpoint costs one request a quarter hour, not one per
+  upload.
+- **The share screen lives until its import ends.** It declared `noHistory`, which
+  finishes an activity the moment the user looks away, and so cancelled the files still
+  being copied and the `uploadNow` behind them. Not moved to the app scope instead: a
+  shared URI's read grant is the receiving activity's and ends with it.
+  `ShareActivityTest` holds the flag off.
+- **A recreated Settings screen keeps what was typed.** The first emission of the
+  store repaints every field; on a rotation that emission races Android restoring the
+  fields, and arriving second it would wipe the typing (not reproduced under
+  Robolectric, whose emission came first; the order is not guaranteed on a handset). A
+  screen recreated from saved state starts as already filled and repaints only governed
+  keys, so the order no longer matters.
 
 ## Debug logging
 

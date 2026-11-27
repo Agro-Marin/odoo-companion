@@ -13,6 +13,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.room.Room
 import com.odoocompanion.config.DeviceConfig
+import com.odoocompanion.config.EnrollmentResult
+import com.odoocompanion.config.FormValues
 import com.odoocompanion.config.ManagedConfig
 import com.odoocompanion.config.Settings
 import com.odoocompanion.data.COMPANION_MIGRATIONS
@@ -32,6 +34,7 @@ import com.odoocompanion.softphone.SoftphoneRetry
 import com.odoocompanion.softphone.SoftphoneService
 import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.system.StaleLookup
 import com.odoocompanion.ui.Appearance
 import com.odoocompanion.ui.ScanWidget
 import com.odoocompanion.update.Updater
@@ -42,9 +45,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -92,7 +97,7 @@ open class CompanionApp : Application() {
 
     private val restrictionsChanged = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            scope.launch { applyConfiguration() }
+            reconcile()
         }
     }
 
@@ -120,6 +125,12 @@ open class CompanionApp : Application() {
     internal lateinit var startup: Job
         private set
 
+    fun reconcile(): Job = scope.launch { applyConfiguration() }
+
+    fun saveForm(form: FormValues): Deferred<EnrollmentResult> = scope.async {
+        config.saveForm(form).also { if (it == EnrollmentResult.Saved) reconcile().join() }
+    }
+
     suspend fun applyConfiguration() = reconfiguring.withLock {
         val managed = ManagedConfig.read(this)
         if (managed != null && config.applyManaged(managed)) {
@@ -127,11 +138,12 @@ open class CompanionApp : Application() {
         }
         retryWhatTheLastBuildCouldNotRead()
         val settings = config.current()
-        val moved = settings.enrollment != null && reconciledEnrollment != null &&
-            settings.enrollment != reconciledEnrollment
-        settings.enrollment?.let { reconciledEnrollment = it }
-        SyncScheduler.schedulePeriodicWork(this, settings, newLink = moved)
-        if (moved) SyncScheduler.uploadAfresh(this, settings.wifiOnlyUploads)
+        val last = reconciledLink
+        val newLink = settings.enrollment != null && last != null &&
+            !settings.sameCredentialsAs(last)
+        if (settings.enrollment != null) reconciledLink = settings
+        SyncScheduler.schedulePeriodicWork(this, settings, newLink = newLink)
+        if (newLink) SyncScheduler.uploadAfresh(this, settings.wifiOnlyUploads)
         if (settings.isEnrolled) {
             LocationForegroundService.start(this)
         } else {
@@ -172,6 +184,15 @@ open class CompanionApp : Application() {
 
     private val softphoneRefreshes = Channel<Unit>(Channel.CONFLATED)
 
+    private val stalePush = StaleLookup()
+
+    private val staleSoftphone = StaleLookup()
+
+    fun retryLookupsAfterDelivery(now: Long) {
+        if (stalePush.dueAfterDelivery(now)) pushRefreshes.trySend(Unit)
+        if (staleSoftphone.dueAfterDelivery(now)) softphoneRefreshes.trySend(Unit)
+    }
+
     @Suppress("TooGenericExceptionCaught")
     private suspend fun refreshSoftphoneSafely() {
         try {
@@ -187,8 +208,12 @@ open class CompanionApp : Application() {
         val asked = config.currentOrNull()?.takeIf { it.isEnrolled } ?: return
         val lookup = client.softphone(asked)
         if (lookup is SoftphoneLookup.Unavailable) {
+            staleSoftphone.failed()
             Log.i(TAG, "Softphone settings not refreshed: ${lookup.reason}")
-        } else if (lookup is SoftphoneLookup.Refused) {
+        } else {
+            staleSoftphone.settled()
+        }
+        if (lookup is SoftphoneLookup.Refused) {
             Log.w(TAG, "Odoo refused the device token (${lookup.code}); stopping the softphone")
         }
         reconfiguring.withLock {
@@ -214,8 +239,11 @@ open class CompanionApp : Application() {
     private suspend fun refreshPush() {
         val settings = config.currentOrNull() ?: return
         val lookup = if (settings.isEnrolled) {
-            client.pushKey(settings)
+            client.pushKey(settings).also {
+                if (it is PushKeyLookup.Unavailable) stalePush.failed() else stalePush.settled()
+            }
         } else {
+            stalePush.settled()
             PushKeyLookup.Unavailable("not enrolled")
         }
         reconfiguring.withLock {
@@ -297,7 +325,7 @@ open class CompanionApp : Application() {
 
     private val reconfiguring = Mutex()
 
-    private var reconciledEnrollment: String? = null
+    private var reconciledLink: Settings? = null
 
     companion object {
         private const val TAG = "CompanionApp"

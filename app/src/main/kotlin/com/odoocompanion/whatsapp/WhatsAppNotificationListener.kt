@@ -7,10 +7,12 @@ import android.os.Environment
 import android.os.FileObserver
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.system.debug
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,12 +24,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class WhatsAppNotificationListener : NotificationListenerService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(
+        SupervisorJob() +
+            Dispatchers.IO +
+            CoroutineExceptionHandler { _, cause -> Log.e(TAG, "WhatsApp intake failed", cause) },
+    )
 
     private var watching: Job? = null
-
-    @Volatile
-    private var observer: FileObserver? = null
 
     private val arrivals = Channel<Unit>(Channel.CONFLATED)
 
@@ -44,10 +47,15 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                     adopt(store)
                 }
             }
-            while (isActive) {
-                if (observer == null) observer = folderObserver()?.also { it.startWatching() }
-                adopt(store)
-                delay(FOLDER_POLL_MILLIS)
+            var observer: FileObserver? = null
+            try {
+                while (isActive) {
+                    if (observer == null) observer = folderObserver()?.also { it.startWatching() }
+                    adopt(store)
+                    delay(FOLDER_POLL_MILLIS)
+                }
+            } finally {
+                observer?.stopWatching()
             }
         }
     }
@@ -76,8 +84,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     }
 
     private fun stopWatching() {
-        observer?.stopWatching()
-        observer = null
         watching?.cancel()
         watching = null
     }

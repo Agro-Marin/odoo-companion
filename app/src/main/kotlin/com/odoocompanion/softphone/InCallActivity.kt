@@ -1,10 +1,13 @@
 package com.odoocompanion.softphone
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import com.odoocompanion.R
 import com.odoocompanion.databinding.ActivityInCallBinding
@@ -16,10 +19,10 @@ class InCallActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        if (!guardLockScreen()) return
         binding = ActivityInCallBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        keepControlsOutFromUnderTheSystemBars()
         binding.answer.setOnClickListener {
             if (SoftphoneCalls.held) SoftphoneCalls.book.current?.resume() else answer()
         }
@@ -30,7 +33,7 @@ class InCallActivity : AppCompatActivity() {
         }
         binding.dial.setOnClickListener {
             val number = binding.number.text.toString().filter { it.isDigit() || it == '+' }
-            if (number.isNotEmpty()) SoftphoneTelecom.placeCall(this, number)
+            if (number.isNotEmpty()) SoftphoneTelecom.placeCall(applicationContext, number)
         }
         if (savedInstanceState == null) handle(intent)
     }
@@ -45,7 +48,37 @@ class InCallActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (!guardLockScreen()) return
         handle(intent)
+    }
+
+    private fun keepControlsOutFromUnderTheSystemBars() {
+        val root = binding.root
+        val left = root.paddingLeft
+        val top = root.paddingTop
+        val right = root.paddingRight
+        val bottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            view.setPadding(
+                left + bars.left,
+                top + bars.top,
+                right + bars.right,
+                bottom + bars.bottom,
+            )
+            insets
+        }
+    }
+
+    private fun guardLockScreen(): Boolean {
+        val onCall = !SoftphoneCalls.book.idle
+        setShowWhenLocked(onCall)
+        setTurnScreenOn(onCall)
+        if (onCall || !getSystemService(KeyguardManager::class.java).isKeyguardLocked) return true
+        finish()
+        return false
     }
 
     override fun onResume() {
@@ -69,6 +102,7 @@ class InCallActivity : AppCompatActivity() {
     }
 
     private fun render() {
+        if (!guardLockScreen()) return
         val call = SoftphoneCalls.call
         val state = call?.state
         val ringing = SoftphoneCalls.ringing

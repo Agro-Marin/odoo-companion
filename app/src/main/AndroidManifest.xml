@@ -76,7 +76,6 @@
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:excludeFromRecents="true"
-            android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -127,9 +126,7 @@
         <activity
             android:name=".softphone.InCallActivity"
             android:exported="false"
-            android:launchMode="singleTop"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true" />
+            android:launchMode="singleTop" />
 
         <service
             android:name=".push.CompanionPushService"

@@ -611,6 +611,42 @@ class StatusScreenTest {
     }
 
     @Test
+    fun `typing that was not saved survives a rotation`() = runTest {
+        open()
+        settle()
+        controller!!.get().type(R.id.baseUrl, "https://typed.example.com")
+
+        controller!!.recreate()
+        settle()
+
+        val field = controller!!.get().findViewById<android.widget.EditText>(R.id.baseUrl)
+        assertEquals("https://typed.example.com", field.text.toString())
+    }
+
+    @Test
+    fun `a save the phone cannot write is reported instead of crashing the app`() = runTest {
+        val activity = open()
+        settle()
+        activity.type(R.id.baseUrl, "https://odoo.example.com")
+        activity.type(R.id.identifier, "phone-01")
+        activity.type(R.id.token, "token")
+        val store = java.io.File(app.filesDir, "datastore")
+        assertTrue(store.isDirectory)
+
+        assertTrue(store.setWritable(false))
+        try {
+            activity.findViewById<View>(R.id.save).performClick()
+            settle()
+        } finally {
+            store.setWritable(true)
+        }
+
+        val shown = panelOf(activity)
+        assertTrue(shown, text(R.string.status_save_failed) in shown)
+        assertFalse("nothing was stored", app.config.current().isEnrolled)
+    }
+
+    @Test
     fun `a grant made behind a dialog shows once the screen resumes`() = runTest {
         batteryExemption(true)
         open()

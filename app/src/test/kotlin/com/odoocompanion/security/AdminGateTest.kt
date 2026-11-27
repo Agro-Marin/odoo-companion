@@ -47,4 +47,26 @@ class AdminGateTest {
         now += 1
         assertFalse(gate.isOpen())
     }
+
+    @Test
+    fun `a renewal counts the lapse from the last time Settings was in use`() {
+        val gate = gate("pw")
+        gate.unlock("pw")
+
+        now += AdminGate.UNLOCKED_MILLIS - 1
+        gate.renew()
+        now += AdminGate.UNLOCKED_MILLIS - 1
+        assertTrue(gate.isOpen())
+        now += 1
+        assertFalse(gate.isOpen())
+    }
+
+    @Test
+    fun `a build without a password has nothing to renew`() {
+        val gate = gate(null)
+
+        gate.renew()
+
+        assertTrue(gate.isOpen())
+    }
 }

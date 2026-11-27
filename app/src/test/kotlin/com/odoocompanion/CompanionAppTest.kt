@@ -7,7 +7,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.NetworkType
 import androidx.work.WorkManager
+import com.odoocompanion.config.EnrollmentResult
 import com.odoocompanion.config.enrol
+import com.odoocompanion.config.form
 import com.odoocompanion.data.DeadReason
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
@@ -20,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -62,24 +65,49 @@ class CompanionAppTest {
         .map { it.id }
 
     @Test
-    fun `a new enrolment does not wait out the backoff the old server earned`() = runTest {
+    fun `a save the screen stops waiting for is still reconciled`() = runBlocking {
+        app.startup.join()
+        assertTrue(liveIds(SyncScheduler.CALL_LOG_PERIODIC).isEmpty())
+
+        val saving = app.saveForm(form(callLogEnabled = true))
+        val screen = launch(Dispatchers.Default) { saving.await() }
+        screen.cancel()
+
+        assertEquals(EnrollmentResult.Saved, saving.await())
+        assertTrue("the settings were stored", app.config.current().isEnrolled)
+        assertEquals(
+            "and the reconcile ran behind them",
+            1,
+            liveIds(SyncScheduler.CALL_LOG_PERIODIC).size,
+        )
+    }
+
+    @Test
+    fun `new credentials do not wait out the backoff the old ones earned`() = runTest {
         app.config.enrol("https://old.example.com", "phone-01", "t")
         app.applyConfiguration()
         SyncScheduler.uploadNow(app, wifiOnlyUploads = false)
-        val waiting = liveIds(SyncScheduler.UPLOAD_NOW)
-        val periodic = liveIds(SyncScheduler.UPLOAD_PERIODIC)
+        var waiting = liveIds(SyncScheduler.UPLOAD_NOW)
+        var periodic = liveIds(SyncScheduler.UPLOAD_PERIODIC)
 
-        app.config.enrol("https://old.example.com", "phone-01", "rotated")
         app.applyConfiguration()
         assertEquals("a reconcile that moved nothing", waiting, liveIds(SyncScheduler.UPLOAD_NOW))
         assertEquals(periodic, liveIds(SyncScheduler.UPLOAD_PERIODIC))
 
-        app.config.enrol("https://new.example.com", "phone-01", "t")
-        app.applyConfiguration()
-        val fresh = liveIds(SyncScheduler.UPLOAD_NOW)
-        assertEquals(1, fresh.size)
-        assertFalse("the old request was replaced", fresh.single() in waiting)
-        assertFalse(liveIds(SyncScheduler.UPLOAD_PERIODIC).single() in periodic)
+        val links = listOf(
+            "https://old.example.com" to "rotated",
+            "https://new.example.com" to "t",
+        )
+        for ((url, token) in links) {
+            app.config.enrol(url, "phone-01", token)
+            app.applyConfiguration()
+            val fresh = liveIds(SyncScheduler.UPLOAD_NOW)
+            assertEquals(1, fresh.size)
+            assertFalse("$url/$token: the old request was replaced", fresh.single() in waiting)
+            assertFalse(liveIds(SyncScheduler.UPLOAD_PERIODIC).single() in periodic)
+            waiting = fresh
+            periodic = liveIds(SyncScheduler.UPLOAD_PERIODIC)
+        }
     }
 
     @Test
@@ -166,6 +194,52 @@ class CompanionAppTest {
                 val tookMillis = (System.nanoTime() - started) / 1_000_000
 
                 assertTrue("the reconcile took $tookMillis ms", tookMillis < 5_000)
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `a push lookup the link failed is asked again once a delivery gets through`() {
+        val server = MockWebServer().apply { start() }
+        val asks = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                !request.target.endsWith("/push") -> MockResponse(
+                    code = 404,
+                    body = """{"service":"remote_mobile","error":"no_extension","message":"x"}""",
+                )
+
+                asks.incrementAndGet() == 1 -> MockResponse(code = 503)
+
+                else -> MockResponse(
+                    body = """{"service":"remote_mobile","status":"success",""" +
+                        """"vapid_public_key":"v"}""",
+                )
+            }
+        }
+        suspend fun asked(count: Int) = withTimeoutOrNull(10_000) {
+            while (asks.get() < count) delay(20)
+        } != null
+        try {
+            runBlocking {
+                app.startup.join()
+                app.config.enrol(server.url("/").toString(), "phone-01", "token")
+                app.applyConfiguration()
+                assertTrue("the first lookup met the outage", asked(1))
+
+                val retried = withTimeoutOrNull(10_000) {
+                    while (asks.get() < 2) {
+                        app.retryLookupsAfterDelivery(System.currentTimeMillis())
+                        delay(50)
+                    }
+                } != null
+                assertTrue("a delivery asks again", retried)
+
+                app.retryLookupsAfterDelivery(System.currentTimeMillis())
+                delay(500)
+                assertEquals("an answered lookup is not asked again", 2, asks.get())
             }
         } finally {
             server.close()

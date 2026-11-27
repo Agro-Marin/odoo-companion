@@ -15,29 +15,36 @@ data class ManagedValues(
     val locationIntervalSeconds: Long? = null,
     val uploadWindowSeconds: Long? = null,
     val minMoveMetres: Long? = null,
+    val enrollmentRejected: Boolean = false,
     val policyPresent: Boolean = false,
     val presentKeys: Set<String> = emptySet(),
 )
 
 object ManagedConfig {
+    @Suppress("TooGenericExceptionCaught")
     fun read(context: Context): ManagedValues? {
         val manager = context.getSystemService(Context.RESTRICTIONS_SERVICE) as? RestrictionsManager
-            ?: return unavailable()
-        val restrictions = runCatching { manager.applicationRestrictions }
-            .getOrElse { return unavailable() }
+            ?: return unavailable("No restrictions service")
+        val restrictions = try {
+            manager.applicationRestrictions
+        } catch (failure: RuntimeException) {
+            return unavailable("The restrictions service failed (${failure.javaClass.simpleName})")
+        }
         return fromBundle(restrictions)
     }
 
-    private fun unavailable(): ManagedValues? {
-        Log.w(TAG, "No restrictions service; leaving the managed configuration as it stands")
+    private fun unavailable(why: String): ManagedValues? {
+        Log.w(TAG, "$why; leaving the managed configuration as it stands")
         return null
     }
 
     fun fromBundle(bundle: Bundle?): ManagedValues {
         if (bundle == null || bundle.isEmpty) return ManagedValues()
+        val baseUrl = bundle.nonBlank(ManagedKey.BASE_URL)
+        val identifier = bundle.nonBlank(ManagedKey.IDENTIFIER)
         return ManagedValues(
-            baseUrl = bundle.nonBlank(ManagedKey.BASE_URL)?.takeIf(::isUsableBaseUrl),
-            identifier = bundle.nonBlank(ManagedKey.IDENTIFIER)?.takeIf(::isUsableIdentifier),
+            baseUrl = baseUrl?.takeIf(::isUsableBaseUrl),
+            identifier = identifier?.takeIf(::isUsableIdentifier),
             token = bundle.nonBlank(ManagedKey.TOKEN),
             callLogEnabled = bundle.booleanOrNull(ManagedKey.CALL_LOG_ENABLED),
             recordingsEnabled = bundle.booleanOrNull(ManagedKey.RECORDINGS_ENABLED),
@@ -57,6 +64,8 @@ object ManagedConfig {
                 DEFAULT_MIN_MOVE_METRES..MAX_MIN_MOVE_METRES,
                 unit = "m",
             ),
+            enrollmentRejected = baseUrl?.let(::isUsableBaseUrl) == false ||
+                identifier?.let(::isUsableIdentifier) == false,
             policyPresent = true,
             presentKeys = ManagedKey.ALL.filterTo(mutableSetOf(), bundle::containsKey),
         )

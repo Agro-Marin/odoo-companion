@@ -194,6 +194,30 @@ class CallLogSyncWorkerTest {
     }
 
     @Test
+    fun `an unavailable provider on the first pass does not seed the cursor at zero`() = runTest {
+        reset()
+        enroll()
+        grantCallLog()
+        app.config.setCallLogCursor(2_000)
+        app.config.clearCallLogIdCursor()
+        FakeCallLogProvider.returnsNull = true
+
+        assertEquals(ListenableWorker.Result.retry(), run())
+        assertEquals(null, app.config.callLogIdCursor())
+
+        FakeCallLogProvider.returnsNull = false
+        FakeCallLogProvider.calls = listOf(
+            Call(number = "+52sent", date = 1_000, modified = 1_000),
+            Call(number = "+52alsosent", date = 2_000, modified = 2_000),
+            Call(number = "+52unsent", date = 3_000, modified = 3_000),
+        )
+
+        assertEquals(ListenableWorker.Result.success(), run())
+        assertEquals("only the call after the old cursor is queued, not the history", 1, queued())
+        assertEquals(3L, app.config.callLogIdCursor())
+    }
+
+    @Test
     fun `an unavailable provider leaves the cursor alone`() = runTest {
         reset()
         enroll()

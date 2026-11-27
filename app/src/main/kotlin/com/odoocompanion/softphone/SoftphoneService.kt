@@ -27,6 +27,7 @@ import org.linphone.core.Factory
 import org.linphone.core.MediaEncryption
 import org.linphone.core.RegistrationState
 import org.linphone.core.TransportType
+import java.io.IOException
 
 class SoftphoneService : LifecycleService() {
     private var core: Core? = null
@@ -85,7 +86,16 @@ class SoftphoneService : LifecycleService() {
             ACTION_STOP -> stopWhenFree()
 
             else -> lifecycleScope.launch {
-                val settings = CompanionApp.from(applicationContext).softphones.current()
+                val settings = try {
+                    CompanionApp.from(applicationContext).softphones.current()
+                } catch (unreadable: IOException) {
+                    Log.w(TAG, "Cannot read the softphone settings; the line stays", unreadable)
+                    if (running == null) {
+                        SoftphoneRetry.schedule(this@SoftphoneService)
+                        stopWhenFree()
+                    }
+                    return@launch
+                }
                 if (settings == null) {
                     stopWhenFree()
                 } else {
@@ -161,6 +171,7 @@ class SoftphoneService : LifecycleService() {
     private fun release() {
         val old = core ?: return
         SoftphoneCalls.core = null
+        SoftphoneCalls.registration = null
         SoftphoneCalls.abandon()
         old.removeListener(listener)
         old.stop()
