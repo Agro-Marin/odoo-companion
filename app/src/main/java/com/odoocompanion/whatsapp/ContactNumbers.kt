@@ -7,6 +7,19 @@ import android.provider.ContactsContract
 import android.util.Log
 import androidx.core.content.ContextCompat
 
+private val FORMATTED_NUMBER = Regex("""\+?[\p{Nd}\p{Zs}().-]+""")
+private val WRITTEN_EXTENSION = Regex("""(?:ext\.?|x)\s*\p{Nd}+$""", RegexOption.IGNORE_CASE)
+
+internal fun subscriberNumber(value: String): String? {
+    val line = value.substringBefore(';').substringBefore(',').trim()
+        .replace(WRITTEN_EXTENSION, "").trimEnd()
+    if (!FORMATTED_NUMBER.matches(line)) return null
+    val digits = buildString {
+        for (char in line) char.digitToIntOrNull()?.let { append(it) }
+    }
+    return digits.takeIf { it.length in 8..15 }
+}
+
 object ContactNumbers {
     internal fun cachedLookup(numberOf: (String) -> String?): (String) -> String? {
         val numbers = mutableMapOf<String, String?>()
@@ -21,13 +34,16 @@ object ContactNumbers {
 
     private const val SAME_LINE_DIGITS = 10
 
-    fun choose(whatsappIds: List<String>, phones: List<String>): String? =
+    fun choose(whatsappIds: List<String>, phones: () -> List<String>): String? =
         onlyLine(whatsappIds.mapNotNull { WhatsAppNotices.phoneOf(it, null) })
-            ?: onlyLine(phones.map { it.filter(Char::isDigit) })
+            ?: onlyLine(
+                phones()
+                    .mapNotNull(::subscriberNumber)
+                    .filter { it.length >= SAME_LINE_DIGITS },
+            )
 
     private fun onlyLine(numbers: List<String>): String? {
-        val lines = numbers.filter { it.length >= SAME_LINE_DIGITS }
-            .groupBy { it.takeLast(SAME_LINE_DIGITS) }
+        val lines = numbers.groupBy { it.takeLast(SAME_LINE_DIGITS) }
         val sameSuffix = lines.values.singleOrNull() ?: return null
         val prefixes = sameSuffix.map { it.dropLast(SAME_LINE_DIGITS) }
             .filter { it.isNotEmpty() }.map { if (it == "521") "52" else it }.distinct()
@@ -55,12 +71,14 @@ class ContactBook(private val context: Context) {
                         ContactNumbers.WHATSAPP_BUSINESS_PROFILE,
                     ),
                 ),
-                phones = column(
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                    ContactsContract.CommonDataKinds.Phone.NUMBER,
-                    "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} = ?",
-                    arrayOf(name),
-                ),
+                phones = {
+                    column(
+                        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                        ContactsContract.CommonDataKinds.Phone.NUMBER,
+                        "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} = ?",
+                        arrayOf(name),
+                    )
+                },
             )
         } catch (e: SecurityException) {
             Log.w(TAG, "Contacts were refused", e)

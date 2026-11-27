@@ -46,7 +46,7 @@ class SoftphoneService : LifecycleService() {
             state: RegistrationState?,
             message: String,
         ) {
-            Log.i(TAG, "Registration $state: $message")
+            Log.i(TAG, "Registration $state")
             SoftphoneCalls.registration = state
             notifyStatus()
         }
@@ -209,7 +209,7 @@ class SoftphoneService : LifecycleService() {
         this.core = core
         SoftphoneCalls.core = core
         running = settings
-        Log.i(TAG, "Registering $settings")
+        Log.i(TAG, "Registering the configured extension")
     }
 
     private fun notifyStatus() {

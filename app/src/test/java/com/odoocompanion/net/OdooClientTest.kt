@@ -61,6 +61,43 @@ class OdooClientTest {
     }
 
     @Test
+    fun `a redirected upload stays pending at the configured endpoint`() = runTest {
+        server.enqueue(
+            MockResponse.Builder().code(307).setHeader("Location", "/moved").build(),
+        )
+        server.enqueue(MockResponse(body = """{"status":"success","accepted":1}"""))
+
+        val outcome = OdooClient().uploads(settings()).post("location", "{}")
+
+        assertTrue(outcome is UploadOutcome.Retry)
+        assertEquals(RetryScope.LINK, (outcome as UploadOutcome.Retry).scope)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `injected transports keep redirects at the original endpoint`() = runTest {
+        server.enqueue(MockResponse.Builder().code(302).setHeader("Location", "/moved").build())
+        server.enqueue(MockResponse(body = """{"status":"success","accepted":1}"""))
+
+        val result = OdooClient(OkHttpClient()).uploads(settings()).post("calllog", "{}")
+
+        assertTrue(result is UploadOutcome.Retry && result.scope == RetryScope.LINK)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `a redirect body cannot establish the server capability`() = runTest {
+        server.enqueue(MockResponse(code = 302, body = """{"service":"remote_mobile"}"""))
+        var learned = false
+        val client = OdooClient(onServerNamedItself = { learned = true })
+
+        val result = client.uploads(settings()).post("location", "{}")
+
+        assertTrue(result is UploadOutcome.Retry && result.scope == RetryScope.LINK)
+        assertFalse(learned)
+    }
+
+    @Test
     fun `cancelling an upload while reading the reply cancels its network call`() = runBlocking {
         val reading = CountDownLatch(1)
         val release = CountDownLatch(1)

@@ -89,8 +89,9 @@ class PageReader {
             val width = pageWidth.coerceAtLeast(1).toDouble()
             val height = pageHeight.coerceAtLeast(1).toDouble()
             val scale = minOf(TARGET_WIDTH / width, sqrt(MAX_PIXELS / (width * height)))
-            return (width * scale).toInt().coerceAtLeast(1) to
-                (height * scale).toInt().coerceAtLeast(1)
+            val columns = (width * scale).toInt().coerceAtLeast(1)
+            val rows = (height * scale).toInt().coerceIn(1, MAX_PIXELS.toInt() / columns)
+            return columns to rows
         }
     }
 }

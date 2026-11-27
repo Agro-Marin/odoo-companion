@@ -150,6 +150,7 @@ anything again, one row is released per budget as a probe. A row the server
 | Answer | Meaning | The queue |
 |--------|---------|-----------|
 | 2xx | stored — `duplicates` counts what it already held, `skipped` what it read but could not use | removed |
+| 3xx | the configured endpoint redirected the request | kept for retry. The drain stops so the operator can correct the base URL. |
 | 409 | the transport layer recognised this exact request inside the dedup window — a request it *delivered*; since odoo `4a4ff8afe550` one it failed on no longer counts, and an older server answering 409 to the retry of a 500 is the one way this table still loses a row | removed, counted as a duplicate |
 | 422 **reporting duplicates** | an older server's spelling of "I already hold this batch" | removed, counted as a duplicate |
 | 400, 422 | unreadable, or read and nothing storable | positions deleted; calls and recordings marked dead |
@@ -304,7 +305,8 @@ each document and where it stands, and a notification says when one reached Odoo
   name. `ContactBook` looks that name up, with `READ_CONTACTS`, which is asked from the
   WhatsApp card. It looks first in WhatsApp's own contact row
   (`vnd.com.whatsapp.profile`, whose `DATA1` is the JID), then in the contact's phone
-  numbers. Two different lines under one name give no number (`ContactNumbers.choose`).
+  numbers. It strips extensions and post-dial digits before comparing lines.
+  Two different lines under one name give no number (`ContactNumbers.choose`).
 - **What a document is.** Only a Constancia de Situación Fiscal, an INE or a passport
   is to leave the handset, so the handset decides. `PageReader` draws a PDF's pages with
   `PdfRenderer`, one at a time and at most two, and reads each with ML Kit's on-device OCR
@@ -473,7 +475,9 @@ Without an Asterisk, `tools/sip-stub.py` stands in for one: it takes the handset
 REGISTER over TLS, and on `kill -USR1` rings it with a DTLS-SRTP offer, ACKs the answer
 and hangs up. No media flows, so it proves registration, ringing through Core-Telecom,
 answering and the hang-up, not audio. Its certificate must name the address the
-extension's `pbx_ip` holds, and its CA goes in `files/extra-ca.pem` as above:
+extension's `pbx_ip` holds, and its CA goes in `files/extra-ca.pem` as above.
+The stub listens on loopback for emulator tests. To test a physical handset, pass
+`--bind` and `--host` with the test host's LAN address.
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out lab-ca.pem -days 7 \
@@ -575,7 +579,9 @@ would otherwise replace a working enrollment with one that can never upload.
 `location_interval_seconds` is read whether the EMM sends it as a number or as text —
 several consoles serialise every managed value as a string, and those pushes used to be
 accepted, reported as applied, and silently ignored. It is clamped rather than trusted:
-one second of `PRIORITY_HIGH_ACCURACY` flattens a handset in an afternoon.
+one second of `PRIORITY_HIGH_ACCURACY` flattens a handset in an afternoon. Numeric settings
+must represent whole numbers. Fractional and non-finite values leave the saved setting
+in place.
 
 ### Manual entry (a handful of phones, or testing)
 
@@ -695,25 +701,22 @@ recording's filename.
 
 ## Before shipping a build
 
-There are no instrumented tests: the whole suite is Robolectric, which is exactly the
-wrong instrument for what this app risks — OEM dialer folders, scoped storage, a
-foreground service, and a battery killer that varies per vendor. `tools/smoke-test.sh`
-is the compensating step, and it is worth running against a real instance before any
-build reaches a handset:
+The JVM suite uses JUnit and Robolectric. Exercise OEM dialer folders, scoped storage,
+foreground services and vendor battery management on a handset. To check the HTTP
+contract, run the smoke test against a disposable Odoo device record using Bash,
+curl and Python 3.
 
 ```bash
 tools/smoke-test.sh https://odoo.example.com phone-01 <bearer-token>
 ```
 
-It replays the exact payloads the app sends — a location batch, call logs in each
-shape a queue can hold, a recording stamped at the call's end the way the app stamps
-it, a wrong token and an unknown identifier — and checks every answer against the one
-the app is built against, exiting non-zero on the first that differs. What it proves
-is the half the unit tests cannot: that the device exists in Odoo, that the token
-authenticates, that the category grants the 50 MB cap and duplicate detection, that
-the recording matches its call, and that the three routes are reachable through
-whatever proxy sits in front. Use a device record created for testing, since every
-row it posts is stored.
+The script sends a location batch, call logs, a duplicate call, a recording, and two
+requests with invalid credentials or identifiers. It checks HTTP status and typed
+JSON fields for each response, including the skipped row index and the recording
+match. For duplicate calls it accepts an explicit duplicate-event conflict or a
+successful response that reports one duplicate and zero new calls. It reports
+response mismatches and exits nonzero if any check fails. Successful requests
+create records on the test server.
 
 ## Known constraints
 

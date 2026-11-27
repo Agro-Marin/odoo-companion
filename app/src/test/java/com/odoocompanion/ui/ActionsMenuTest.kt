@@ -2,12 +2,16 @@ package com.odoocompanion.ui
 
 import android.os.Looper
 import android.view.View
+import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.R
 import com.odoocompanion.config.ManagedValues
 import com.odoocompanion.security.AdminGate
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -142,9 +146,16 @@ class ActionsMenuTest {
     }
 
     @Test
-    fun `an unenrolled phone is pointed at Settings`() {
+    fun `an unenrolled phone is pointed at Settings`() = runBlocking {
         val screen = open()
-
+        val state = screen.findViewById<TextView>(R.id.stateText)
+        withTimeout(5_000) {
+            while (state.text.isEmpty()) {
+                Shadows.shadowOf(Looper.getMainLooper()).idle()
+                delay(10)
+            }
+        }
+        assertEquals(screen.getString(R.string.status_not_enrolled), state.text.toString())
         assertTrue(screen.findViewById<View>(R.id.enrollPrompt).isShown)
     }
 }

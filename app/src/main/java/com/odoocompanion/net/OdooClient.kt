@@ -53,9 +53,15 @@ sealed interface UploadOutcome {
 }
 
 class OdooClient(
-    private val http: OkHttpClient = defaultClient(),
+    http: OkHttpClient = defaultClient(),
     private val onServerNamedItself: suspend (baseUrl: String) -> Unit = {},
 ) {
+    private val http = if (http.followRedirects) {
+        http.newBuilder().followRedirects(false).build()
+    } else {
+        http
+    }
+
     private var unpersistedServiceUrl: String? = null
 
     fun uploads(settings: Settings): Uploads {
@@ -184,7 +190,7 @@ class OdooClient(
         settings: Settings,
         suffix: String,
         body: RequestBody?,
-        failed: (reason: String, cause: Exception) -> T,
+        failed: (reason: String, cause: Exception?) -> T,
         read: suspend (code: Int, text: String, reply: JsonObject?) -> T,
     ): T {
         val request = try {
@@ -199,8 +205,14 @@ class OdooClient(
         }
         return try {
             val (code, text) = http.newCall(request).readResponse { response ->
-                response.code to response.peekBody(MAX_READ_BYTES).string()
+                val bodyText = if (response.code in 300..399) {
+                    null
+                } else {
+                    response.peekBody(MAX_READ_BYTES).string()
+                }
+                response.code to bodyText
             }
+            if (text == null) return failed(reasonFor(code), null)
             read(code, text, text.asJsonObject())
         } catch (e: IOException) {
             val reason = "request failed (${e.javaClass.simpleName})"
@@ -296,6 +308,8 @@ class OdooClient(
         (this?.get(key) as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.intOrNull }.orEmpty()
 
     private fun reasonFor(code: Int): String = when (code) {
+        in 300..399 -> "endpoint redirected ($code) — check the configured Odoo base URL"
+
         401, 403 -> "auth rejected ($code)"
 
         404 ->
@@ -335,6 +349,7 @@ class OdooClient(
         const val HTTP_UNAVAILABLE = 503
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+            .followRedirects(false)
             .connectTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)

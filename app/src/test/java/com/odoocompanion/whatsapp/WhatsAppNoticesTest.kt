@@ -184,5 +184,12 @@ class WhatsAppNoticesTest {
         assertNull(WhatsAppNotices.phoneOf("120363040000000000@g.us", null))
         assertNull(WhatsAppNotices.phoneOf(null, "content://contacts/people/12"))
         assertNull(WhatsAppNotices.phoneOf(null, "tel:123"))
+        assertEquals("525512345678", WhatsAppNotices.phoneOf(null, "tel:+52 (55) 1234-5678 x42"))
+        assertEquals("1234567890", WhatsAppNotices.phoneOf(null, "tel:１２３４５６７８９０"))
+        assertEquals("525512345678", WhatsAppNotices.phoneOf(null, "tel:+525512345678;ext=99"))
+        assertEquals(
+            "525512345678",
+            WhatsAppNotices.phoneOf("525512345678@s.whatsapp.net", "tel:123"),
+        )
     }
 }

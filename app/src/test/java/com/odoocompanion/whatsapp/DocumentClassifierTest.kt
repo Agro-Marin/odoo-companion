@@ -93,10 +93,13 @@ class DocumentClassifierTest {
 
     @Test
     fun `a QR that is not the SAT's makes nothing a constancia`() {
-        assertEquals(
-            DocumentKind.OTHER,
-            kindOf("", listOf("https://example.com/?D3=1_PCA221013LF1"))
+        val codes = listOf(
+            "https://example.com/?D3=1_PCA221013LF1",
+            "https://example.com/siat.sat.gob.mx?D3=1_PCA221013LF1",
+            "https://siat.sat.gob.mx/#?D3=1_PCA221013LF1",
+            "https://siat.sat.gob.mx/?D3=1_PCA221013LF1suffix",
         )
+        codes.forEach { assertEquals(it, DocumentKind.OTHER, kindOf("", listOf(it))) }
     }
 
     @Test

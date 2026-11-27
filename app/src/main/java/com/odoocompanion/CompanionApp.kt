@@ -7,10 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.database.sqlite.SQLiteException
 import android.os.Environment
 import android.util.Log
 import androidx.core.content.ContextCompat
-import androidx.core.content.pm.PackageInfoCompat
 import androidx.room.Room
 import com.odoocompanion.config.DeviceConfig
 import com.odoocompanion.config.ManagedConfig
@@ -279,22 +279,25 @@ open class CompanionApp : Application() {
             PackageManager.PERMISSION_GRANTED
 
     private suspend fun retryWhatTheLastBuildCouldNotRead() {
-        if (!config.consumeBuildChange(installedVersion())) return
-        val revived = database.outbox().reviveUndecodable()
-        if (revived > 0) {
-            Log.i(TAG, "Queueing $revived row(s) the previous build could not decode")
+        val version = packageManager.getPackageInfo(packageName, 0).longVersionCode
+        try {
+            config.onBuildChanged(version) {
+                val revived = database.outbox().reviveUndecodable()
+                if (revived > 0) {
+                    Log.i(TAG, "Queueing $revived row(s) the previous build could not decode")
+                }
+            }
+        } catch (failure: SQLiteException) {
+            Log.w(
+                TAG,
+                "Queue recovery deferred until the next configuration pass (${failure.javaClass.simpleName})"
+            )
         }
     }
 
     private val reconfiguring = Mutex()
 
     private var reconciledEnrollment: String? = null
-
-    private fun installedVersion(): Long = runCatching {
-        PackageInfoCompat.getLongVersionCode(
-            packageManager.getPackageInfo(packageName, 0),
-        )
-    }.getOrDefault(0L)
 
     companion object {
         private const val TAG = "CompanionApp"

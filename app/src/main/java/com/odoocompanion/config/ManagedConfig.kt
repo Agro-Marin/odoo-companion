@@ -71,7 +71,7 @@ object ManagedConfig {
         return when (val value = get(key)) {
             is Boolean -> value
 
-            is Number -> value.toInt() != 0
+            is Number -> value.wholeLong()?.let { it != 0L } ?: unusable(key)
 
             is CharSequence -> value.toString().trim().lowercase().let(TRUTH::get)
                 ?: unusable(key)
@@ -94,20 +94,26 @@ object ManagedConfig {
     private fun Bundle.boundedOrNull(key: String, bounds: LongRange, unit: String): Long? {
         if (!containsKey(key)) return null
         val raw = when (val value = get(key)) {
-            is Number -> value.toLong()
+            is Number -> value.wholeLong()
             is CharSequence -> value.toString().trim().toLongOrNull()
             else -> null
         }
 
         if (raw == null || raw < 0 || (raw == 0L && bounds.first > 0)) {
-            Log.w(TAG, "Ignoring unusable managed $key: ${get(key)}")
+            Log.w(TAG, "Ignoring unusable managed $key")
             return null
         }
         val clamped = raw.coerceIn(bounds)
         if (clamped != raw) {
-            Log.w(TAG, "Managed $key of $raw $unit is out of range; using $clamped $unit")
+            Log.w(TAG, "Managed $key is out of range. Using $clamped $unit")
         }
         return clamped
+    }
+
+    private fun Number.wholeLong(): Long? = try {
+        toString().toBigDecimalOrNull()?.longValueExact()
+    } catch (_: ArithmeticException) {
+        null
     }
 
     private const val TAG = "ManagedConfig"

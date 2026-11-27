@@ -56,6 +56,20 @@ class SoftphoneLookupTest {
     }
 
     @Test
+    fun `a redirected settings lookup keeps the stored extension`() = runTest {
+        server.enqueue(MockResponse.Builder().code(302).setHeader("Location", "/moved").build())
+        server.enqueue(
+            MockResponse(
+                code = 404,
+                body = """{"service":"remote_mobile","error":"no_extension"}"""
+            )
+        )
+
+        assertTrue(OdooClient().softphone(settings()) is SoftphoneLookup.Unavailable)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `odoo saying the user has no extension is an answer`() = runTest {
         server.enqueue(
             MockResponse(

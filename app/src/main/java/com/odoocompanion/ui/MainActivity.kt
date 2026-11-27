@@ -9,7 +9,6 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -31,9 +30,6 @@ import com.odoocompanion.update.UpdateRelaunch
 import com.odoocompanion.update.UpdateStep
 import com.odoocompanion.update.Updater
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -66,31 +62,12 @@ class MainActivity : AppCompatActivity() {
         alerts = AlertBand(binding.alerts) { grants.requestAll() }
         setUpActions()
         scanCard = ScanCard(this, binding).also { it.start() }
-        binding.appVersion.text = versionText()
+        val info = packageManager.getPackageInfo(packageName, 0)
+        binding.appVersion.text = versionText(info)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(
-                    app.config.settings,
-                    StatusText.queueCounts(app),
-                    merge(healthChecks, statusMinutes),
-                    combine(
-                        app.softphones.configured,
-                        StatusText.localNetworkWanted(app, healthChecks),
-                        ::Pair,
-                    ),
-                ) { settings, counts, _, (softphone, localNetwork) ->
-                    StatusText.panel(
-                        this@MainActivity,
-                        settings,
-                        counts,
-                        null,
-                        softphone,
-                        localNetwork,
-                    )
-                }
-                    .distinctUntilChanged()
-                    .collect(::showPanel)
+                StatusText.panels(this@MainActivity, healthChecks).collect(::showPanel)
             }
         }
         binding.updateInstall.setOnClickListener { offered?.let(::install) }
@@ -100,7 +77,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (savedInstanceState == null) {
-            WhatsNewDialog(this, installedVersionCode()).showIfDue()
+            WhatsNewDialog(this, info.longVersionCode).showIfDue()
             handle(intent)
         }
     }
@@ -116,15 +93,6 @@ class MainActivity : AppCompatActivity() {
         intent.action = null
         scanCard.scan()
     }
-
-    private fun installedVersionCode(): Long =
-        PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0))
-
-    private fun versionText(): String = getString(
-        R.string.app_version,
-        packageManager.getPackageInfo(packageName, 0).versionName.orEmpty(),
-        installedVersionCode().toInt(),
-    )
 
     private fun showUpdateStep(step: UpdateStep?) {
         val manifest = offered ?: return

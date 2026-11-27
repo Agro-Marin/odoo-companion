@@ -75,17 +75,18 @@ object DeviceHealth {
         recordingsWanted: Boolean,
         softphoneWanted: Boolean,
         localNetworkWanted: Boolean,
-        sdk: Int = Build.VERSION.SDK_INT,
     ): List<String> = buildList {
         add(Manifest.permission.ACCESS_FINE_LOCATION)
         add(Manifest.permission.ACCESS_COARSE_LOCATION)
         if (callLogWanted) add(Manifest.permission.READ_CALL_LOG)
         if (softphoneWanted) add(Manifest.permission.RECORD_AUDIO)
-        if (localNetworkWanted && sdk >= Build.VERSION_CODES.CINNAMON_BUN) {
+        if (localNetworkWanted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN) {
             add(Manifest.permission.ACCESS_LOCAL_NETWORK)
         }
-        if (sdk >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
-        if (recordingsWanted && sdk < Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (recordingsWanted && Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             add(Manifest.permission.READ_EXTERNAL_STORAGE)
             add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }

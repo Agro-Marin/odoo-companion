@@ -176,6 +176,7 @@ async def main():
     parser.add_argument("--cert", required=True, help="server certificate (PEM)")
     parser.add_argument("--key", required=True, help="its private key (PEM)")
     parser.add_argument("--host", default="10.0.2.2", help="this host as the handset reaches it")
+    parser.add_argument("--bind", default="127.0.0.1", help="local address on which to listen")
     parser.add_argument("--port", type=int, default=5061)
     parser.add_argument("--hangup-after", type=float, default=8.0, help="seconds")
     parser.add_argument("--verbose", action="store_true", help="print whole messages")
@@ -190,8 +191,8 @@ async def main():
 
     stub = Stub(args.host, fingerprint, args.hangup_after, args.verbose)
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, stub.ring)
-    server = await asyncio.start_server(stub.handle, "0.0.0.0", args.port, ssl=context)
-    print(f"listening on {args.port}; kill -USR1 to ring", flush=True)
+    server = await asyncio.start_server(stub.handle, args.bind, args.port, ssl=context)
+    print(f"listening on {args.bind}:{args.port}; kill -USR1 to ring", flush=True)
     async with server:
         await server.serve_forever()
 

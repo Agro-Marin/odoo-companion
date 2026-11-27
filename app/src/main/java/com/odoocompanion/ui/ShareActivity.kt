@@ -83,8 +83,16 @@ class ShareActivity : ComponentActivity() {
 
     private fun message(queued: Int, results: List<ImportResult>): String = when {
         results.all { it == ImportResult.TOO_LARGE } -> getString(R.string.scan_too_large)
+
         queued == 0 -> getString(R.string.scan_unreadable)
-        queued < results.size -> getString(R.string.share_partly_queued, queued, results.size)
+
+        queued < results.size -> resources.getQuantityString(
+            R.plurals.share_partly_queued,
+            results.size,
+            queued,
+            results.size,
+        )
+
         else -> resources.getQuantityString(R.plurals.share_queued, queued, queued)
     }
 

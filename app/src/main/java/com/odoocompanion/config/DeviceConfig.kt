@@ -344,13 +344,13 @@ class DeviceConfig(
         store.edit { prefs -> prefs[WIFI_ONLY] = enabled }
     }
 
-    suspend fun consumeBuildChange(version: Long): Boolean {
-        var changed = false
+    suspend fun onBuildChanged(version: Long, action: suspend () -> Unit) {
         store.edit { prefs ->
-            changed = prefs[LAST_BUILD] != version
-            if (changed) prefs[LAST_BUILD] = version
+            if (prefs[LAST_BUILD] != version) {
+                action()
+                prefs[LAST_BUILD] = version
+            }
         }
-        return changed
     }
 
     suspend fun learnServerNamesItself(baseUrl: String) {

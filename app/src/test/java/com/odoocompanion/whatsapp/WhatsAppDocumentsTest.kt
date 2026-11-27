@@ -6,6 +6,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Files
 
 class WhatsAppDocumentsTest {
     @get:Rule
@@ -41,6 +42,19 @@ class WhatsAppDocumentsTest {
         saved("$inbox/.nomedia")
 
         assertEquals(emptyList<String>(), names())
+    }
+
+    @Test
+    fun `scans and observers stay within received directories`() {
+        val other = saved("elsewhere/other.pdf")
+        val received = saved("$inbox/received.pdf").parentFile
+        Files.createSymbolicLink(File(received, "alias.pdf").toPath(), other.toPath())
+        Files.createSymbolicLink(File(received, "linked").toPath(), other.parentFile.toPath())
+        val legacy = File(folder.root, "WhatsApp")
+        Files.createSymbolicLink(legacy.toPath(), received.parentFile.parentFile.toPath())
+
+        assertEquals(listOf("received.pdf"), names())
+        assertEquals(listOf(received), WhatsAppDocuments(folder.root).watchedDirectories())
     }
 
     @Test

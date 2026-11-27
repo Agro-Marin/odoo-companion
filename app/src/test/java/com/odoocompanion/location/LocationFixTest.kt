@@ -3,6 +3,7 @@ package com.odoocompanion.location
 import android.app.Application
 import android.location.Location
 import com.odoocompanion.location.LocationForegroundService.Companion.fixOf
+import com.odoocompanion.net.LocationFix
 import com.odoocompanion.net.WireJson
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
@@ -45,6 +46,22 @@ class LocationFixTest {
         assertNull(fix.altitude)
         assertNull(fix.speed)
         assertNull(fix.heading)
+    }
+
+    @Test
+    fun `nonfinite optional readings leave a usable fix`() {
+        val fix = fixOf(
+            location {
+                altitude = Double.POSITIVE_INFINITY
+                accuracy = Float.NaN
+                speed = Float.POSITIVE_INFINITY
+            },
+            null,
+        )
+        assertNull(fix.altitude)
+        assertNull(fix.accuracy)
+        assertNull(fix.speed)
+        assertEquals(fix, WireJson.decodeFromString<LocationFix>(WireJson.encodeToString(fix)))
     }
 
     @Test

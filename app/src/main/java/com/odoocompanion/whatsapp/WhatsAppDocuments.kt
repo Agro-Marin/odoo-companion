@@ -1,8 +1,11 @@
 package com.odoocompanion.whatsapp
 
 import com.odoocompanion.data.FileStamp
+import com.odoocompanion.data.directoryWithoutLinks
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption
 
 internal enum class WhatsAppInbox(val app: String, val source: String) {
     PERSONAL(WhatsAppNotices.WHATSAPP, "WhatsApp"),
@@ -47,10 +50,12 @@ data class DocumentFile(
 
 class WhatsAppDocuments(private val root: File) {
     fun scan(): List<DocumentFile> = inboxes.flatMap { (relative, inbox) ->
-        val directory = File(root, relative)
-        if (!directory.isDirectory) return@flatMap emptyList()
+        val directory = root.directoryWithoutLinks(relative) ?: return@flatMap emptyList()
         directory.received().maxDepth(MAX_DEPTH)
-            .filter { it.isFile && !it.name.startsWith(".") }
+            .filter {
+                !it.name.startsWith(".") &&
+                    Files.isRegularFile(it.toPath(), LinkOption.NOFOLLOW_LINKS)
+            }
             .map {
                 DocumentFile(it.absolutePath, it.name, it.lastModified(), it.length(), inbox.app)
             }
@@ -58,14 +63,15 @@ class WhatsAppDocuments(private val root: File) {
     }
 
     fun watchedDirectories(): List<File> = inboxes.keys
-        .map { File(root, it) }
-        .filter { it.isDirectory }
-        .flatMap { it.received().maxDepth(MAX_DEPTH - 1).filter(File::isDirectory) }
+        .mapNotNull(root::directoryWithoutLinks)
+        .flatMap { it.received().maxDepth(MAX_DEPTH - 1) }
+        .filter { Files.isDirectory(it.toPath(), LinkOption.NOFOLLOW_LINKS) }
         .filterNot { it.name.lowercase() in NOT_RECEIVED_DIRECTORIES }
         .distinctBy { it.absolutePath }
 
-    private fun File.received(): FileTreeWalk =
-        walkTopDown().onEnter { it.name.lowercase() !in NOT_RECEIVED_DIRECTORIES }
+    private fun File.received(): FileTreeWalk = walkTopDown().onEnter {
+        !Files.isSymbolicLink(it.toPath()) && it.name.lowercase() !in NOT_RECEIVED_DIRECTORIES
+    }
 
     companion object {
         private val inboxes = WhatsAppInbox.entries.associateBy { it.modern } +

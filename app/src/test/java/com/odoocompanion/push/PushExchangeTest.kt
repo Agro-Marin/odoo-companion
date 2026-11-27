@@ -92,6 +92,13 @@ class PushExchangeTest {
     }
 
     @Test
+    fun `a redirect mentioning push unavailability leaves registration alone`() = runTest {
+        reply(302, """{"service":"remote_mobile","error":"push_unavailable"}""")
+
+        assertTrue(OdooClient().pushKey(settings()) is PushKeyLookup.Unavailable)
+    }
+
+    @Test
     fun `an odoo that sends no push says so`() = runTest {
         reply(503, """{"service":"remote_mobile","error":"push_unavailable","message":"x"}""")
 

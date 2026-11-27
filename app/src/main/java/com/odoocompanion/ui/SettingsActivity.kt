@@ -11,7 +11,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
@@ -100,7 +99,7 @@ class SettingsActivity : AppCompatActivity() {
         setUpGuide()
         setUpAppearance()
         binding.back.setOnClickListener { finish() }
-        binding.appVersion.text = versionText()
+        binding.appVersion.text = versionText(packageManager.getPackageInfo(packageName, 0))
 
         var populated = false
         lifecycleScope.launch {
@@ -111,28 +110,7 @@ class SettingsActivity : AppCompatActivity() {
                         populated = true
                     }
                 }
-                combine(
-                    app.config.settings,
-                    StatusText.queueCounts(app),
-                    refusal,
-                    merge(healthChecks, statusMinutes),
-                    combine(
-                        app.softphones.configured,
-                        StatusText.localNetworkWanted(app, healthChecks),
-                        ::Pair,
-                    ),
-                ) { settings, counts, refused, _, (softphone, localNetwork) ->
-                    StatusText.panel(
-                        this@SettingsActivity,
-                        settings,
-                        counts,
-                        refused,
-                        softphone,
-                        localNetwork,
-                    )
-                }
-                    .distinctUntilChanged()
-                    .collect(::showPanel)
+                StatusText.panels(this@SettingsActivity, healthChecks, refusal).collect(::showPanel)
             }
         }
         lifecycleScope.launch {
@@ -238,15 +216,6 @@ class SettingsActivity : AppCompatActivity() {
             val chosen = buttons.entries.first { it.value == id }.key
             if (chosen != Appearance.current(this)) Appearance.choose(this, chosen)
         }
-    }
-
-    private fun versionText(): String {
-        val info = packageManager.getPackageInfo(packageName, 0)
-        return getString(
-            R.string.app_version,
-            info.versionName.orEmpty(),
-            PackageInfoCompat.getLongVersionCode(info).toInt(),
-        )
     }
 
     @SuppressLint("SetTextI18n")

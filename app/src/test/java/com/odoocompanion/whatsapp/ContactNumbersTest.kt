@@ -11,8 +11,17 @@ class ContactNumbersTest {
             "5215512345678",
             ContactNumbers.choose(
                 whatsappIds = listOf("5215512345678@s.whatsapp.net"),
-                phones = listOf("+52 33 1111 2222"),
+                phones = { error("Redundant phone lookup") },
             ),
+        )
+    }
+
+    @Test
+    fun `valid short WhatsApp numbers are kept and participate in ambiguity checks`() {
+        val short = "12345678@s.whatsapp.net"
+        assertEquals("12345678", ContactNumbers.choose(listOf(short)) { error("lookup") })
+        assertNull(
+            ContactNumbers.choose(listOf(short, "525512345678@s.whatsapp.net")) { emptyList() },
         )
     }
 
@@ -20,15 +29,26 @@ class ContactNumbersTest {
     fun `without WhatsApp's row, the contact's one line`() {
         assertEquals(
             "525512345678",
-            ContactNumbers.choose(emptyList(), listOf("+52 55 1234 5678")),
+            ContactNumbers.choose(emptyList()) { listOf("+52 55 1234 5678") },
         )
+    }
+
+    @Test
+    fun `contacts' extensions and post-dial digits stay out of the subscriber number`() {
+        val line = "+52 (55) 1234-5678"
+        for (suffix in listOf(" ext. 42", " x42", ";ext=42", ",42", ";42")) {
+            val chosen = ContactNumbers.choose(emptyList()) { listOf(line + suffix) }
+            assertEquals(suffix, "525512345678", chosen)
+        }
+        assertNull(ContactNumbers.choose(emptyList()) { listOf("work 5512345678") })
+        assertNull(ContactNumbers.choose(emptyList()) { listOf("1234567890123456") })
     }
 
     @Test
     fun `one line written two ways is one number, kept in its fullest form`() {
         assertEquals(
             "5215512345678",
-            ContactNumbers.choose(emptyList(), listOf("55 1234 5678", "+52 1 55 1234 5678")),
+            ContactNumbers.choose(emptyList()) { listOf("55 1234 5678", "+52 1 55 1234 5678") },
         )
     }
 
@@ -37,22 +57,22 @@ class ContactNumbersTest {
         assertNull(
             ContactNumbers.choose(
                 emptyList(),
-                listOf("+1 551 234 5678", "+52 55 1234 5678", "5512345678")
+                { listOf("+1 551 234 5678", "+52 55 1234 5678", "5512345678") },
             )
         )
         assertEquals(
             "5215512345678",
-            ContactNumbers.choose(emptyList(), listOf("+52 1 55 1234 5678", "+52 55 1234 5678")),
+            ContactNumbers.choose(emptyList()) { listOf("+52 1 55 1234 5678", "+52 55 1234 5678") },
         )
     }
 
     @Test
     fun `two lines under one name are not guessed between`() {
-        assertNull(ContactNumbers.choose(emptyList(), listOf("55 1234 5678", "33 1111 2222")))
+        assertNull(ContactNumbers.choose(emptyList()) { listOf("55 1234 5678", "33 1111 2222") })
         assertNull(
             ContactNumbers.choose(
                 listOf("5215512345678@s.whatsapp.net", "5213311112222@s.whatsapp.net"),
-                emptyList(),
+                { emptyList() },
             ),
         )
     }
@@ -63,14 +83,14 @@ class ContactNumbersTest {
             "525512345678",
             ContactNumbers.choose(
                 listOf("5215512345678@s.whatsapp.net", "5213311112222@s.whatsapp.net"),
-                listOf("+52 55 1234 5678"),
+                { listOf("+52 55 1234 5678") },
             ),
         )
     }
 
     @Test
     fun `a short extension or a lid is no number`() {
-        assertNull(ContactNumbers.choose(listOf("123456789012345@lid"), listOf("1234")))
+        assertNull(ContactNumbers.choose(listOf("123456789012345@lid")) { listOf("1234") })
     }
 
     private fun notice(sender: String, phone: String? = null) = DocumentNotice(

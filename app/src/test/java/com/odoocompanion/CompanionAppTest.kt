@@ -8,16 +8,21 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.work.NetworkType
 import androidx.work.WorkManager
 import com.odoocompanion.config.enrol
+import com.odoocompanion.data.DeadReason
+import com.odoocompanion.data.OutboxEntry
+import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.push.PushBinding
 import com.odoocompanion.push.PushRegistration
 import com.odoocompanion.softphone.SoftphoneSettings
 import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -75,6 +80,42 @@ class CompanionAppTest {
         assertEquals(1, fresh.size)
         assertFalse("the old request was replaced", fresh.single() in waiting)
         assertFalse(liveIds(SyncScheduler.UPLOAD_PERIODIC).single() in periodic)
+    }
+
+    @Test
+    fun `a failed queue recovery allows scheduling and retries on the next reconcile`() = runTest {
+        app.startup.join()
+        val dao = app.database.outbox()
+        dao.insert(
+            OutboxEntry(
+                kind = OutboxKind.LOCATION,
+                payload = "{}",
+                createdAt = 1,
+                deadAt = 2,
+                deadReason = DeadReason.UNDECODABLE,
+            ),
+        )
+        app.config.onBuildChanged(-1L) {}
+        app.config.setWifiOnlyUploads(true)
+        withContext(Dispatchers.IO) {
+            app.database.openHelper.writableDatabase.execSQL(
+                "CREATE TRIGGER refuse_recovery BEFORE UPDATE OF deadAt ON outbox " +
+                    "BEGIN SELECT RAISE(ABORT, 'temporary storage failure'); END",
+            )
+        }
+        try {
+            app.applyConfiguration()
+            assertEquals(NetworkType.UNMETERED, periodicUploadNetwork())
+            assertEquals(1, dao.countDead())
+        } finally {
+            withContext(Dispatchers.IO) {
+                app.database.openHelper.writableDatabase.execSQL("DROP TRIGGER refuse_recovery")
+            }
+        }
+
+        app.applyConfiguration()
+        assertEquals(0, dao.countDead())
+        assertEquals(1, dao.countOf(OutboxKind.LOCATION))
     }
 
     @Test

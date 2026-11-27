@@ -358,13 +358,23 @@ class DeviceConfigTest {
     fun `one build change is consumed once, however many callers race for it`() = runTest {
         val config = config()
 
-        val consumed = (1..8).map { async { config.consumeBuildChange(42L) } }.awaitAll()
+        var recoveries = 0
+        (1..8).map { async { config.onBuildChanged(42L) { recoveries++ } } }.awaitAll()
 
-        assertEquals(
-            "startup and a restrictions broadcast can both call this at once",
-            1,
-            consumed.count { it },
-        )
+        assertEquals(1, recoveries)
+    }
+
+    @Test
+    fun `a failed build recovery is retried on the same build`() = runTest {
+        val config = config()
+        val failure = runCatching {
+            config.onBuildChanged(42L) { throw IOException("storage unavailable") }
+        }
+        assertTrue(failure.exceptionOrNull() is IOException)
+
+        var recovered = false
+        config.onBuildChanged(42L) { recovered = true }
+        assertTrue(recovered)
     }
 
     @Test

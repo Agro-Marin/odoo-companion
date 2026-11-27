@@ -14,8 +14,6 @@ sealed interface StatusLine {
 
     data class Say(@StringRes override val text: Int) : StatusLine
 
-    data class Count(@StringRes override val text: Int, val value: Int) : StatusLine
-
     data class Quantity(@PluralsRes override val text: Int, val value: Int) : StatusLine
 
     data class Since(@StringRes override val text: Int, val at: Long) : StatusLine

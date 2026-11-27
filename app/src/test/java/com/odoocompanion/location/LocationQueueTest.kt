@@ -84,6 +84,13 @@ class LocationQueueTest {
     }
 
     @Test
+    fun `invalid coordinates leave the rest of a provider batch usable`() = runTest {
+        val fixes = listOf(fix().copy(latitude = Double.NaN), fix(), fix().copy(longitude = 181.0))
+        assertTrue(queue().record(fixes, windowSeconds = 0))
+        assertEquals(1, dao.countOf(OutboxKind.LOCATION))
+    }
+
+    @Test
     fun `a failed insert does not suppress the same position on retry`() = runTest {
         var first = true
         val flaky = object : OutboxDao by dao {

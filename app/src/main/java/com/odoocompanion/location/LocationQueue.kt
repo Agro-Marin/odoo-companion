@@ -39,12 +39,15 @@ class LocationQueue(
         val sameOwner = enrollment == owner
         var previous = lastQueued.takeIf { sameOwner }
         val moving = fixes.filter { fix ->
+            if (fix.latitude !in -90.0..90.0 || fix.longitude !in -180.0..180.0) {
+                return@filter false
+            }
             val keep = worthKeeping(previous, fix, minMoveMetres)
             if (keep) previous = fix
             keep
         }
         if (moving.isEmpty()) {
-            debug(TAG) { "dropped ${fixes.size} fix(es) under $minMoveMetres m of the last kept" }
+            debug(TAG) { "no usable movement in ${fixes.size} fix(es) at $minMoveMetres m" }
             return false
         }
         val queuedAt = now()

@@ -26,6 +26,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
@@ -186,6 +187,33 @@ class StatusScreenTest {
         )
         assertTrue(shown, text(R.string.status_undeliverable_hint) in shown)
     }
+
+    @Test
+    fun `the first unenrolled panel already excludes the previous enrolment's calls`() =
+        runBlocking {
+            app.config.enrol("https://192.0.2.1", "phone-01", "token")
+            app.database.outbox().insert(
+                OutboxEntry(
+                    kind = OutboxKind.CALL_LOG,
+                    payload = "{}",
+                    createdAt = 1,
+                    enrollment = app.config.current().enrollment,
+                ),
+            )
+            val ready = CompletableDeferred<Unit>()
+            val changed = async {
+                withTimeout(5_000) {
+                    StatusText.panels(app, flowOf(Unit)).onEach {
+                        if (it.enrolled && it.queues.calls == 1) ready.complete(Unit)
+                    }.first { !it.enrolled }
+                }
+            }
+            withTimeout(5_000) { ready.await() }
+            app.config.clearEnrollment()
+            val panel = changed.await()
+            assertEquals(0, panel.queues.calls)
+            assertEquals(1, panel.queues.held)
+        }
 
     @Test
     fun `the panel can render before the first local network check finishes`() = runBlocking {

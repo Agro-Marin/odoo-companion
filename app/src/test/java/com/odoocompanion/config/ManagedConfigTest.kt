@@ -14,6 +14,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import org.xmlpull.v1.XmlPullParser
 
 @RunWith(RobolectricTestRunner::class)
@@ -90,6 +91,28 @@ class ManagedConfigTest {
     }
 
     @Test
+    fun `large integral switch values keep their nonzero meaning`() {
+        val bundle = Bundle().apply { putLong("call_log_enabled", 1L shl 32) }
+        assertEquals(true, ManagedConfig.fromBundle(bundle).callLogEnabled)
+    }
+
+    @Test
+    fun `unusable numeric values leave managed switches and timing alone`() {
+        for (bad in listOf(Double.NaN, Double.POSITIVE_INFINITY, -0.5, 2.5)) {
+            val bundle = Bundle().apply {
+                putDouble("recordings_enabled", bad)
+                putDouble("upload_window_seconds", bad)
+            }
+            val values = ManagedConfig.fromBundle(bundle)
+            assertNull(values.recordingsEnabled)
+            assertNull(values.uploadWindowSeconds)
+        }
+
+        val whole = Bundle().apply { putDouble("upload_window_seconds", 300.0) }
+        assertEquals(300L, ManagedConfig.fromBundle(whole).uploadWindowSeconds)
+    }
+
+    @Test
     fun `an unparseable switch leaves the stored value alone`() {
         val bundle = Bundle().apply {
             putString("call_log_enabled", "")
@@ -156,6 +179,23 @@ class ManagedConfigTest {
 
         assertNull(values.baseUrl)
         assertEquals("phone-04", values.identifier)
+    }
+
+    @Test
+    fun `warnings identify the managed setting without logging its supplied value`() {
+        val bundle = Bundle().apply {
+            putString(ManagedKey.CALL_LOG_ENABLED, "private-test-value")
+            putLong(ManagedKey.LOCATION_INTERVAL_SECONDS, 987654321L)
+            putString(ManagedKey.UPLOAD_WINDOW_SECONDS, "private-test-value")
+        }
+
+        ManagedConfig.fromBundle(bundle)
+
+        val messages = ShadowLog.getLogsForTag("ManagedConfig").map { it.msg }
+        for (key in bundle.keySet()) {
+            assertTrue(key, messages.any { key in it })
+        }
+        assertTrue(messages.none { "private-test-value" in it || "987654321" in it })
     }
 
     @Test

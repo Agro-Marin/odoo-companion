@@ -1,6 +1,7 @@
 package com.odoocompanion.ui
 
 import android.content.Context
+import android.content.pm.PackageInfo
 import android.content.res.ColorStateList
 import android.text.format.DateUtils
 import androidx.annotation.StringRes
@@ -22,13 +23,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
+
+internal fun Context.versionText(info: PackageInfo): String =
+    getString(R.string.app_version, info.versionName.orEmpty(), info.longVersionCode)
 
 internal val statusMinutes: Flow<Unit> = flow {
     while (true) {
@@ -50,7 +57,33 @@ data class PanelText(
 )
 
 object StatusText {
-    fun panel(
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun panels(
+        context: Context,
+        checks: Flow<*>,
+        refusal: Flow<Int?> = flowOf(null),
+    ): Flow<PanelText> {
+        val app = CompanionApp.from(context)
+        val counts = app.config.settings.map { it.enrollment }.distinctUntilChanged()
+            .flatMapLatest { owner ->
+                app.database.outbox().counts(owner).map { owner to it }
+            }
+        return combine(
+            app.config.settings,
+            counts,
+            refusal,
+            merge(checks, statusMinutes),
+            combine(app.softphones.configured, localNetworkWanted(app, checks), ::Pair),
+        ) { settings, (owner, counts), refused, _, (softphone, localNetwork) ->
+            if (settings.enrollment == owner) {
+                panel(context, settings, counts, refused, softphone, localNetwork)
+            } else {
+                null
+            }
+        }.filterNotNull().distinctUntilChanged()
+    }
+
+    private fun panel(
         context: Context,
         settings: Settings,
         counts: OutboxCounts,
@@ -80,12 +113,6 @@ object StatusText {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun queueCounts(app: CompanionApp): Flow<OutboxCounts> = app.config.settings
-        .map { it.enrollment }
-        .distinctUntilChanged()
-        .flatMapLatest { app.database.outbox().counts(it) }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
     fun localNetworkWanted(app: CompanionApp, checks: Flow<*>): Flow<Boolean> = combine(
         app.config.settings.map { if (it.isEnrolled) it.baseUrl else null }.distinctUntilChanged(),
         app.softphones.domain,
@@ -106,8 +133,6 @@ object StatusText {
 
     private fun format(context: Context, line: StatusLine): String = when (line) {
         is StatusLine.Say -> context.getString(line.text)
-
-        is StatusLine.Count -> context.getString(line.text, line.value)
 
         is StatusLine.Quantity ->
             context.resources.getQuantityString(line.text, line.value, line.value)

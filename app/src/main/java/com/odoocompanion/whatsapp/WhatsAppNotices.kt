@@ -90,11 +90,8 @@ object WhatsAppNotices {
     }
 
     fun phoneOf(key: String?, uri: String?): String? {
-        uri?.takeIf { it.startsWith("tel:") }?.let { tel ->
-            return tel.filter(Char::isDigit).takeIf { it.length >= MIN_DIGITS }
-        }
-        return key?.let { JID_NUMBER.matchEntire(it)?.groupValues?.get(1) }
+        val phone = uri?.takeIf { it.startsWith("tel:", ignoreCase = true) }
+            ?.substringAfter(':')?.let(::subscriberNumber)
+        return phone ?: key?.let { JID_NUMBER.matchEntire(it)?.groupValues?.get(1) }
     }
-
-    private const val MIN_DIGITS = 8
 }

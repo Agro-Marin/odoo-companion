@@ -1,6 +1,7 @@
 package com.odoocompanion.recording
 
 import com.odoocompanion.data.FileStamp
+import com.odoocompanion.data.directoryWithoutLinks
 import com.odoocompanion.system.debug
 import java.io.File
 import java.io.IOException
@@ -15,7 +16,7 @@ class RecordingScanner(
     fun scan(): List<ScannedRecording> {
         val settledBefore = now() - SETTLE_MILLIS
         return CANDIDATE_DIRECTORIES.asSequence()
-            .mapNotNull(::candidateDirectory)
+            .mapNotNull(root::directoryWithoutLinks)
             .flatMap { directory ->
                 directory.walkTopDown().onEnter {
                     !Files.isSymbolicLink(it.toPath()) &&
@@ -40,15 +41,6 @@ class RecordingScanner(
             .filter { it.stamp.modifiedAt <= settledBefore }
             .sortedBy { it.stamp.modifiedAt }
             .toList()
-    }
-
-    private fun candidateDirectory(relative: String): File? {
-        var directory = root
-        for (name in relative.split('/')) {
-            directory = File(directory, name)
-            if (Files.isSymbolicLink(directory.toPath())) return null
-        }
-        return directory.takeIf { it.isDirectory }
     }
 
     companion object {

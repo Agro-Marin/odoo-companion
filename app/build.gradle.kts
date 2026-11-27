@@ -106,7 +106,8 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
-                it.maxHeapSize = "256m"
+                // Permission and widget tests load framework resources from multiple Android releases.
+                it.maxHeapSize = "512m"
                 it.forkEvery = 24
                 it.jvmArgs("--add-exports", "java.base/jdk.internal.access=ALL-UNNAMED")
             }

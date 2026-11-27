@@ -190,13 +190,13 @@ class DeviceHealthTest {
     }
 
     @Test
+    @Config(sdk = [29])
     fun `a collector that is off costs no prompt`() {
         val bare = DeviceHealth.wantedPermissions(
             callLogWanted = false,
             recordingsWanted = false,
             softphoneWanted = false,
             localNetworkWanted = false,
-            sdk = 29,
         )
 
         assertFalse(Manifest.permission.READ_CALL_LOG in bare)
@@ -205,52 +205,33 @@ class DeviceHealthTest {
     }
 
     @Test
-    fun `recordings ask for the legacy storage pair only where it is the access`() {
-        val android10 = DeviceHealth.wantedPermissions(
-            false,
-            true,
-            false,
-            localNetworkWanted = false,
-            sdk = 29
-        )
-        val android12 = DeviceHealth.wantedPermissions(
-            false,
-            true,
-            false,
-            localNetworkWanted = false,
-            sdk = 31
-        )
-
-        assertTrue(Manifest.permission.READ_EXTERNAL_STORAGE in android10)
-        assertTrue(Manifest.permission.WRITE_EXTERNAL_STORAGE in android10)
-        assertFalse(
-            "from 11 the folder takes all-files access; a runtime prompt grants nothing",
-            Manifest.permission.READ_EXTERNAL_STORAGE in android12,
-        )
+    @Config(sdk = [29])
+    fun `recordings request both legacy storage permissions on Android 10`() {
+        val wanted = DeviceHealth.wantedPermissions(false, true, false, false)
+        assertTrue(Manifest.permission.READ_EXTERNAL_STORAGE in wanted)
+        assertTrue(Manifest.permission.WRITE_EXTERNAL_STORAGE in wanted)
     }
 
     @Test
-    fun `notifications are asked for where they are a runtime permission`() {
-        assertFalse(
-            Manifest.permission.POST_NOTIFICATIONS in
-                DeviceHealth.wantedPermissions(
-                    true,
-                    false,
-                    false,
-                    localNetworkWanted = false,
-                    sdk = 32
-                ),
-        )
-        assertTrue(
-            Manifest.permission.POST_NOTIFICATIONS in
-                DeviceHealth.wantedPermissions(
-                    true,
-                    false,
-                    false,
-                    localNetworkWanted = false,
-                    sdk = 33
-                ),
-        )
+    @Config(sdk = [30])
+    fun `recordings use all-files access from Android 11`() {
+        val wanted = DeviceHealth.wantedPermissions(false, true, false, false)
+        assertFalse(Manifest.permission.READ_EXTERNAL_STORAGE in wanted)
+        assertFalse(Manifest.permission.WRITE_EXTERNAL_STORAGE in wanted)
+    }
+
+    @Test
+    @Config(sdk = [32])
+    fun `Android 12L needs no runtime notification prompt`() {
+        val wanted = DeviceHealth.wantedPermissions(true, false, false, false)
+        assertFalse(Manifest.permission.POST_NOTIFICATIONS in wanted)
+    }
+
+    @Test
+    @Config(sdk = [33])
+    fun `Android 13 requests the notification permission`() {
+        val wanted = DeviceHealth.wantedPermissions(true, false, false, false)
+        assertTrue(Manifest.permission.POST_NOTIFICATIONS in wanted)
     }
 
     @Test
@@ -296,7 +277,6 @@ class DeviceHealthTest {
                     false,
                     softphoneWanted = true,
                     localNetworkWanted = false,
-                    sdk = 33
                 ),
         )
         assertFalse(
@@ -306,24 +286,27 @@ class DeviceHealthTest {
                     false,
                     softphoneWanted = false,
                     localNetworkWanted = false,
-                    sdk = 33
                 ),
         )
     }
 
     @Test
+    @Config(sdk = [37])
     fun `local network access is asked for from Android 17, and only for a local server`() {
         val local = Manifest.permission.ACCESS_LOCAL_NETWORK
 
-        assertTrue(local in DeviceHealth.wantedPermissions(false, false, false, true, sdk = 37))
+        assertTrue(local in DeviceHealth.wantedPermissions(false, false, false, true))
         assertFalse(
             "a cloud server costs no nearby-devices prompt",
-            local in DeviceHealth.wantedPermissions(false, false, false, false, sdk = 37),
+            local in DeviceHealth.wantedPermissions(false, false, false, false),
         )
-        assertFalse(
-            "below 17 there is no such permission",
-            local in DeviceHealth.wantedPermissions(false, false, false, true, sdk = 36),
-        )
+    }
+
+    @Test
+    @Config(sdk = [36])
+    fun `Android 16 needs no local network permission`() {
+        val wanted = DeviceHealth.wantedPermissions(false, false, false, true)
+        assertFalse(Manifest.permission.ACCESS_LOCAL_NETWORK in wanted)
     }
 
     @Test
