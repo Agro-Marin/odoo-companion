@@ -43,6 +43,19 @@ without WorkManager, a `LifecycleService` or a fused location provider — a rul
 worth keeping the next time something is added to a callback because that is
 where the data arrives.
 
+The outbox spans two packages under `app/src/main/java/com/odoocompanion/`.
+
+| When changing | Start in |
+| --- | --- |
+| Stored rows, file receipts, or queue counts | `data/Outbox.kt` |
+| Queue queries or atomic row updates | `data/OutboxDao.kt` |
+| Room schema version or migrations | `data/CompanionDatabase.kt` |
+| Delivery order, retention, or coordination with re-enrollment | `sync/OutboxDrainer.kt` |
+| Credential checks at send time, payload limits, or retry accounting | `sync/UploadSession.kt` |
+| Location or call-log batch encoding and acknowledgments | `sync/BatchUpload.kt` |
+| Recording, document, or scan uploads and source verification | `sync/FileUpload.kt` |
+| Per-pass counters and the result returned to the worker | `sync/DrainReport.kt` |
+
 ## Build / test / lint
 
 Requires JDK 25, the version pinned in `tools/versions.env`, and the Android

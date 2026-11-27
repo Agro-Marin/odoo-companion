@@ -22,7 +22,7 @@ internal class FileBody private constructor(
     constructor(
         metadata: JsonObject,
         file: File,
-        contentType: MediaType,
+        contentType: MediaType = JSON_MEDIA_TYPE,
         fileKey: String = AUDIO_KEY,
         stamp: FileStamp? = null,
     ) : this(

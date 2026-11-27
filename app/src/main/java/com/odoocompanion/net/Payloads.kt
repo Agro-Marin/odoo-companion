@@ -3,6 +3,7 @@ package com.odoocompanion.net
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
 
 @Serializable
 data class LocationFix(
@@ -52,6 +53,8 @@ data class LocationUpload(val points: List<LocationFix>)
 
 @Serializable
 data class CallLogUpload(val calls: List<CallRecord>)
+
+internal val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
 val WireJson: Json = Json {
     explicitNulls = false

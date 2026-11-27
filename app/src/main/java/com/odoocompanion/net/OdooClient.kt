@@ -3,7 +3,6 @@ package com.odoocompanion.net
 import android.util.Log
 import com.odoocompanion.config.Settings
 import com.odoocompanion.config.canonicalBaseUrl
-import com.odoocompanion.data.FileStamp
 import com.odoocompanion.push.PushKeyLookup
 import com.odoocompanion.push.PushRegistration
 import com.odoocompanion.softphone.SoftphoneLookup
@@ -19,7 +18,6 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -79,14 +77,14 @@ class OdooClient(
         private var requiresName = settings.serverNamesItself || unpersistedServiceUrl == baseUrl
 
         suspend fun post(suffix: String, body: String): UploadOutcome =
-            post(suffix, body.toRequestBody(JSON))
+            post(suffix, body.toRequestBody(JSON_MEDIA_TYPE))
 
         suspend fun post(
             suffix: String,
             file: File,
             metadata: JsonObject,
             fileKey: String = FileBody.AUDIO_KEY,
-        ): UploadOutcome = post(suffix, FileBody(metadata, file, JSON, fileKey))
+        ): UploadOutcome = post(suffix, FileBody(metadata, file, fileKey = fileKey))
 
         internal suspend fun post(suffix: String, body: RequestBody): UploadOutcome = exchange(
             settings,
@@ -121,13 +119,6 @@ class OdooClient(
             classify(code, text, reply, requiresName)
         }
     }
-
-    internal fun fileBody(
-        file: File,
-        metadata: JsonObject,
-        fileKey: String,
-        source: FileStamp,
-    ): FileBody = FileBody(metadata, file, JSON, fileKey, source)
 
     suspend fun softphone(settings: Settings): SoftphoneLookup = exchange(
         settings,
@@ -164,7 +155,7 @@ class OdooClient(
                 }
             }
         }
-        return push(settings, body.toString().toRequestBody(JSON))
+        return push(settings, body.toString().toRequestBody(JSON_MEDIA_TYPE))
     }
 
     private suspend fun push(settings: Settings, body: RequestBody?): PushKeyLookup = exchange(
@@ -339,7 +330,6 @@ class OdooClient(
         val AUTH_REFUSED = setOf(401, 403)
 
         const val DAMAGED_BODY = "invalid_json"
-        val JSON = "application/json; charset=utf-8".toMediaType()
 
         val PERMANENTLY_REFUSED = setOf(400, HTTP_UNPROCESSABLE)
 
