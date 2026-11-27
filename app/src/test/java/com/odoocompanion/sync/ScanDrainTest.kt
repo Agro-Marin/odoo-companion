@@ -134,7 +134,6 @@ class ScanDrainTest {
         assertTrue(report.delivered)
         assertEquals(0, dao.countOf(OutboxKind.SCAN))
         assertFalse("the app's copy is the outbox's to delete", pdf.exists())
-        // the person scanned it on this phone: no notice tells them it went
         assertTrue(report.deliveredDocuments.isEmpty())
     }
 
