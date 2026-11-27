@@ -141,6 +141,14 @@ class OdooClient(
         }
     }
 
+    suspend fun reportHealth(settings: Settings, health: HandsetHealth): Boolean = exchange(
+        settings,
+        HEALTH,
+        WireJson.encodeToString(HandsetHealth.serializer(), health)
+            .toRequestBody(JSON_MEDIA_TYPE),
+        failed = { _, _ -> false },
+    ) { code, _, reply -> code in 200..299 && reply.namesTheService() && reply.reportsSuccess() }
+
     suspend fun pushKey(settings: Settings): PushKeyLookup = push(settings, null)
 
     suspend fun registerPush(settings: Settings, registration: PushRegistration?): PushKeyLookup {
@@ -326,6 +334,7 @@ class OdooClient(
         const val SOFTPHONE = "softphone"
         const val NO_EXTENSION = "no_extension"
         const val PUSH = "push"
+        const val HEALTH = "health"
         const val PUSH_UNAVAILABLE = "push_unavailable"
         val AUTH_REFUSED = setOf(401, 403)
 

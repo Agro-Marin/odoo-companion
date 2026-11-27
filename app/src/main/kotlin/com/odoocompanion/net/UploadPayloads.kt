@@ -51,6 +51,18 @@ data class DocumentMetadata(
 )
 
 @Serializable
+data class HandsetHealth(
+    @SerialName("app_version") val appVersion: String,
+    val android: String,
+    val model: String,
+    val blockers: List<String>,
+    val queued: Int,
+    val undeliverable: Int,
+    @SerialName("last_error") val lastError: String? = null,
+    val softphone: String? = null,
+)
+
+@Serializable
 data class LocationUpload(val points: List<LocationFix>)
 
 @Serializable

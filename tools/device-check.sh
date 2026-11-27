@@ -240,6 +240,8 @@ for api in ${apis//,/ }; do
         --bind type:i:1 --bind "date:l:$(date +%s)000" --bind duration:i:30 --bind new:i:1
     within 180 logged 'accepted={calllog=1}'
     result "a call in the handset's log reaches Odoo" $?
+    within 60 grep -q "POST /remote/mobile/$identifier/health HTTP/1.1\" 200" "$work/odoo.log"
+    result "the handset reports its health to Odoo" $?
 
     stop_emulator
 done

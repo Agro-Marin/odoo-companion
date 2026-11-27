@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import com.odoocompanion.CompanionApp
 import com.odoocompanion.data.OutboxKind
 import com.odoocompanion.data.QueuedFile
+import com.odoocompanion.system.HealthReporter
 import com.odoocompanion.whatsapp.UploadedNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,6 +45,9 @@ class UploadWorker(context: Context, params: WorkerParameters) :
         )
         UploadedNotice.post(applicationContext, report.deliveredDocuments)
         if (report.delivered) app.retryLookupsAfterDelivery(System.currentTimeMillis())
+        if (report.outcome == OutboxDrainer.Outcome.DONE || report.delivered) {
+            HealthReporter.reportIfDue(app, settings, report.lastError)
+        }
 
         if (report.deadLettered > 0 ||
             report.skipped.isNotEmpty() ||

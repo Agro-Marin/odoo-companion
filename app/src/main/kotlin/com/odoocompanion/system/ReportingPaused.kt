@@ -15,7 +15,8 @@ object ReportingPaused {
     const val ACTION_RESUME = "com.odoocompanion.RESUME_REPORTING"
 
     @Volatile
-    private var pending = false
+    var pending = false
+        private set
 
     fun notice(context: Context) {
         pending = true

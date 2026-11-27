@@ -32,6 +32,16 @@ settings `GET`, and the push registration both:
 | Documents (with `device_mobile_document`) | `/remote/mobile/<identifier>/document` | one object with `file_b64` and document metadata |
 | Softphone settings | `/remote/mobile/<identifier>/softphone` | — |
 | Wake-ups | `/remote/mobile/<identifier>/push` | `GET`: none; `POST`: `{"endpoint", "keys": {"p256dh", "auth"}}`, or `{"endpoint": null}` to leave |
+| Health | `/remote/mobile/<identifier>/health` | `{"app_version", "android", "model", "blockers": [ … ], "queued", "undeliverable", "last_error", "softphone"}` |
+
+The health report is the phone's own state, so an operator can see in Odoo why a phone
+went quiet: `HealthReporter` sends it after a drain that reached Odoo, when anything but
+the queue length has changed since the last one it offered, and otherwise every six
+hours; a report Odoo did not take is offered again an hour later (`HealthCadence`), so an
+Odoo without the route costs one request an hour. `blockers` are the status screen's blockers as codes
+(`battery_optimized`, `location_missing`, …) plus `reporting_paused` while Android has
+refused to start the app in the background; `device_mobile` turns a blocker or an
+undeliverable record into an operational issue.
 
 The batch routes answer with `accepted`, `duplicates` and `skipped`: rows newly
 stored, rows this device had already sent, and rows the endpoint read and could

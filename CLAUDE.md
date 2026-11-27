@@ -780,6 +780,15 @@ machine at `http://10.0.2.2:<port>`.
 - **The lab can enrol a debug build without its screen.** `LabEnrollReceiver` exists only in
   the debug source set and is protected by `android.permission.DUMP`, which adb holds and
   no app does; `check-release-wire.sh` fails a release APK that declares or contains it.
+- **The phone tells Odoo why it is quiet.** A phone that stopped reporting looked the
+  same in Odoo whatever the cause; only someone holding it could read the status screen.
+  `HealthReporter` posts `HandsetHealth` to `/health` after a drain that reached Odoo,
+  and `HealthCadence` keeps it to changes plus a six-hour refresh, leaving the queue
+  length out of the comparison -- it moves on every drain and would make the report a
+  request per upload. Every attempt is recorded with whether Odoo took it: a refusal is
+  offered again an hour later, so an Odoo without the route costs one request an hour,
+  not one per drain. Codes, counts and versions only: nothing in it
+  names a person.
 - **A recreated Settings screen keeps what was typed.** The first emission of the
   store repaints every field; on a rotation that emission races Android restoring the
   fields, and arriving second it would wipe the typing (not reproduced under

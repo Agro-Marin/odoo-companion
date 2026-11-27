@@ -7,6 +7,8 @@ import com.odoocompanion.CompanionApp
 import com.odoocompanion.config.enrol
 import com.odoocompanion.data.OutboxEntry
 import com.odoocompanion.data.OutboxKind
+import com.odoocompanion.net.HandsetHealth
+import com.odoocompanion.net.WireJson
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -66,6 +68,34 @@ class UploadWorkerTest {
 
     private suspend fun runWorker(): ListenableWorker.Result =
         TestListenableWorkerBuilder<UploadWorker>(app).build().doWork()
+
+    @Test
+    fun `a drain that reaches odoo reports the phone's health, once until it changes`() = runTest {
+        val reports = mutableListOf<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.target.endsWith("/health")) {
+                    reports += request.body!!.utf8()
+                    return MockResponse(body = """{"service":"remote_mobile","status":"success"}""")
+                }
+                return MockResponse(
+                    body = """{"service":"remote_mobile","status":"success","accepted":1}""",
+                )
+            }
+        }
+        enroll()
+        queueCall()
+
+        assertEquals(ListenableWorker.Result.success(), runWorker())
+        assertEquals(1, reports.size)
+        val sent = WireJson.decodeFromString(HandsetHealth.serializer(), reports.single())
+        assertTrue("no location grant is a blocker", "location_missing" in sent.blockers)
+        assertEquals(0, sent.queued)
+
+        queueCall()
+        runWorker()
+        assertEquals("nothing new on the phone, nothing sent", 1, reports.size)
+    }
 
     @Test
     fun `an unenrolled device succeeds without contacting anything`() = runTest {
