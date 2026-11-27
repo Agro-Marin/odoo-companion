@@ -4,5 +4,11 @@
 
     <application
         android:usesCleartextTraffic="true"
-        tools:ignore="UnusedAttribute" />
+        tools:ignore="UnusedAttribute">
+
+        <receiver
+            android:name=".system.LabEnrollReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
 </manifest>

@@ -34,6 +34,7 @@ import com.odoocompanion.softphone.SoftphoneRetry
 import com.odoocompanion.softphone.SoftphoneService
 import com.odoocompanion.softphone.SoftphoneStore
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.system.ReportingPaused
 import com.odoocompanion.system.StaleLookup
 import com.odoocompanion.ui.Appearance
 import com.odoocompanion.ui.ScanWidget
@@ -292,6 +293,7 @@ open class CompanionApp : Application() {
                     SoftphoneRetry.schedule(this)
                 } else if (!SoftphoneService.start(this)) {
                     SoftphoneRetry.schedule(this)
+                    ReportingPaused.notice(this)
                 }
             }
 

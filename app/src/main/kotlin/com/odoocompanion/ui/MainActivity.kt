@@ -23,6 +23,7 @@ import com.odoocompanion.R
 import com.odoocompanion.databinding.ActivityMainBinding
 import com.odoocompanion.databinding.DialogAdminPasswordBinding
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.system.ReportingPaused
 import com.odoocompanion.update.InstallStart
 import com.odoocompanion.update.UpdateCheck
 import com.odoocompanion.update.UpdateManifest
@@ -134,6 +135,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (ReportingPaused.consume(this, intent)) CompanionApp.from(this).reconcile()
         healthChecks.value++
         UpdateNotices.dismiss(this)
         offer(updater.known())

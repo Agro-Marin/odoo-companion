@@ -29,6 +29,7 @@ import com.odoocompanion.config.DEFAULT_MIN_MOVE_METRES
 import com.odoocompanion.config.DEFAULT_UPLOAD_WINDOW_SECONDS
 import com.odoocompanion.net.LocationFix
 import com.odoocompanion.sync.SyncScheduler
+import com.odoocompanion.system.ReportingPaused
 import com.odoocompanion.system.debug
 import com.odoocompanion.ui.MainActivity
 import com.odoocompanion.ui.ScanShortcut
@@ -212,6 +213,7 @@ class LocationForegroundService : LifecycleService() {
                 )
             } catch (e: IllegalStateException) {
                 Log.w(TAG, "Foreground start refused; will retry on the next trigger", e)
+                ReportingPaused.notice(context)
             }
         }
 

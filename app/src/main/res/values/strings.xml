@@ -10,6 +10,9 @@
     <string name="action_sync_now">Sync now</string>
     <string name="action_grant">Grant permissions</string>
     <string name="notification_channel_location">Location reporting</string>
+    <string name="notification_channel_paused">Reporting stopped</string>
+    <string name="reporting_paused_title">Companion is not reporting</string>
+    <string name="reporting_paused_text">Android did not let it start in the background. Tap to start it.</string>
     <string name="notification_location_title">Location reporting active</string>
     <string name="notification_location_text">Sending position to Odoo</string>
     <string name="status_managed">Configured by your organization</string>

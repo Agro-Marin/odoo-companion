@@ -495,6 +495,35 @@ app in the background, was answered, ran with Telecom's foreground service (phon
 and microphone types) and ended on the stub's BYE with cause `REMOTE`; with local network
 access revoked the registration failed after 15 s and nothing reached the stub.
 
+### Checking a build on an emulator
+
+The JVM tests cannot see what a locked phone shows, where the navigation bar sits or what
+Android refuses to an app in the background, and those are where the defects were.
+`tools/device-check.sh` builds the debug APK and, for each Android level asked for, boots an
+emulator against a throwaway Odoo and `tools/sip-stub.py`, then checks:
+
+- the lab CA is in the debug build's trust file;
+- the handset enrols (through the debug build's `LabEnrollReceiver`, which only adb can
+  call and which `check-release-wire.sh` refuses in a release);
+- enrolled from the background without a battery-optimisation exemption, the refused
+  start is announced; exempted and granted background location, as provisioning does, it
+  registers its extension;
+- a locked phone with no call does not show the dialer;
+- an incoming call rings over the lock screen;
+- *Answer* is clear of the navigation bar and a tap on its centre answers;
+- the call screen closes on a locked phone when the far end hangs up;
+- a call written to the handset's call log reaches Odoo.
+
+```bash
+ODOO_PYTHON=…/bin/python ODOO_BIN=…/odoo-bin ODOO_CONF=…/odoo.conf \
+ODOO_ARGS="…"  tools/device-check.sh --api=29,35   # one line per check; exit 1 on any FAIL
+```
+
+It needs the `system-images;android-<level>;default;x86_64` images and an Odoo with
+`device_mobile`, `device_phone_call` and `voip_device` on its addons path; it creates and
+drops its own database (`tools/lab-odoo.py` provisions the handset, its holder and the
+extension) and deletes the emulator it made. One emulator takes about 4 GB.
+
 ### Signing a release
 
 A handset installs a signed APK and nothing else, so a release meant for the fleet

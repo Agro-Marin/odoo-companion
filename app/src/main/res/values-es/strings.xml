@@ -9,6 +9,9 @@
     <string name="action_sync_now">Sincronizar ahora</string>
     <string name="action_grant">Conceder permisos</string>
     <string name="notification_channel_location">Reporte de ubicación</string>
+    <string name="notification_channel_paused">Reporte detenido</string>
+    <string name="reporting_paused_title">Companion no está reportando</string>
+    <string name="reporting_paused_text">Android no le permitió iniciar en segundo plano. Toca para iniciarlo.</string>
     <string name="notification_location_title">Reporte de ubicación activo</string>
     <string name="notification_location_text">Enviando la posición a Odoo</string>
     <string name="status_managed">Configurado por tu organización</string>

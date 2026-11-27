@@ -69,6 +69,7 @@ tools/lint.sh [--fix] [--static-only] # ktlint + detekt (+ Android Lint)
 tools/check-release-wire.sh          # after assembleRelease: R8 kept the payload
 tools/smoke-test.sh <url> <id> <tok> # replay real payloads, assert every answer
 tools/sip-stub.py --cert … --key …   # a stand-in phone system: registers, rings on SIGUSR1
+tools/device-check.sh --api=29,35    # emulator + lab Odoo + stub: what a JVM test cannot see
 ```
 
 **`tools/lint.sh` refuses a tool that is not the pinned version**, which is in
@@ -766,6 +767,19 @@ machine at `http://10.0.2.2:<port>`.
   being copied and the `uploadNow` behind them. Not moved to the app scope instead: a
   shared URI's read grant is the receiving activity's and ends with it.
   `ShareActivityTest` holds the flag off.
+- **A start Android refuses is announced, not swallowed.** Since Android 12 an app in the
+  background may not start a foreground service unless it is exempt from battery
+  optimisation, and a location service started from the background also needs "Allow all
+  the time". An MDM enrolment arrives exactly so -- a broadcast to an app nobody opened --
+  and `tools/device-check.sh` measured it: `ForegroundServiceStartNotAllowedException`
+  for the location service and the softphone, logged as a warning and nothing else, so
+  the phone neither reported nor rang until someone rebooted or opened it.
+  `ReportingPaused` posts "Companion is not reporting"; its tap (or any open of Home)
+  reconciles in the foreground, where the start is allowed. The exemption and the
+  background grant stay part of provisioning.
+- **The lab can enrol a debug build without its screen.** `LabEnrollReceiver` exists only in
+  the debug source set and is protected by `android.permission.DUMP`, which adb holds and
+  no app does; `check-release-wire.sh` fails a release APK that declares or contains it.
 - **A recreated Settings screen keeps what was typed.** The first emission of the
   store repaints every field; on a rotation that emission races Android restoring the
   fields, and arriving second it would wipe the typing (not reproduced under

@@ -84,5 +84,15 @@ else
     done
 fi
 
+if [ -n "$aapt2" ] && "$aapt2" dump xmltree --file AndroidManifest.xml "$apk" | grep -q LabEnrollReceiver; then
+    echo "  FAIL  the debug-only lab enrolment receiver is declared in the release APK" >&2
+    status=1
+elif grep -qa LabEnrollReceiver "$work"/classes*.dex; then
+    echo "  FAIL  the debug-only lab enrolment receiver is compiled into the release APK" >&2
+    status=1
+else
+    echo "  ok    no lab enrolment receiver in the release APK"
+fi
+
 [ "$status" -eq 0 ] && echo "release wire format and managed configuration intact"
 exit "$status"
